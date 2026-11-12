@@ -204,5 +204,12 @@ describe("archive on the hive page", () => {
     // At the end of a window the next one plays on its own (08:45 + 10 min).
     fireEvent(video, new Event("ended"));
     await waitFor(() => expect(plays()).toEqual([at(8, 30), at(8, 45), at(8, 55)]));
+
+    // ADR-0016: the owner can delete the day shown, starting from this camera and day.
+    await user.click(screen.getByRole("button", { name: "Delete this day…" }));
+    const form = screen.getByRole("region", { name: "Delete recordings" });
+    expect(within(form).getByRole("checkbox", { name: "Door" })).toBeChecked();
+    expect(within(form).getByLabelText("From")).toHaveValue("2026-11-09T00:00");
+    expect(within(form).getByLabelText("To")).toHaveValue("2026-11-10T00:00");
   }, 20_000);
 });

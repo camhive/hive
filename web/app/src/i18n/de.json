@@ -100,7 +100,8 @@
     "unsupported": "Der Hive unterstützt das nicht.",
     "camera": "Die Kamera hat nicht geantwortet.",
     "camera_auth": "Die Kamera hat die Anmeldung abgelehnt.",
-    "unexpected_code": "Unerwarteter Fehler ({{code}})."
+    "unexpected_code": "Unerwarteter Fehler ({{code}}).",
+    "export_running": "Ein Export dieser Aufnahmen läuft noch; bitte nach dessen Ende erneut löschen."
   },
   "account": {
     "title": "Konto",
@@ -466,5 +467,39 @@
       "signal.offer": "Livebild gestartet",
       "promo.redeem": "Promo-Code eingelöst"
     }
+  },
+  "deletion": {
+    "title": "Aufnahmen löschen",
+    "help": "Entfernt Aufnahmen sofort von der Festplatte dieses Hives, etwa wenn eine gefilmte Person das verlangt. Gelöschte Aufnahmen lassen sich nicht wiederherstellen.",
+    "open": "Aufnahmen löschen…",
+    "cameras": "Kameras",
+    "allCameras": "Alle Kameras, auch entfernte",
+    "what": "Was",
+    "everything": "Alles",
+    "range": "Ein Zeitraum",
+    "from": "Von",
+    "to": "Bis",
+    "older": "Älter als",
+    "days": "Tage",
+    "includeExports": "Auch Exporte dieser Aufnahmen löschen",
+    "preview": "Vorschau",
+    "nothing": "Dort ist nichts aufgezeichnet.",
+    "files_one": "{{count}} Datei",
+    "files_other": "{{count}} Dateien",
+    "pendingShort_one": "{{count}} wird noch aufgezeichnet",
+    "pendingShort_other": "{{count}} werden noch aufgezeichnet",
+    "exports_one": "Und {{count}} Export ({{size}}).",
+    "exports_other": "Und {{count}} Exporte ({{size}}).",
+    "rounded": "Aufnahmen liegen in Dateien von einigen Minuten; Dateien, die den Zeitraum berühren, werden ganz gelöscht, der Zeitraum kann also etwas größer sein als gewählt.",
+    "irreversible": "Das lässt sich nicht rückgängig machen.",
+    "typeToConfirm": "Zur Bestätigung {{word}} eingeben",
+    "deleteNow": "Endgültig löschen",
+    "deleted_one": "{{count}} Datei gelöscht ({{size}}).",
+    "deleted_other": "{{count}} Dateien gelöscht ({{size}}).",
+    "pendingNote_one": "{{count}} Datei wird noch aufgezeichnet und in wenigen Minuten gelöscht, sobald sie abgeschlossen ist.",
+    "pendingNote_other": "{{count}} Dateien werden noch aufgezeichnet und in wenigen Minuten gelöscht, sobald sie abgeschlossen sind.",
+    "exportsDeleted_one": "{{count}} Export gelöscht.",
+    "exportsDeleted_other": "{{count}} Exporte gelöscht.",
+    "thisDay": "Diesen Tag löschen…"
   }
 }

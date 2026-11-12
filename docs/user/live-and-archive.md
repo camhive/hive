@@ -93,3 +93,33 @@ default) and, independently, keeps at least the configured free space on the
 recording disk: old exports go first, then the oldest complete segments. Recording never
 stops because of retention; if the disk cannot be freed, the hive reports
 "storage low" and keeps going. Downgrading a plan never deletes anything.
+
+## Deleting recordings
+
+The owner can remove footage from the hive's disk at once, for example when
+someone who was filmed asks for it to be erased (GDPR Art. 17). Members,
+operators included, cannot. It works on the home network without the cloud.
+
+- **Hive → Settings → Delete recordings** picks the cameras (or *all
+  cameras*, which also covers footage of cameras removed since) and what to
+  delete: *everything*, *a time range*, or footage *older than* a number of
+  days. *Also delete exports of this footage* removes exports that overlap
+  it too; otherwise those copies stay.
+- In an opened camera, **Delete this day…** starts the same form with that
+  camera and day filled in.
+- **Preview** shows what the hive will really delete, per camera: the span,
+  the number of files and their size. Recordings are files of a few minutes
+  (`segment_minutes`); a file that touches the chosen range is deleted
+  whole, so the span can be a little wider than chosen, never narrower.
+  Both streams (main and sub) always go together.
+- **Delete permanently** deletes right away and frees the space. There is
+  no trash and no undo. Deleting *everything* asks you to type the camera's
+  name (one camera) or the hive's name first.
+- The file being recorded right now is deleted within minutes, as soon as
+  the hive closes it; the preview and the result say how many there are.
+  If an export of the footage is still being made, the hive refuses until
+  it has finished.
+- Every deletion is recorded in the hive's own action log (who, which
+  cameras, which span, how much), which cannot be deleted. The app does not
+  show that log yet; the owner can read it from the hive's API
+  (`GET /v0/actions`).

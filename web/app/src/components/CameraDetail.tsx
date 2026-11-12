@@ -9,6 +9,7 @@ import { streamFor } from "@/lib/reconnect";
 import type { PeerFactory, Signalling } from "@/lib/live";
 import { activityRuns, coverage, dayKey, dayStart, exportCapMinutes, nextRecorded, recordedAt, snapshotName, useCalendar, useEvents, useExports, useTimeline, type ExportJob, type StreamName } from "@/lib/archive";
 import { DayStrip } from "@/components/DayStrip";
+import { DeleteRecordings } from "@/components/DeleteRecordings";
 import { ArchivePlayer, DEFAULT_WINDOW_S, type PlayerDeps } from "@/lib/archivePlayer";
 import { ArchiveSound } from "@/lib/archiveSound";
 import { LiveTile } from "@/components/LiveTile";
@@ -54,6 +55,7 @@ export function CameraDetail({ hive, grant, quality, client, camera, health, sig
   const [position, setPosition] = useState<Date | null>(null);
   const [playError, setPlayError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const video = useRef<HTMLVideoElement>(null);
   const player = useRef<ArchivePlayer | null>(null);
   const audioEl = useRef<HTMLAudioElement>(null);
@@ -74,6 +76,7 @@ export function CameraDetail({ hive, grant, quality, client, camera, health, sig
     setPosition(null);
     setPlayError(null);
     setExporting(false);
+    setDeleting(false);
   }, [camera.id, day]);
 
   async function seek(want: Date) {
@@ -238,12 +241,19 @@ export function CameraDetail({ hive, grant, quality, client, camera, health, sig
             <option value="sub">sub</option>
           </select>
           {operator && client && <button type="button" className="btn btn-secondary btn-sm" onClick={() => setExporting((v) => !v)} disabled={!position}>{t("archive.exportFromHere")}</button>}
+          {owner && client && <button type="button" className="btn btn-ghost btn-sm" aria-expanded={deleting} onClick={() => setDeleting((v) => !v)}>{t("deletion.thisDay")}</button>}
           {!live && <button type="button" className="btn btn-sm" onClick={backToLive}><span className="dot" style={{ color: "var(--accent)" }} aria-hidden="true" />{t("live.backToLive")}</button>}
         </div>
       </div>
       <Timeline day={day} ranges={ranges} events={(events.data ?? []).map((e) => Date.parse(e.at ?? ""))} position={live ? (day === today ? new Date() : null) : position} onSeek={(at) => void seek(at)} activity={activity} />
       {calendar.data && (days.length === 0 ? <p className="muted text-sm">{t("archive.noFootage")}</p> : <DayStrip footage={days} day={day} today={today} onPick={pickDay} />)}
 
+      {deleting && owner && client && (
+        <div className="card" role="region" aria-label={t("deletion.title")}>
+          <DeleteRecordings client={client} cameras={[camera]} hiveName={hive.name ?? hive.id} preset={{ camera: camera.id, from: dayStart(day), to: nextDay(day) }}
+            onDone={() => { player.current?.stop(); sound.current?.stop(); playing.current = null; setPosition(null); }} />
+        </div>
+      )}
       {operator && client && (
         <div aria-label={t("archive.export")} role="region">
           {exporting && position && (
@@ -313,4 +323,11 @@ function ExportList({ client, hive, token }: { client: HiveClient; hive: Hive; t
       </ul>
     </div>
   );
+}
+
+/** Local midnight after a `YYYY-MM-DD` day. */
+function nextDay(day: string): Date {
+  const d = dayStart(day);
+  d.setDate(d.getDate() + 1);
+  return d;
 }

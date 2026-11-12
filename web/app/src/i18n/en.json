@@ -100,7 +100,8 @@
     "unsupported": "The hive does not support this.",
     "camera": "The camera did not answer.",
     "camera_auth": "The camera refused the login.",
-    "unexpected_code": "Unexpected error ({{code}})."
+    "unexpected_code": "Unexpected error ({{code}}).",
+    "export_running": "An export of this footage is still being made; delete again when it has finished."
   },
   "account": {
     "title": "Account",
@@ -466,5 +467,39 @@
       "signal.offer": "Live view started",
       "promo.redeem": "Promo code redeemed"
     }
+  },
+  "deletion": {
+    "title": "Delete recordings",
+    "help": "Remove footage from this hive's disk now, for example when someone filmed asks for it. Deleted footage cannot be recovered.",
+    "open": "Delete recordings…",
+    "cameras": "Cameras",
+    "allCameras": "All cameras, also removed ones",
+    "what": "What",
+    "everything": "Everything",
+    "range": "A time range",
+    "from": "From",
+    "to": "To",
+    "older": "Older than",
+    "days": "Days",
+    "includeExports": "Also delete exports of this footage",
+    "preview": "Preview",
+    "nothing": "Nothing is recorded there.",
+    "files_one": "{{count}} file",
+    "files_other": "{{count}} files",
+    "pendingShort_one": "{{count}} still being recorded",
+    "pendingShort_other": "{{count}} still being recorded",
+    "exports_one": "And {{count}} export ({{size}}).",
+    "exports_other": "And {{count}} exports ({{size}}).",
+    "rounded": "Recordings are stored in files of a few minutes; files that touch the range are deleted whole, so the span can be a little wider than you chose.",
+    "irreversible": "This cannot be undone.",
+    "typeToConfirm": "Type {{word}} to confirm",
+    "deleteNow": "Delete permanently",
+    "deleted_one": "Deleted {{count}} file ({{size}}).",
+    "deleted_other": "Deleted {{count}} files ({{size}}).",
+    "pendingNote_one": "{{count}} file still being recorded will be deleted within minutes, once it is closed.",
+    "pendingNote_other": "{{count}} files still being recorded will be deleted within minutes, once they are closed.",
+    "exportsDeleted_one": "{{count}} export deleted.",
+    "exportsDeleted_other": "{{count}} exports deleted.",
+    "thisDay": "Delete this day…"
   }
 }

@@ -10,6 +10,10 @@ import { useMe } from "@/lib/session";
 import { useHives } from "@/lib/hives";
 import { useTransport } from "@/lib/useTransport";
 import { lanBase, rebindHintApplies, relayBase } from "@/lib/transport";
+import { useGrant } from "@/lib/useGrant";
+import { useCameras, useHiveClient } from "@/lib/hiveApi";
+import { DeleteRecordings } from "@/components/DeleteRecordings";
+import type { Hive } from "@/lib/hives";
 
 /** Connection settings for one hive: which path the app uses and why (ADR-0012). */
 export function HiveSettings() {
@@ -22,6 +26,7 @@ export function HiveSettings() {
   const nav = useNavigate();
   const qc = useQueryClient();
   const [removeError, setRemoveError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const owned = !!hives.data?.hives.find((h) => h.id === id);
   async function remove() {
     if (!hive || !window.confirm(t("transport.confirmRemove", { name: hive.name }))) return;
@@ -64,6 +69,13 @@ export function HiveSettings() {
         <button className="btn btn-secondary mt-4" disabled={probing} onClick={() => void reprobe()}>{probing ? t("transport.probing") : t("transport.reprobe")}</button>
       </section>
       {owned && hive.status !== "revoked" && (
+        <section className="card max-w-3xl" aria-labelledby="delete-recordings-title">
+          <h2 id="delete-recordings-title" className="text-lg font-semibold mb-1">{t("deletion.title")}</h2>
+          <p className="muted text-sm mb-3">{t("deletion.help")}</p>
+          {deleting ? <HiveDeletion hive={hive} /> : <button type="button" className="btn btn-secondary" disabled={!hive.online} onClick={() => setDeleting(true)}>{t("deletion.open")}</button>}
+        </section>
+      )}
+      {owned && hive.status !== "revoked" && (
         <section className="card max-w-3xl" aria-labelledby="remove-title">
           <h2 id="remove-title" className="text-lg font-semibold mb-1">{t("transport.removeTitle")}</h2>
           <p className="muted text-sm mb-3">{t("transport.removeHelp")}</p>
@@ -73,4 +85,18 @@ export function HiveSettings() {
       )}
     </div>
   );
+}
+
+/**
+ * The deletion form with the hive's cameras. It asks the hive for access
+ * only once opened: a remote session counts against the plan.
+ */
+function HiveDeletion({ hive }: { hive: Hive }) {
+  const { t } = useTranslation();
+  const { grant, access } = useGrant(hive);
+  const client = useHiveClient(hive, grant);
+  const cameras = useCameras(hive, client);
+  if (access.error) return <p role="alert" className="error text-sm">{errorMessage(t, access.error)}</p>;
+  if (!client || !cameras.data) return <p className="muted text-sm">…</p>;
+  return <DeleteRecordings client={client} cameras={cameras.data} hiveName={hive.name ?? hive.id} />;
 }
