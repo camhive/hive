@@ -1,5 +1,6 @@
 // Package camsim simulates IP cameras for tests and local development: RTSP
-// streams (H.264 / H.265, main and sub) published through MediaMTX by ffmpeg,
+// streams (H.264 / H.265, main and sub, optionally with G.711 audio)
+// published through MediaMTX by ffmpeg,
 // plus an ONVIF mock (device and media services) and a WS-Discovery responder.
 // Every integration test of the hive runs against camsim; real cameras are for
 // acceptance only.
@@ -44,6 +45,7 @@ type Camera struct {
 	Main  Resolution
 	Sub   Resolution
 	FPS   int
+	Audio bool // a microphone: both streams carry a G.711 µ-law tone
 }
 
 // Profile selects how faithfully the ONVIF mock behaves.
@@ -181,7 +183,8 @@ func (c *Config) mediamtxYAML() string {
 }
 
 // ffmpegArgs builds the publisher command line for one stream: a synthetic
-// test pattern encoded live at the camera's frame rate.
+// test pattern encoded live at the camera's frame rate and, for a camera
+// with a microphone, a G.711 µ-law tone, as most real cameras send.
 func (c *Config) ffmpegArgs(cam Camera, s Stream) []string {
 	res := cam.resolution(s)
 	enc := "libx264"
@@ -191,13 +194,20 @@ func (c *Config) ffmpegArgs(cam Camera, s Stream) []string {
 	// testsrc2 is a moving pattern with a frame counter; no fonts needed, so it
 	// behaves the same on Linux and Windows builds of ffmpeg.
 	src := fmt.Sprintf("testsrc2=size=%dx%d:rate=%d", res.Width, res.Height, cam.FPS)
-	return []string{
+	args := []string{
 		"-hide_banner", "-loglevel", "error", "-nostdin",
 		"-re", "-f", "lavfi", "-i", src,
-		"-c:v", enc, "-preset", "ultrafast", "-tune", "zerolatency",
-		"-g", itoa(cam.FPS * 2), "-pix_fmt", "yuv420p",
-		"-f", "rtsp", "-rtsp_transport", "tcp", c.RTSPURL(cam, s),
 	}
+	audio := []string{"-an"}
+	if cam.Audio {
+		args = append(args, "-re", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=8000")
+		audio = []string{"-map", "0:v", "-map", "1:a", "-c:a", "pcm_mulaw", "-ar", "8000", "-ac", "1"}
+	}
+	args = append(args,
+		"-c:v", enc, "-preset", "ultrafast", "-tune", "zerolatency",
+		"-g", itoa(cam.FPS*2), "-pix_fmt", "yuv420p")
+	args = append(args, audio...)
+	return append(args, "-f", "rtsp", "-rtsp_transport", "tcp", c.RTSPURL(cam, s))
 }
 
 func itoa(i int) string { return strconv.Itoa(i) }

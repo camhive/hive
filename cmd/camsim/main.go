@@ -1,6 +1,6 @@
 // Command camsim runs simulated IP cameras for development and tests.
 //
-//	camsim --camera front:h264 --camera yard:h265 --rtsp-port 8554 --onvif-port 8080
+//	camsim --camera front:h264 --camera yard:h265:audio --rtsp-port 8554 --onvif-port 8080
 //	camsim --profile quirky --user admin --pass secret
 //
 // Each camera publishes main and sub RTSP streams through MediaMTX and is
@@ -28,13 +28,18 @@ type cameraFlags []camsim.Camera
 
 func (c *cameraFlags) String() string { return fmt.Sprint(*c) }
 
-// Set parses "name[:codec]", e.g. "front" or "yard:h265".
+// Set parses "name[:codec][:audio]", e.g. "front", "yard:h265" or
+// "door:h264:audio" (a camera with a microphone).
 func (c *cameraFlags) Set(v string) error {
-	name, codec, _ := strings.Cut(v, ":")
+	name, rest, _ := strings.Cut(v, ":")
 	if name == "" {
 		return errors.New("camera name is empty")
 	}
-	*c = append(*c, camsim.Camera{Name: name, Codec: camsim.Codec(codec)})
+	codec, opt, _ := strings.Cut(rest, ":")
+	if opt != "" && opt != "audio" {
+		return fmt.Errorf("camera %q: unknown option %q (want audio)", name, opt)
+	}
+	*c = append(*c, camsim.Camera{Name: name, Codec: camsim.Codec(codec), Audio: opt == "audio"})
 	return nil
 }
 
@@ -46,7 +51,7 @@ func run(args []string, stdout, stderr *os.File) int {
 	fs := flag.NewFlagSet("camsim", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var cams cameraFlags
-	fs.Var(&cams, "camera", "camera as name[:h264|h265]; repeatable (default: front:h264, yard:h265)")
+	fs.Var(&cams, "camera", "camera as name[:h264|h265][:audio]; repeatable (default: front:h264, yard:h265)")
 	host := fs.String("host", "127.0.0.1", "advertised host")
 	rtspPort := fs.Int("rtsp-port", 8554, "RTSP port")
 	apiPort := fs.Int("api-port", 9997, "MediaMTX API port")

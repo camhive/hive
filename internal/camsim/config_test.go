@@ -67,6 +67,27 @@ func TestFFmpegArgsEncodeWithRequestedCodecAndSize(t *testing.T) {
 	}
 }
 
+// Cameras with a microphone send G.711 µ-law, as most real ones do; the
+// others send video only.
+func TestFFmpegArgsAddG711AudioOnlyWhenTheCameraHasAMicrophone(t *testing.T) {
+	cfg := testConfig()
+	silent := strings.Join(cfg.ffmpegArgs(cfg.Cameras[0], Main), " ")
+	if strings.Contains(silent, "-c:a") || !strings.Contains(silent, "-an") {
+		t.Errorf("camera without audio must send video only\n%s", silent)
+	}
+	cam := cfg.Cameras[0]
+	cam.Audio = true
+	args := strings.Join(cfg.ffmpegArgs(cam, Main), " ")
+	for _, want := range []string{"sine=frequency=440:sample_rate=8000", "-c:a pcm_mulaw", "-ar 8000", "-ac 1", "-map 0:v", "-map 1:a"} {
+		if !strings.Contains(args, want) {
+			t.Errorf("args missing %q\n%s", want, args)
+		}
+	}
+	if strings.Index(args, "-c:a") > strings.Index(args, "-f rtsp") {
+		t.Errorf("audio options must come before the output\n%s", args)
+	}
+}
+
 func TestConfigValidation(t *testing.T) {
 	cfg := testConfig()
 	if err := cfg.Validate(); err != nil {
