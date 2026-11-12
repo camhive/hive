@@ -28,6 +28,7 @@ type Segment struct {
 	Bytes    int64
 	Path     string
 	Complete bool // not the newest file of its stream, i.e. no longer written
+	Analysis int  // AnalysisVersion of the reading that filled it; 0 when unread
 }
 
 // MediaMTX writes <YYYY-MM-DD_HH-MM-SS-ffffff_±HHMM>.mp4 from our recordPath
@@ -111,6 +112,11 @@ func formatFileTime(t time.Time) string {
 	return t.Format(fileNameLayout) + fmt.Sprintf("-%06d", t.Nanosecond()/1000)
 }
 
+// AnalysisVersion is the version of how fill reads a segment file. Raise it
+// when that reading changes; settled rows from an older version are read
+// again on the next reconcile. 1: duration from the video track only.
+const AnalysisVersion = 1
+
 // Index is the archive index over the store.
 type Index struct {
 	repo *store.Segments
@@ -133,11 +139,11 @@ type Option func(*Index)
 func WithLogger(l *slog.Logger) Option { return func(i *Index) { i.log = l } }
 
 func toRow(s Segment) store.SegmentRow {
-	return store.SegmentRow{Camera: s.Camera, Stream: s.Stream, Start: s.Start, Duration: s.Duration, Bytes: s.Bytes, Path: s.Path, Complete: s.Complete}
+	return store.SegmentRow{Camera: s.Camera, Stream: s.Stream, Start: s.Start, Duration: s.Duration, Bytes: s.Bytes, Path: s.Path, Complete: s.Complete, Analysis: s.Analysis}
 }
 
 func fromRow(r store.SegmentRow) Segment {
-	return Segment{Camera: r.Camera, Stream: r.Stream, Start: r.Start, Duration: r.Duration, Bytes: r.Bytes, Path: r.Path, Complete: r.Complete}
+	return Segment{Camera: r.Camera, Stream: r.Stream, Start: r.Start, Duration: r.Duration, Bytes: r.Bytes, Path: r.Path, Complete: r.Complete, Analysis: r.Analysis}
 }
 
 // Upsert records a segment.
@@ -265,7 +271,7 @@ func (i *Index) indexFound(ctx context.Context, found []Segment, byKey map[strin
 		k := key(seg.Camera, seg.Stream, seg.Start)
 		seen[k] = true
 		old, had := byKey[k]
-		if had && old.Complete && old.Bytes == seg.Bytes && old.Path == seg.Path {
+		if had && settled(old, seg) {
 			continue
 		}
 		if err := i.fill(&seg); err != nil {
@@ -281,6 +287,12 @@ func (i *Index) indexFound(ctx context.Context, found []Segment, byKey map[strin
 		}
 	}
 	return rep, seen, nil
+}
+
+// settled says a row already describes the file as the current reading
+// would: complete, same size and path, filled by this AnalysisVersion.
+func settled(old store.SegmentRow, seg Segment) bool {
+	return old.Complete && old.Bytes == seg.Bytes && old.Path == seg.Path && old.Analysis == AnalysisVersion
 }
 
 func key(camera, stream string, start time.Time) string {
@@ -302,7 +314,7 @@ func (i *Index) fill(seg *Segment) error {
 	if err != nil {
 		return err
 	}
-	seg.Duration = d
+	seg.Duration, seg.Analysis = d, AnalysisVersion
 	return nil
 }
 
@@ -319,6 +331,10 @@ func scan(root string) ([]Segment, error) {
 			return nil
 		}
 		if seg, ok := ParsePath(root, path); ok {
+			// The size decides whether a settled row needs reading again.
+			if info, err := d.Info(); err == nil {
+				seg.Bytes = info.Size()
+			}
 			out = append(out, seg)
 		}
 		return nil

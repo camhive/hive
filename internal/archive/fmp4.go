@@ -6,32 +6,39 @@ import (
 	"time"
 )
 
-// FMP4Duration computes the duration of a fragmented MP4 by summing sample
-// durations from every complete moof (trun entries, falling back to tfhd and
-// trex defaults) at the first video track's timescale. Truncated trailing
-// data is ignored, so a file still being written yields the duration of what
-// is already there.
+// FMP4Duration computes the duration of a fragmented MP4 from its video
+// track: the sample durations of that track in every complete moof (trun
+// entries, falling back to tfhd and trex defaults) at its timescale. Other
+// tracks (camera audio) are ignored; a file without video falls back to its
+// first track. Truncated trailing data is ignored, so a file still being
+// written yields the duration of what is already there.
 func FMP4Duration(data []byte) (time.Duration, error) {
 	if len(data) < 8 || string(data[4:8]) != "ftyp" {
 		return 0, errors.New("archive: not an MP4 file")
 	}
 	var (
-		timescale  uint32
-		defaultDur uint32 // from trex
-		total      uint64
+		tr    track
+		total uint64
 	)
 	for _, b := range boxes(data) {
 		switch b.typ {
 		case "moov":
-			timescale, defaultDur = parseMoov(b.payload)
+			tr = timedTrack(b.payload)
 		case "moof":
-			total += parseMoof(b.payload, defaultDur)
+			total += parseMoof(b.payload, tr)
 		}
 	}
-	if timescale == 0 {
+	if tr.timescale == 0 {
 		return 0, errors.New("archive: no timescale in moov")
 	}
-	return time.Duration(float64(total) / float64(timescale) * float64(time.Second)), nil
+	return time.Duration(float64(total) / float64(tr.timescale) * float64(time.Second)), nil
+}
+
+// track is what timing a segment needs of one track.
+type track struct {
+	id         uint32
+	timescale  uint32
+	defaultDur uint32 // from trex; 0 when absent
 }
 
 type mp4box struct {
@@ -63,64 +70,117 @@ func find(payload []byte, typ string) ([]byte, bool) {
 	return nil, false
 }
 
-// parseMoov returns the first track's mdhd timescale and the trex default
-// sample duration (0 when absent).
-func parseMoov(moov []byte) (timescale, defaultDur uint32) {
-	return mdhdTimescale(moov), trexDefaultDuration(moov)
+// timedTrack picks the track that times the segment: the first video track
+// (handler "vide"), else the first track.
+func timedTrack(moov []byte) track {
+	var first, video *track
+	for _, b := range boxes(moov) {
+		if b.typ != "trak" {
+			continue
+		}
+		t, handler := trakInfo(b.payload)
+		if first == nil {
+			first = &t
+		}
+		if handler == "vide" {
+			video = &t
+			break
+		}
+	}
+	pick := first
+	if video != nil {
+		pick = video
+	}
+	if pick == nil {
+		return track{}
+	}
+	pick.defaultDur = trexDefaultDuration(moov, pick.id)
+	return *pick
 }
 
-func mdhdTimescale(moov []byte) uint32 {
-	trak, ok := find(moov, "trak")
-	if !ok {
-		return 0
+// trakInfo reads a trak's ID (tkhd), timescale (mdhd) and handler type (hdlr).
+func trakInfo(trak []byte) (track, string) {
+	var t track
+	if tkhd, ok := find(trak, "tkhd"); ok {
+		t.id = versioned(tkhd, 12, 20)
 	}
 	mdia, ok := find(trak, "mdia")
 	if !ok {
-		return 0
+		return t, ""
 	}
-	mdhd, ok := find(mdia, "mdhd")
-	switch {
-	case !ok || len(mdhd) < 16:
-		return 0
-	case mdhd[0] == 1 && len(mdhd) >= 24: // version 1: 64-bit times
-		return binary.BigEndian.Uint32(mdhd[20:24])
-	default:
-		return binary.BigEndian.Uint32(mdhd[12:16])
+	if mdhd, ok := find(mdia, "mdhd"); ok {
+		t.timescale = versioned(mdhd, 12, 20)
 	}
+	handler := ""
+	if hdlr, ok := find(mdia, "hdlr"); ok && len(hdlr) >= 12 {
+		handler = string(hdlr[8:12])
+	}
+	return t, handler
 }
 
-func trexDefaultDuration(moov []byte) uint32 {
+// versioned reads a 32-bit field of a full box whose offset depends on the
+// version (v0: 32-bit times before it, v1: 64-bit); 0 when the box is short.
+func versioned(box []byte, v0, v1 int) uint32 {
+	off := v0
+	if len(box) > 0 && box[0] == 1 {
+		off = v1
+	}
+	if len(box) < off+4 {
+		return 0
+	}
+	return binary.BigEndian.Uint32(box[off : off+4])
+}
+
+// trexDefaultDuration is the default sample duration trex declares for the
+// track (0 when absent).
+func trexDefaultDuration(moov []byte, id uint32) uint32 {
 	mvex, ok := find(moov, "mvex")
 	if !ok {
 		return 0
 	}
-	trex, ok := find(mvex, "trex")
-	if !ok || len(trex) < 16 {
-		return 0
+	for _, b := range boxes(mvex) {
+		if b.typ == "trex" && len(b.payload) >= 16 && binary.BigEndian.Uint32(b.payload[4:8]) == id {
+			return binary.BigEndian.Uint32(b.payload[12:16])
+		}
 	}
-	return binary.BigEndian.Uint32(trex[12:16])
+	return 0
 }
 
-// parseMoof sums the durations of all samples in the fragment's first traf.
-func parseMoof(moof []byte, trexDefault uint32) uint64 {
-	traf, ok := find(moof, "traf")
-	if !ok {
+// parseMoof sums the durations of the track's samples in one fragment.
+func parseMoof(moof []byte, tr track) uint64 {
+	var total uint64
+	for _, b := range boxes(moof) {
+		if b.typ == "traf" {
+			total += parseTraf(b.payload, tr)
+		}
+	}
+	return total
+}
+
+// tfhdDefaultDuration is the default sample duration a tfhd declares, or
+// fallback (the trex default) when it declares none.
+func tfhdDefaultDuration(tfhd []byte, fallback uint32) uint32 {
+	flags := binary.BigEndian.Uint32(tfhd[:4]) & 0xffffff
+	off := 8 // version/flags + track_ID
+	if flags&0x1 != 0 {
+		off += 8 // base_data_offset
+	}
+	if flags&0x2 != 0 {
+		off += 4 // sample_description_index
+	}
+	if flags&0x8 != 0 && len(tfhd) >= off+4 { // default-sample-duration-present
+		return binary.BigEndian.Uint32(tfhd[off : off+4])
+	}
+	return fallback
+}
+
+// parseTraf sums one traf's sample durations if it belongs to the track.
+func parseTraf(traf []byte, tr track) uint64 {
+	tfhd, ok := find(traf, "tfhd")
+	if !ok || len(tfhd) < 8 || binary.BigEndian.Uint32(tfhd[4:8]) != tr.id {
 		return 0
 	}
-	defaultDur := trexDefault
-	if tfhd, ok := find(traf, "tfhd"); ok && len(tfhd) >= 8 {
-		flags := binary.BigEndian.Uint32(tfhd[:4]) & 0xffffff
-		off := 8 // version/flags + track_ID
-		if flags&0x1 != 0 {
-			off += 8 // base_data_offset
-		}
-		if flags&0x2 != 0 {
-			off += 4 // sample_description_index
-		}
-		if flags&0x8 != 0 && len(tfhd) >= off+4 { // default-sample-duration-present
-			defaultDur = binary.BigEndian.Uint32(tfhd[off : off+4])
-		}
-	}
+	defaultDur := tfhdDefaultDuration(tfhd, tr.defaultDur)
 	var total uint64
 	for _, b := range boxes(traf) {
 		if b.typ == "trun" {

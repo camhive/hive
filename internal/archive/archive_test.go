@@ -201,7 +201,8 @@ func buildFMP4(t *testing.T, timescale, defaultDur uint32, frags []fragment) []b
 	// mdhd v0: version/flags(4) ctime(4) mtime(4) timescale(4) duration(4) lang(2) pre(2)
 	mdhd := box("mdhd", u32(0), u32(0), u32(0), u32(timescale), u32(0), []byte{0, 0, 0, 0})
 	mdia := box("mdia", mdhd)
-	tkhd := box("tkhd", u32(0), make([]byte, 80))
+	// tkhd v0: version/flags(4) ctime(4) mtime(4) track_ID(4) ...
+	tkhd := box("tkhd", u32(0), u32(0), u32(0), u32(1), make([]byte, 68))
 	trak := box("trak", tkhd, mdia)
 	// trex: version/flags, track_ID, default_sample_description_index, default_sample_duration, size, flags
 	trex := box("trex", u32(0), u32(1), u32(1), u32(defaultDur), u32(0), u32(0))
@@ -230,4 +231,40 @@ func buildFMP4(t *testing.T, timescale, defaultDur uint32, frags []fragment) []b
 		out = append(out, box("mdat", make([]byte, 16))...)
 	}
 	return out
+}
+
+// A hive upgraded from a version that timed segments wrongly (audio tracks
+// counted, #dev-stack comb) re-reads its settled segments once: rows carry
+// the version of the reading that filled them.
+func TestReconcileRereadsSegmentsFilledByAnOlderReading(t *testing.T) {
+	s := openStore(t)
+	idx := archive.NewIndex(s)
+	ctx := context.Background()
+	root := t.TempDir()
+	dir := filepath.Join(root, "cam_a", "main")
+	_ = os.MkdirAll(dir, 0o750)
+	names := []string{"2026-11-09_10-00-00-000000.mp4", "2026-11-09_10-10-00-000000.mp4"}
+	for _, f := range names {
+		_ = os.WriteFile(filepath.Join(dir, f), buildFMP4(t, 30000, 1000, []fragment{{samples: 30}}), 0o600)
+	}
+	if _, err := idx.Reconcile(ctx, root); err != nil {
+		t.Fatal(err)
+	}
+	segs, _ := idx.Range(ctx, "cam_a", "main", time.Time{}, time.Now().Add(24*time.Hour))
+	old := segs[0]
+	old.Duration, old.Analysis = 700*time.Millisecond, 0 // as an older hive left it
+	if err := idx.Upsert(ctx, old); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := idx.Reconcile(ctx, root)
+	if err != nil || rep.Updated != 2 { // the old row, and the incomplete newest as always
+		t.Fatalf("reconcile = %+v, %v", rep, err)
+	}
+	segs, _ = idx.Range(ctx, "cam_a", "main", time.Time{}, time.Now().Add(24*time.Hour))
+	if segs[0].Duration != time.Second || segs[0].Analysis != archive.AnalysisVersion {
+		t.Fatalf("re-read segment = %+v", segs[0])
+	}
+	if rep, _ := idx.Reconcile(ctx, root); rep.Updated != 1 {
+		t.Fatalf("settled rows are read again: %+v", rep)
+	}
 }

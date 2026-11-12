@@ -15,6 +15,7 @@ type SegmentRow struct {
 	Bytes    int64
 	Path     string
 	Complete bool
+	Analysis int // version of the reading that filled the row
 }
 
 // Segments returns the archive segment repository.
@@ -25,17 +26,17 @@ type Segments struct {
 	s *Store
 }
 
-const segmentColumns = `camera, stream, start_utc, duration_ms, bytes, path, complete`
+const segmentColumns = `camera, stream, start_utc, duration_ms, bytes, path, complete, analysis`
 
 func ts(t time.Time) string { return t.UTC().Format("2006-01-02T15:04:05.000000Z") }
 
 // Upsert inserts or updates by (camera, stream, start).
 func (r *Segments) Upsert(ctx context.Context, row SegmentRow) error {
 	_, err := r.s.db.ExecContext(ctx, `
-		INSERT INTO segment (`+segmentColumns+`) VALUES (?,?,?,?,?,?,?)
+		INSERT INTO segment (`+segmentColumns+`) VALUES (?,?,?,?,?,?,?,?)
 		ON CONFLICT(camera, stream, start_utc) DO UPDATE SET
-		  duration_ms=excluded.duration_ms, bytes=excluded.bytes, path=excluded.path, complete=excluded.complete`,
-		row.Camera, row.Stream, ts(row.Start), row.Duration.Milliseconds(), row.Bytes, row.Path, boolInt(row.Complete))
+		  duration_ms=excluded.duration_ms, bytes=excluded.bytes, path=excluded.path, complete=excluded.complete, analysis=excluded.analysis`,
+		row.Camera, row.Stream, ts(row.Start), row.Duration.Milliseconds(), row.Bytes, row.Path, boolInt(row.Complete), row.Analysis)
 	if err != nil {
 		return fmt.Errorf("store: upsert segment: %w", err)
 	}
@@ -103,7 +104,7 @@ func scanSegments(rows rowsLike) ([]SegmentRow, error) {
 			durationMS int64
 			complete   int
 		)
-		if err := rows.Scan(&row.Camera, &row.Stream, &start, &durationMS, &row.Bytes, &row.Path, &complete); err != nil {
+		if err := rows.Scan(&row.Camera, &row.Stream, &start, &durationMS, &row.Bytes, &row.Path, &complete, &row.Analysis); err != nil {
 			return nil, err
 		}
 		t, err := time.Parse("2006-01-02T15:04:05.000000Z", start)
