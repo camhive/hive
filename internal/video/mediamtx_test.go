@@ -29,7 +29,10 @@ func TestBaseYAMLEnablesOnlyWhatTheHiveUses(t *testing.T) {
 	for _, want := range []string{
 		"api: yes", "apiAddress: 127.0.0.1:19997",
 		"playback: yes", "playbackAddress: 127.0.0.1:19996",
-		"webrtc: yes", "webrtcAddress: :18889",
+		"webrtc: yes", "webrtcAddress: 127.0.0.1:18889",
+		// Media (ICE over UDP) must reach browsers on the LAN; signalling
+		// stays with the Hive, which checks access tokens first.
+		"webrtcLocalUDPAddress: :18890",
 		"rtmp: no", "hls: no", "srt: no", "moq: no",
 		"paths: {}",
 	} {

@@ -126,7 +126,9 @@ func (c MediaMTXConfig) baseYAML(pub publisher) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "logLevel: warn\napi: yes\napiAddress: %s:%d\n", c.Host, c.APIPort)
 	fmt.Fprintf(&b, "playback: yes\nplaybackAddress: %s:%d\n", c.Host, c.PlaybackPort)
-	fmt.Fprintf(&b, "webrtc: yes\nwebrtcAddress: :%d\nwebrtcLocalUDPAddress: :%d\nwebrtcIPsFromInterfaces: yes\n", c.WebRTCPort, c.WebRTCPort+1)
+	// WHEP signalling answers the Hive only (it checks access tokens and
+	// forwards the offer); ICE media over UDP must reach browsers on the LAN.
+	fmt.Fprintf(&b, "webrtc: yes\nwebrtcAddress: %s:%d\nwebrtcLocalUDPAddress: :%d\nwebrtcIPsFromInterfaces: yes\n", c.Host, c.WebRTCPort, c.WebRTCPort+1)
 	if len(c.ICEServers) > 0 {
 		b.WriteString("webrtcICEServers2:\n")
 		for _, s := range c.ICEServers {
@@ -144,7 +146,8 @@ func (c MediaMTXConfig) baseYAML(pub publisher) string {
 }
 
 // writeAuth renders MediaMTX's defaults minus publishing for anyone: anyone
-// may read (WHEP) and play back as before, the API answers loopback only,
+// who reaches the WHEP and playback listeners (bound to Host, loopback by
+// default) may read and play back, the API answers loopback only,
 // and only the Hive may publish.
 func writeAuth(b *strings.Builder, pub publisher) {
 	const loopback = "    ips: [127.0.0.1, \"::1\"]\n"
