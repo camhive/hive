@@ -21,6 +21,12 @@ export const SHOWN_ENTITLEMENTS = [
   "analytics.level", "ptz.enabled", "updates.early_access",
 ] as const;
 
+/** Whole months the yearly price saves against twelve monthly ones (5 €/month, 50 €/year → 2); 0 when there is no saving. */
+export function freeMonths(monthCents: number, yearCents: number): number {
+  if (!monthCents || !yearCents) return 0;
+  return Math.max(0, Math.floor((12 * monthCents - yearCents) / monthCents));
+}
+
 /** Price in whole currency units, e.g. "5 €" or "0". */
 export function price(cents: number, currency: string): string {
   if (!cents) return "0";

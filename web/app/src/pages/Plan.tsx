@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { unwrap } from "@camhive/api";
 import { api } from "@/lib/api";
 import { useMe } from "@/lib/session";
-import { useMyPlan, usePlans, price, SHOWN_ENTITLEMENTS } from "@/lib/plan";
+import { freeMonths, useMyPlan, usePlans, price, SHOWN_ENTITLEMENTS } from "@/lib/plan";
 import { errorMessage } from "@/lib/errors";
 import { Field } from "@/components/Field";
 
@@ -37,7 +37,7 @@ export function Plan() {
                 {tiers.data.map((p) => (
                   <th key={p.id} className="text-left py-2" aria-current={p.id === currentId ? "true" : undefined}>
                     {p.name}{p.id === currentId && <span className="ml-1 text-xs muted">({t("plan.yours")})</span>}
-                    <div className="text-xs muted font-normal">{t("plan.price", { month: price(p.price_month_cents, p.currency), year: price(p.price_year_cents, p.currency) })}</div>
+                    <PlanPrice monthCents={p.price_month_cents} yearCents={p.price_year_cents} currency={p.currency} testId={`price-${p.id}`} />
                   </th>
                 ))}
               </tr>
@@ -72,6 +72,23 @@ export function formatValue(key: string, v: unknown, t: (k: string, o?: Record<s
   const s = String(v);
   const known = t(`plan.values.${key}.${s}`, { defaultValue: "" });
   return known || s;
+}
+
+/** The monthly price in front; a yearly price only as the cheaper alternative, with what it saves. */
+function PlanPrice({ monthCents, yearCents, currency, testId }: { monthCents: number; yearCents: number; currency: string; testId: string }) {
+  const { t } = useTranslation();
+  if (!monthCents) return <div className="text-sm font-normal" data-testid={testId}>{t("plan.free")}</div>;
+  const saved = freeMonths(monthCents, yearCents);
+  return (
+    <div className="font-normal" data-testid={testId}>
+      <div className="text-sm">{t("plan.perMonth", { price: price(monthCents, currency) })}</div>
+      {yearCents > 0 && (
+        <div className="text-xs muted">
+          {saved > 0 ? t("plan.perYearSaving", { price: price(yearCents, currency), count: saved }) : t("plan.perYear", { price: price(yearCents, currency) })}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function PromoCard() {

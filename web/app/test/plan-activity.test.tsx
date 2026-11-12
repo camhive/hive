@@ -7,7 +7,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { App } from "../src/App";
 import { makeRouter } from "../src/router";
 import { formatValue } from "../src/pages/Plan";
-import { price } from "../src/lib/plan";
+import { freeMonths, price } from "../src/lib/plan";
 
 beforeEach(() => { resetCloudForTest(); localStorage.clear(); });
 
@@ -84,8 +84,11 @@ describe("plan page", () => {
     expect(cell("export.api", "pro")).toHaveTextContent("yes");
     expect(cell("notify.devices", "free")).toHaveTextContent("1"); expect(cell("notify.devices", "pro")).toHaveTextContent("unlimited");
     expect(cell("updates.early_access", "pro")).toHaveTextContent("yes");
-    expect(within(table).getByText("5€ / month · 50€ / year")).toBeInTheDocument();
-    expect(within(table).getByText("12€ / month · 120€ / year")).toBeInTheDocument();
+    // The monthly price first; the yearly one reads as the alternative it is, not a second monthly price.
+    const priceOf = (id: string) => within(table).getByTestId(`price-${id}`);
+    expect(priceOf("free")).toHaveTextContent(/^free$/);
+    expect(priceOf("plus")).toHaveTextContent(/^5€ \/ monthor 50€ a year — 2 months free$/);
+    expect(priceOf("pro")).toHaveTextContent(/^12€ \/ monthor 120€ a year — 2 months free$/);
 
     await user.type(screen.getByLabelText("Code"), "NOPE");
     await user.click(screen.getByRole("button", { name: "Redeem" }));
@@ -105,6 +108,7 @@ describe("plan page", () => {
     expect(formatValue("export.api", true, t)).toBe("yes");
     expect(formatValue("analytics.level", "custom", t)).toBe("custom");
     expect(formatValue("x", undefined, t)).toBe("—");
+    expect(freeMonths(500, 5000)).toBe(2); expect(freeMonths(1200, 12000)).toBe(2); expect(freeMonths(500, 6000)).toBe(0); expect(freeMonths(500, 0)).toBe(0); expect(freeMonths(0, 0)).toBe(0);
     expect(price(0, "EUR")).toBe("0"); expect(price(500, "EUR")).toBe("5€"); expect(price(1250, "USD")).toBe("12.50$"); expect(price(700, "CHF")).toBe("7 CHF");
   });
 });
