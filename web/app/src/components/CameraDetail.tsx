@@ -77,11 +77,12 @@ export function CameraDetail({ hive, grant, quality, client, camera, health, sig
     setPosition(at);
     setPlayError(null);
     if (!video.current) return;
-    player.current ??= new ArchivePlayer(video.current, (path, sig) => transport.fetch(hive, path, { token: grant.token, signal: sig }), playerDeps);
+    player.current ??= new ArchivePlayer(video.current, (path, sig) => transport.fetch(hive, path, { token: grant.token, signal: sig }),
+      { onError: () => setPlayError(t("archive.playbackFailed")), ...playerDeps });
     const range = recordedAt(ranges, at);
     const duration = Math.min(DEFAULT_WINDOW_S, Math.max(1, Math.floor(((range?.[1] ?? at.getTime() + DEFAULT_WINDOW_S * 1000) - at.getTime()) / 1000)));
     try {
-      await player.current.play(camera.id, stream, at, duration, camera.streams?.[stream]?.Codec);
+      await player.current.play(camera.id, stream, at, duration, { main: camera.streams?.main?.Codec, sub: camera.streams?.sub?.Codec });
     } catch (err) {
       setPlayError(err instanceof CamhiveError ? errorMessage(t, err) : t("archive.playbackFailed"));
     }
@@ -129,7 +130,8 @@ export function CameraDetail({ hive, grant, quality, client, camera, health, sig
         </LiveTile>
       )}
       <div className={live ? "hidden" : "bg-black rounded-lg aspect-video overflow-hidden relative"}>
-        <video ref={video} className="w-full h-full object-contain" controls playsInline data-testid="player" />
+        <video ref={video} className="w-full h-full object-contain" controls playsInline data-testid="player"
+          onError={(e) => { if (e.currentTarget.getAttribute("src")) setPlayError(t("archive.playbackFailed")); }} />
         {position && <span className="absolute top-2 left-2 text-xs glass px-2 py-0.5 rounded" data-testid="position">{position.toLocaleString()}</span>}
       </div>
       {playError && <p role="alert" className="error text-sm">{playError}</p>}

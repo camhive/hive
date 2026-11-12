@@ -6,6 +6,8 @@
 export type ByteSource = (path: string, signal: AbortSignal) => Promise<Response>;
 
 export interface PlayerDeps {
+  /** Called when playback fails after it started (the browser rejected the bytes, the download broke). */
+  onError?: (err: unknown) => void;
   mediaSource?: (new () => MediaSource) | null;
   isTypeSupported?: (mime: string) => boolean;
   createObjectURL?: (b: Blob) => string;
@@ -13,6 +15,12 @@ export interface PlayerDeps {
 }
 
 export const DEFAULT_WINDOW_S = 600;
+
+/** The hive names the stream it served; through the relay a reduced plan gets sub whatever was asked. */
+export const SERVED_STREAM_HEADER = "X-Camhive-Stream";
+
+/** Codec name per stream, as the camera reports them (e.g. { main: "H265", sub: "H264" }). */
+export type StreamCodecs = Partial<Record<string, string>>;
 
 /** MIME for MSE from the camera's codec name; profile levels are hints, the init segment decides. */
 export function mimeFor(codec: string | undefined): string {
@@ -35,6 +43,7 @@ export class ArchivePlayer {
     const g = globalThis as unknown as { MediaSource?: new () => MediaSource; URL: typeof URL };
     const ms = deps.mediaSource === undefined ? (g.MediaSource ?? null) : deps.mediaSource;
     this.deps = {
+      onError: deps.onError ?? (() => undefined),
       mediaSource: ms,
       isTypeSupported: deps.isTypeSupported ?? ((m) => !!(ms as unknown as { isTypeSupported?: (m: string) => boolean } | null)?.isTypeSupported?.(m)),
       createObjectURL: deps.createObjectURL ?? ((b) => g.URL.createObjectURL(b)),
@@ -43,13 +52,14 @@ export class ArchivePlayer {
   }
 
   /** Starts playback from `start` for `durationS`; a running playback is cancelled. Resolves when the first bytes arrived. */
-  async play(camera: string, stream: string, start: Date, durationS: number, codec?: string): Promise<"mse" | "blob"> {
+  async play(camera: string, stream: string, start: Date, durationS: number, codecs: StreamCodecs = {}): Promise<"mse" | "blob"> {
     this.stop();
     const ctl = new AbortController();
     this.abort = ctl;
     const res = await this.source(playPath(camera, stream, start, durationS), ctl.signal);
     if (!res.ok) throw new Error(`playback ${res.status}`);
-    const mime = mimeFor(codec);
+    const served = res.headers.get(SERVED_STREAM_HEADER) || stream;
+    const mime = mimeFor(codecs[served]);
     if (this.deps.mediaSource && this.deps.isTypeSupported(mime) && res.body) {
       await this.streamInto(res.body, mime, ctl.signal);
       return "mse";
@@ -82,6 +92,10 @@ export class ArchivePlayer {
             while (!signal.aborted) {
               const { done, value } = await reader.read();
               if (done) {
+                if (first) {
+                  reject(new Error("playback empty"));
+                  return;
+                }
                 if (ms.readyState === "open" && !sb.updating) ms.endOfStream();
                 else sb.addEventListener("updateend", () => { if (ms.readyState === "open") ms.endOfStream(); }, { once: true });
                 return;
@@ -96,7 +110,9 @@ export class ArchivePlayer {
               }
             }
           } catch (err) {
+            if (signal.aborted) return;
             if (first) reject(err);
+            else this.deps.onError(err);
           }
         };
         void pump();
