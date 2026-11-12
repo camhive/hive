@@ -188,3 +188,38 @@ func TestRunSweepsAtOnceAndStopsWithItsContext(t *testing.T) {
 		t.Fatal("Run did not sweep")
 	}
 }
+
+// A newest file untouched for exactly two minutes counts as closed; two
+// cameras still writing wait separately and are both finished in one sweep.
+func TestWritingWindowAndSeveralWaitingDeletions(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(t)
+	idle := f.put(t, "cam_a", "main", 10*time.Minute, false)
+	f.fs.mod[idle.Path] = f.now.Add(-2 * time.Minute)
+	b := f.put(t, "cam_b", "main", 10*time.Minute, false)
+	c := f.put(t, "cam_c", "main", 10*time.Minute, false)
+	f.fs.mod[b.Path], f.fs.mod[c.Path] = f.now, f.now
+	s := f.sweeper(retention.Policy{})
+	if _, err := s.Delete(ctx, retention.Scope{To: f.now}, false); err != nil {
+		t.Fatal(err)
+	}
+	if f.has(idle.Path) {
+		t.Fatal("a file idle for two minutes was kept")
+	}
+	if p, _ := f.st.Segments().Pending(ctx); len(p) != 2 {
+		t.Fatalf("pending = %+v", p)
+	}
+	for _, seg := range []archive.Segment{b, c} {
+		seg.Complete = true
+		if err := f.idx.Upsert(ctx, seg); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rep, err := s.Sweep(ctx)
+	if err != nil || rep.ByOwner != 2 || f.has(b.Path) || f.has(c.Path) {
+		t.Fatalf("sweep = %+v, %v", rep, err)
+	}
+	if p, _ := f.st.Segments().Pending(ctx); len(p) != 0 {
+		t.Fatalf("pending left = %+v", p)
+	}
+}

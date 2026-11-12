@@ -24,6 +24,9 @@ type world struct {
 	health    map[camera.ID]time.Time // offline since; absent: online
 	moved     []string
 	conflicts []string
+
+	conflictCalls, identityWrites int
+	noNets                        bool // Subnets knows none
 }
 
 type device struct {
@@ -44,6 +47,9 @@ func (w *world) Neighbours(context.Context) (map[netip.Addr]string, error) {
 }
 
 func (w *world) Subnets() ([]netip.Prefix, error) {
+	if w.noNets {
+		return nil, nil
+	}
 	return []netip.Prefix{netip.MustParsePrefix("192.168.1.0/24")}, nil
 }
 
@@ -103,6 +109,7 @@ func (w *world) List(context.Context) ([]camera.Camera, error) {
 func (w *world) SetIdentity(_ context.Context, id camera.ID, identity camera.Identity, network camera.Network) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	w.identityWrites++
 	c := w.cams[id]
 	c.Identity, c.Network = identity, network
 	w.cams[id] = c
@@ -150,9 +157,12 @@ func setup(t *testing.T, kind camera.SourceKind) (*world, *locate.Locator, *cloc
 		since, off := w.health[id]
 		return !off, since
 	}, locate.Options{
-		Now:        func() time.Time { return now.t },
-		OnMoved:    func(old, moved camera.Camera) { w.moved = append(w.moved, old.Host()+"->"+moved.Host()) },
-		OnConflict: func(c camera.Camera, fields []string) { w.conflicts = append(w.conflicts, fields...) },
+		Now:     func() time.Time { return now.t },
+		OnMoved: func(old, moved camera.Camera) { w.moved = append(w.moved, old.Host()+"->"+moved.Host()) },
+		OnConflict: func(c camera.Camera, fields []string) {
+			w.conflictCalls++
+			w.conflicts = append(w.conflicts, fields...)
+		},
 	})
 	return w, l, now, c
 }
@@ -172,18 +182,23 @@ func (w *world) offline(id camera.ID, since time.Time) {
 }
 
 func TestOnlineCameraLearnsItsIdentityAndNetwork(t *testing.T) {
-	w, l, _, c := setup(t, camera.SourceONVIF)
+	w, l, now, c := setup(t, camera.SourceONVIF)
 	l.Tick(context.Background())
 	got := w.cam(c.ID)
 	want := camera.Identity{MAC: "aa:bb:cc:00:11:22", ONVIFEndpoint: "urn:uuid:1", Serial: "SN1", Manufacturer: "Acme", Model: "X1"}
 	if got.Identity != want || got.Network != camera.NetworkLocal {
 		t.Fatalf("identity = %+v network %q", got.Identity, got.Network)
 	}
-	// Another device on the old address later: reported, not learned.
+	if w.conflictCalls != 0 || w.identityWrites != 1 {
+		t.Fatalf("clean learning: %d conflict reports, %d writes", w.conflictCalls, w.identityWrites)
+	}
+	// Another device on the old address later: found by the hourly check,
+	// reported, not learned.
 	w.devices["192.168.1.10"] = device{mac: "aa:bb:cc:00:11:99", endpoint: "urn:uuid:9", serial: "SN9", password: "pw", onvif: true}
-	l.Identify(context.Background(), w.cam(c.ID))
-	if w.cam(c.ID).Identity != want || len(w.conflicts) == 0 {
-		t.Fatalf("identity %+v conflicts %v", w.cam(c.ID).Identity, w.conflicts)
+	now.t = now.t.Add(time.Hour)
+	l.Tick(context.Background())
+	if w.cam(c.ID).Identity != want || len(w.conflicts) != 3 || w.identityWrites != 1 {
+		t.Fatalf("identity %+v conflicts %v writes %d", w.cam(c.ID).Identity, w.conflicts, w.identityWrites)
 	}
 }
 
@@ -312,46 +327,76 @@ func (w *world) askedCount() int {
 	return len(w.asked)
 }
 
-// A camera whose identity is complete is not asked again; one that cannot
-// tell everything (here: no endpoint) is asked at most hourly.
-func TestIdentityIsAskedOnlyWhileIncompleteAndAtMostHourly(t *testing.T) {
+// An online camera is asked what it is at once, then hourly (to notice
+// another device at its address), never in between; switched-off cameras
+// never.
+func TestIdentityIsAskedAtOnceThenHourly(t *testing.T) {
 	ctx := context.Background()
 	w, l, now, c := setup(t, camera.SourceONVIF)
 	l.Tick(ctx)
-	n := w.askedCount()
-	now.t = now.t.Add(2 * time.Hour)
-	l.Tick(ctx)
-	if w.askedCount() != n || w.cam(c.ID).Identity.ONVIFEndpoint == "" {
-		t.Fatalf("complete identity asked again: %d → %d", n, w.askedCount())
+	first := w.askedCount()
+	if first == 0 {
+		t.Fatal("not asked at once")
 	}
-
-	w2, l2, now2, c2 := setup(t, camera.SourceONVIF)
-	w2.mu.Lock()
-	d := w2.devices["192.168.1.10"]
-	d.endpoint = "" // a camera that never announces itself
-	w2.devices["192.168.1.10"] = d
-	w2.mu.Unlock()
-	l2.Tick(ctx)
-	first := w2.askedCount()
-	now2.t = now2.t.Add(30 * time.Minute)
-	l2.Tick(ctx)
-	if w2.askedCount() != first {
+	now.t = now.t.Add(59 * time.Minute)
+	l.Tick(ctx)
+	if w.askedCount() != first {
 		t.Fatal("asked again within the hour")
 	}
-	now2.t = now2.t.Add(31 * time.Minute)
-	l2.Tick(ctx)
-	if w2.askedCount() != first+1 || w2.cam(c2.ID).Identity.Serial != "SN1" {
-		t.Fatalf("not asked after an hour: %d", w2.askedCount())
+	now.t = now.t.Add(time.Minute) // exactly an hour
+	l.Tick(ctx)
+	if w.askedCount() != first+1 {
+		t.Fatalf("not asked after an hour: %d", w.askedCount())
 	}
-
-	// A switched-off camera is left alone.
-	off := w2.cam(c2.ID)
+	off := w.cam(c.ID)
 	off.Enabled = false
-	w2.cams[c2.ID] = off
-	now2.t = now2.t.Add(2 * time.Hour)
-	l2.Tick(ctx)
-	if w2.askedCount() != first+1 {
+	w.cams[c.ID] = off
+	now.t = now.t.Add(2 * time.Hour)
+	l.Tick(ctx)
+	if w.askedCount() != first+1 {
 		t.Fatal("asked a switched-off camera")
+	}
+}
+
+// Without known subnets the hive cannot tell local from routed: it says neither.
+func TestNoSubnetsMeansTheNetworkStaysUnknown(t *testing.T) {
+	w, l, _, c := setup(t, camera.SourceONVIF)
+	w.noNets = true
+	l.Tick(context.Background())
+	if w.cam(c.ID).Network != "" {
+		t.Fatalf("network = %q", w.cam(c.ID).Network)
+	}
+}
+
+// A local camera the hive knows nothing about is not searched for.
+func TestLocalCameraWithoutIdentityIsNotSearched(t *testing.T) {
+	w, l, now, c := setup(t, camera.SourceONVIF)
+	bare := w.cam(c.ID)
+	bare.Network = camera.NetworkLocal
+	w.cams[c.ID] = bare
+	w.offline(c.ID, now.t.Add(-time.Hour))
+	l.Tick(context.Background())
+	if w.sweeps != 0 || w.askedCount() != 0 {
+		t.Fatal("searched for a camera it cannot recognise")
+	}
+}
+
+// When the sweep did not learn the new address's MAC, the ONVIF endpoint
+// alone leads to the camera, and the serial still has to match.
+func TestCameraIsFoundByItsEndpointWhenTheSweepMissedItsMAC(t *testing.T) {
+	ctx := context.Background()
+	w, l, now, c := setup(t, camera.SourceONVIF)
+	l.Tick(ctx)
+	w.mu.Lock()
+	d := w.devices["192.168.1.10"]
+	delete(w.devices, "192.168.1.10")
+	d.mac = ""
+	w.devices["192.168.1.77"] = d
+	w.mu.Unlock()
+	w.offline(c.ID, now.t.Add(-time.Hour))
+	l.Tick(ctx)
+	if w.cam(c.ID).Host() != "192.168.1.77" {
+		t.Fatalf("not found by endpoint: %v", w.moved)
 	}
 }
 

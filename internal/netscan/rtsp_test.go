@@ -91,6 +91,15 @@ func TestDigestWithQopAuthUsesACnonce(t *testing.T) {
 	}
 }
 
+func TestOnlyMD5DigestIsAnswered(t *testing.T) {
+	if _, ok := digestChallenge([]string{`Digest realm="r", nonce="n", algorithm=MD5`}); !ok {
+		t.Fatal("explicit MD5 refused")
+	}
+	if _, ok := digestChallenge([]string{`Digest realm="r", nonce="n", algorithm=SHA-256`}); ok {
+		t.Fatal("SHA-256 accepted; the response would be computed with MD5")
+	}
+}
+
 func TestCheckRTSPNeverSendsBasic(t *testing.T) {
 	url, seen := fakeRTSP(t, `Basic realm="cam"`, "admin", "pw")
 	if err := CheckRTSP(ctx(t), url, "admin", "pw"); !errors.Is(err, ErrNoDigest) {
@@ -132,6 +141,7 @@ func TestHandshakeOddAnswers(t *testing.T) {
 		"refused after the challenge": {"RTSP/1.0 401 x\r\nWWW-Authenticate: Digest realm=\"r\", nonce=\"n\"\r\n\r\nRTSP/1.0 403 Forbidden\r\n\r\n", false},
 		"a cut-off body":              {"RTSP/1.0 200 OK\r\nContent-Length: 50\r\n\r\nv=0", false},
 		"silence":                     {"", false},
+		"no reason phrase":            {"RTSP/1.0 200\r\n\r\n", true},
 	} {
 		err := handshake(&answers{out: strings.NewReader(tc.reply)}, "rtsp://h/x", "u", "p")
 		if (err == nil) != tc.ok {

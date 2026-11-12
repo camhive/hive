@@ -60,7 +60,9 @@ type Options struct {
 // backoff between searches while a camera stays missing.
 var backoff = []time.Duration{2 * time.Minute, 5 * time.Minute, 15 * time.Minute, time.Hour}
 
-// relearn is how often an online camera with incomplete identity is asked again.
+// relearn is how often an online camera is asked again what it is: to fill
+// what it could not tell before, and to notice another device at its
+// address (ADR-0017 §1).
 const relearn = time.Hour
 
 // Locator learns identities and finds moved cameras.
@@ -134,7 +136,7 @@ func (l *Locator) Tick(ctx context.Context) {
 		online, since := l.health(c.ID)
 		if online {
 			delete(l.search, c.ID)
-			if l.needsIdentity(c) && now.Sub(l.learned[c.ID]) >= relearn {
+			if now.Sub(l.learned[c.ID]) >= relearn {
 				l.learned[c.ID] = now
 				l.identify(ctx, c, scan)
 			}
@@ -146,15 +148,9 @@ func (l *Locator) Tick(ctx context.Context) {
 	}
 }
 
-// Identify asks the camera at its current address what it is, stores what
-// is new and reports conflicts. It returns the camera as stored.
-func (l *Locator) Identify(ctx context.Context, c camera.Camera) camera.Camera {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.identify(ctx, c, &scan{l: l})
-}
-
-func (l *Locator) identify(ctx context.Context, c camera.Camera, s *scan) camera.Camera {
+// identify asks the camera at its current address what it is, stores what
+// is new and reports fields that differ from the known ones.
+func (l *Locator) identify(ctx context.Context, c camera.Camera, s *scan) {
 	seen, network := l.probeAt(ctx, c, c.Host(), s)
 	learned, conflicts := c.Learn(seen, l.opts.Now())
 	if network == "" {
@@ -167,11 +163,8 @@ func (l *Locator) identify(ctx context.Context, c camera.Camera, s *scan) camera
 	if learned.Identity != c.Identity || network != c.Network {
 		if err := l.cams.SetIdentity(ctx, c.ID, learned.Identity, network); err != nil {
 			l.opts.Logger.Warn("locate: store identity", "camera", c.ID, "err", err)
-			return c
 		}
 	}
-	learned.Network = network
-	return learned
 }
 
 // Probe reports what the device at host is and how it is reached, using
@@ -203,18 +196,6 @@ func (l *Locator) probeAt(ctx context.Context, c camera.Camera, host string, s *
 		}
 	}
 	return id, network
-}
-
-func (l *Locator) needsIdentity(c camera.Camera) bool {
-	switch {
-	case c.Network == "":
-		return true
-	case c.Network == camera.NetworkLocal && c.Identity.MAC == "":
-		return true
-	case c.Source.Kind == camera.SourceONVIF && (c.Identity.Serial == "" || c.Identity.ONVIFEndpoint == ""):
-		return true
-	}
-	return false
 }
 
 // searchDue: a local camera that can be recognised, offline long enough,
