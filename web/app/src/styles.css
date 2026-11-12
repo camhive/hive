@@ -1,0 +1,268 @@
+@import "tailwindcss";
+@import "@fontsource-variable/inter";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * Design tokens: warm paper, ink, and honey as the only accent. Surfaces are
+ * flat; honey marks what is live or recorded, ink carries the actions. Every
+ * component below reads these, so light and dark only differ here.
+ */
+:root {
+  --bg: #faf8f4;
+  --fg: #1b1b19;
+  --card: #ffffff;
+  --elev: #ffffff;
+  --sunken: #f1ede5;
+  --muted: #77736a;
+  --border: #e9e5dc;
+  --border-strong: #d8d3c7;
+  --accent: #e6a417;
+  --accent-soft: #fbf0d3;
+  --accent-text: #7a5200;
+  --danger: #b3261e;
+  --danger-soft: #fbeceb;
+  --success: #2e7d4f;
+  --ring: rgba(230, 164, 23, 0.55);
+  --header: rgba(250, 248, 244, 0.85);
+  color-scheme: light;
+}
+.dark {
+  --bg: #161614;
+  --fg: #eceae4;
+  --card: #1e1e1b;
+  --elev: #232320;
+  --sunken: #1b1b18;
+  --muted: #9a968c;
+  --border: #2e2d29;
+  --border-strong: #403e38;
+  --accent: #edb02e;
+  --accent-soft: #33290f;
+  --accent-text: #f0c462;
+  --danger: #f2877f;
+  --danger-soft: #3a1c1a;
+  --success: #7fcf9b;
+  --ring: rgba(237, 176, 46, 0.55);
+  --header: rgba(22, 22, 20, 0.85);
+  color-scheme: dark;
+}
+
+@layer base {
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    color: var(--fg);
+    background: var(--bg);
+    font-family: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  h1, h2, h3 { letter-spacing: -0.015em; }
+  ::selection { background: var(--accent-soft); }
+  :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+  code, .font-mono { font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace; }
+  input[type="checkbox"] { accent-color: var(--fg); width: 1rem; height: 1rem; }
+}
+
+@layer components {
+  /* Surfaces */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: .75rem;
+    padding: 1.5rem;
+  }
+  .card-hover { transition: border-color .15s; }
+  .card-hover:hover { border-color: var(--border-strong); }
+  .callout {
+    background: var(--sunken);
+    border-radius: .625rem;
+    padding: .875rem 1rem;
+  }
+  .callout-accent { background: var(--accent-soft); border-color: transparent; }
+  p.card.error, p.card.muted { padding: 1rem 1.25rem; }
+  p.card.error { background: var(--danger-soft); border-color: transparent; }
+
+  /* Typography helpers */
+  .page-title { font-size: 1.5rem; line-height: 2rem; font-weight: 600; letter-spacing: -0.02em; }
+  .eyebrow { font-size: .8125rem; font-weight: 500; color: var(--muted); }
+  .muted { color: var(--muted); }
+  .error { color: var(--danger); }
+
+  /* Links: ink text, honey underline */
+  .link {
+    color: var(--fg);
+    font-weight: 500;
+    text-decoration: underline;
+    text-decoration-color: var(--accent);
+    text-decoration-thickness: 2px;
+    text-underline-offset: 3px;
+    background: none;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+    border-radius: .25rem;
+  }
+  .link:hover { text-decoration-color: var(--fg); }
+  .link-danger { color: var(--danger); text-decoration-color: currentColor; text-decoration-thickness: 1px; }
+
+  /* Buttons: the primary action is ink */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: .5rem;
+    min-height: 2.5rem;
+    padding: .5rem 1rem;
+    border: 1px solid var(--fg);
+    border-radius: .5rem;
+    font-size: .875rem;
+    font-weight: 500;
+    line-height: 1.25rem;
+    white-space: nowrap;
+    cursor: pointer;
+    color: var(--bg);
+    background: var(--fg);
+    transition: opacity .15s, background .15s, border-color .15s;
+    text-decoration: none;
+    user-select: none;
+  }
+  .btn:hover { opacity: .85; }
+  .btn:disabled { opacity: .4; cursor: default; }
+  .btn-secondary { color: var(--fg); background: var(--card); border-color: var(--border-strong); }
+  .btn-secondary:hover { opacity: 1; background: var(--sunken); }
+  .btn-ghost { color: var(--fg); background: transparent; border-color: transparent; }
+  .btn-ghost:hover { opacity: 1; background: var(--sunken); }
+  .btn-danger { color: #fff; background: var(--danger); border-color: var(--danger); }
+  .dark .btn-danger { color: #1b1b19; }
+  .btn-sm { min-height: 2rem; padding: .25rem .75rem; font-size: .8125rem; }
+  .btn-xs { min-height: 1.75rem; padding: .125rem .5rem; font-size: .75rem; border-radius: .375rem; }
+
+  /* Segmented control: a row of buttons, the pressed/selected one raised. */
+  .seg {
+    display: inline-flex;
+    gap: 2px;
+    padding: 3px;
+    border-radius: .5rem;
+    background: var(--sunken);
+  }
+  .seg > button {
+    min-height: 1.875rem;
+    padding: .25rem .75rem;
+    border: 0;
+    border-radius: .375rem;
+    background: transparent;
+    color: var(--muted);
+    font-size: .8125rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: color .15s, background .15s;
+  }
+  .seg > button:hover { color: var(--fg); }
+  .seg > button[aria-pressed="true"],
+  .seg > button[aria-selected="true"] {
+    color: var(--fg);
+    background: var(--card);
+    box-shadow: 0 0 0 1px var(--border);
+  }
+  .seg-sm > button { min-height: 1.5rem; padding: .125rem .5rem; font-size: .75rem; }
+
+  /* Inputs */
+  .input {
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 2.5rem;
+    border: 1px solid var(--border-strong);
+    background: var(--elev);
+    color: var(--fg);
+    border-radius: .5rem;
+    padding: .5rem .75rem;
+    font-size: .9375rem;
+    transition: border-color .15s, box-shadow .15s;
+  }
+  .input::placeholder { color: var(--muted); opacity: .7; }
+  .input:hover { border-color: var(--muted); }
+  .input:focus { outline: none; border-color: var(--fg); box-shadow: 0 0 0 3px var(--ring); }
+  select.input {
+    appearance: none;
+    padding-right: 2rem;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%2377736a'%3E%3Cpath d='M5.3 7.3a1 1 0 0 1 1.4 0L10 10.6l3.3-3.3a1 1 0 1 1 1.4 1.4l-4 4a1 1 0 0 1-1.4 0l-4-4a1 1 0 0 1 0-1.4z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right .5rem center;
+    background-size: 1rem;
+    cursor: pointer;
+  }
+  .input-sm { min-height: 2rem; padding-top: .25rem; padding-bottom: .25rem; font-size: .8125rem; }
+
+  /* Status: quiet coloured text with a dot */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: .375rem;
+    font-size: .8125rem;
+    font-weight: 500;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .badge-success { color: var(--success); }
+  .badge-accent { color: var(--accent-text); }
+  .badge-danger { color: var(--danger); }
+  .dot { width: .4375rem; height: .4375rem; border-radius: 999px; background: currentColor; flex: none; }
+
+  /* Tab bar for hive pages */
+  .tabs { display: flex; gap: .25rem; overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid var(--border); }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab {
+    position: relative;
+    padding: .625rem .75rem;
+    font-size: .875rem;
+    font-weight: 500;
+    color: var(--muted);
+    white-space: nowrap;
+    text-decoration: none;
+    transition: color .15s;
+  }
+  .tab:hover { color: var(--fg); }
+  .tab[aria-current="page"] { color: var(--fg); }
+  .tab[aria-current="page"]::after {
+    content: "";
+    position: absolute;
+    left: .75rem;
+    right: .75rem;
+    bottom: -1px;
+    height: 2px;
+    background: var(--accent);
+  }
+
+  /* Header nav link */
+  .nav-link {
+    padding: .375rem .625rem;
+    border-radius: .375rem;
+    font-size: .875rem;
+    font-weight: 500;
+    color: var(--muted);
+    text-decoration: none;
+    transition: color .15s;
+  }
+  .nav-link:hover { color: var(--fg); }
+  .nav-link[aria-current="page"] { color: var(--fg); }
+
+  /* Controls laid over video */
+  .glass { background: rgba(20, 20, 18, .7); color: #fff; border: 0; }
+  .glass-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: .375rem;
+    font-size: .75rem;
+    cursor: pointer;
+  }
+  .glass-btn:hover { background: rgba(255, 255, 255, .18); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

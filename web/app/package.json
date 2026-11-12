@@ -1,0 +1,43 @@
+{
+  "name": "@camhive/app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@camhive/api": "workspace:*",
+    "@fontsource-variable/inter": "5.2.8",
+    "@tanstack/react-query": "5.90.2",
+    "@tanstack/react-router": "1.132.0",
+    "i18next": "25.5.2",
+    "i18next-browser-languagedetector": "8.2.0",
+    "qrcode": "1.5.4",
+    "react": "19.1.1",
+    "react-dom": "19.1.1",
+    "react-i18next": "15.7.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.1.13",
+    "@testing-library/jest-dom": "6.8.0",
+    "@testing-library/react": "16.3.0",
+    "@testing-library/user-event": "14.6.1",
+    "@types/qrcode": "1.5.5",
+    "@types/react": "19.1.13",
+    "@types/react-dom": "19.1.9",
+    "@vitejs/plugin-react": "5.0.3",
+    "jsdom": "27.0.0",
+    "tailwindcss": "4.1.13",
+    "typescript": "5.9.2",
+    "vite": "7.1.7",
+    "vite-plugin-pwa": "^2.0.0",
+    "vitest": "3.2.4",
+    "workbox-window": "^7.4.1"
+  },
+  "license": "SEE LICENSE IN ../../LICENSE"
+}

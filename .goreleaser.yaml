@@ -1,0 +1,115 @@
+# Generated from the Camhive development repository; edit it there.
+version: 2
+project_name: camhive
+env:
+- CGO_ENABLED=0
+before:
+  hooks:
+  - tools/fetch-mediamtx-release.sh build/mediamtx
+builds:
+- id: hive
+  main: ./cmd/hive
+  binary: hive
+  goos:
+  - linux
+  - windows
+  goarch:
+  - amd64
+  - arm64
+  ignore:
+  - goos: windows
+    goarch: arm64
+  flags: &id001
+  - -trimpath
+  ldflags: &id002
+  - -s -w
+  - -X github.com/camhive/hive/internal/version.version={{.Version}}
+  - -X github.com/camhive/hive/internal/version.commit={{.ShortCommit}}
+  - -X github.com/camhive/hive/internal/version.date={{.CommitDate}}
+  mod_timestamp: '{{ .CommitTimestamp }}'
+- id: camsim
+  main: ./cmd/camsim
+  binary: camsim
+  goos:
+  - linux
+  - windows
+  goarch:
+  - amd64
+  - arm64
+  flags: *id001
+  ldflags: *id002
+  mod_timestamp: '{{ .CommitTimestamp }}'
+archives:
+- id: hive
+  ids:
+  - hive
+  name_template: hive_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+  formats:
+  - tar.gz
+  format_overrides:
+  - goos: windows
+    formats:
+    - zip
+  files:
+  - LICENSE
+  - THIRD_PARTY_NOTICES.md
+  - README.md
+  - src: build/mediamtx/{{ .Os }}_{{ .Arch }}/*
+    strip_parent: true
+- id: camsim
+  ids:
+  - camsim
+  name_template: camsim_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+  formats:
+  - tar.gz
+  format_overrides:
+  - goos: windows
+    formats:
+    - zip
+nfpms:
+- id: hive
+  ids:
+  - hive
+  package_name: camhive-hive
+  vendor: Camhive
+  homepage: https://camhive.app
+  maintainer: Camhive <hello@camhive.app>
+  description: Camhive video surveillance agent. Records your cameras and keeps footage at home.
+  license: Proprietary
+  formats:
+  - deb
+  - rpm
+  bindir: /usr/lib/camhive
+  contents:
+  - src: build/mediamtx/{{ .Os }}_{{ .Arch }}/mediamtx
+    dst: /usr/lib/camhive/mediamtx
+    file_info:
+      mode: 493
+  - src: build/mediamtx/{{ .Os }}_{{ .Arch }}/LICENSE.mediamtx
+    dst: /usr/share/doc/camhive-hive/LICENSE.mediamtx
+  - src: LICENSE
+    dst: /usr/share/doc/camhive-hive/LICENSE
+  - src: THIRD_PARTY_NOTICES.md
+    dst: /usr/share/doc/camhive-hive/THIRD_PARTY_NOTICES.md
+  - src: /usr/lib/camhive/hive
+    dst: /usr/bin/hive
+    type: symlink
+  scripts:
+    postinstall: deploy/packaging/postinstall.sh
+    preremove: deploy/packaging/preremove.sh
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+snapshot:
+  version_template: '{{ incpatch .Version }}-dev+{{ .ShortCommit }}'
+changelog:
+  use: git
+  sort: asc
+  filters:
+    exclude:
+    - ^chore
+    - ^ci
+    - ^test
+    - ^docs
+release:
+  draft: true

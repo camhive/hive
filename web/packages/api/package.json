@@ -1,0 +1,34 @@
+{
+  "name": "@camhive/api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Typed clients for the Camhive cloud API and the hive local API, generated from api/*.yaml",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src/schema.d.ts",
+    "src/hive-schema.d.ts"
+  ],
+  "scripts": {
+    "generate": "openapi-typescript ../../../api/cloud-openapi.yaml -o src/schema.d.ts && openapi-typescript ../../../api/hive-openapi.yaml -o src/hive-schema.d.ts",
+    "build": "tsc -p tsconfig.json && cp src/schema.d.ts src/hive-schema.d.ts dist/",
+    "test": "node --test --experimental-strip-types test/*.test.ts"
+  },
+  "dependencies": {
+    "openapi-fetch": "0.14.0"
+  },
+  "devDependencies": {
+    "openapi-typescript": "7.9.1",
+    "typescript": "5.9.2",
+    "@types/node": "22.18.0"
+  },
+  "license": "SEE LICENSE IN ../../../LICENSE"
+}

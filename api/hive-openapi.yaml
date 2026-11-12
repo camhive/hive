@@ -1,0 +1,533 @@
+openapi: 3.1.0
+info:
+  title: Camhive Hive local API
+  version: 0.0.1
+  description: |
+    Served by the hive on the owner's server (loopback by default; reached
+    remotely through the relay or LAN per ADR-0010). Every request except
+    /healthz carries an access token issued by the cloud (ADR-0004) as
+    `Authorization: Bearer <paseto>`. Error bodies always have a stable `code`.
+
+    Plan limits apply to remote requests only (#58). Requests that come
+    through the cloud relay are remote: a token with `quality: sub` gets the
+    sub stream for archive playback, exports and live offers whatever
+    `stream` asks for (main when the camera has no sub stream), and exports
+    are capped at the token's `export_max_minutes` (`403 plan_limit`). On the
+    LAN the hive serves the requested stream and does not cap exports.
+
+    CORS: every response carries `Access-Control-Allow-Origin: *` and the
+    preflight allows `Authorization`, `Content-Type` and `Range` plus
+    `Access-Control-Allow-Private-Network: true`, so the web app on the cloud
+    origin can call the hive on the LAN (`<id>.h.camhive.app`) or through the
+    relay (`<id>.relay.camhive.app`). Bearer tokens, never cookies, carry the
+    identity, so a permissive origin policy exposes nothing (ADR-0012).
+servers:
+  - url: http://127.0.0.1:16016
+security:
+  - accessToken: []
+components:
+  securitySchemes:
+    accessToken:
+      type: http
+      scheme: bearer
+      bearerFormat: PASETO v4.public
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: Stable machine-readable code.
+          enum: [token_missing, token_invalid, token_expired, clock_skew, wrong_hive, license_required, forbidden, not_found, invalid, bad_json, not_ready, engine, unsupported, camera, camera_auth, plan_limit, internal]
+        message: { type: string }
+    Source:
+      type: object
+      required: [kind, address]
+      properties:
+        kind: { type: string, enum: [onvif, rtsp] }
+        address: { type: string, description: ONVIF device service URL or RTSP URL (credentials are moved out) }
+    Credentials:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string }
+        password: { type: string, writeOnly: true }
+    Stream:
+      type: object
+      properties:
+        URL: { type: string }
+        ProfileToken: { type: string }
+        Codec: { type: string }
+        Width: { type: integer }
+        Height: { type: integer }
+    Camera:
+      type: object
+      required: [id, name, group, source, streams, enabled, created_at, updated_at]
+      properties:
+        id: { type: string, example: cam_3f9a1c2b7d4e }
+        name: { type: string, maxLength: 100 }
+        group: { type: string, maxLength: 100 }
+        source: { $ref: "#/components/schemas/Source" }
+        credentials:
+          type: object
+          description: Present for owners only; the password is never returned.
+          properties:
+            username: { type: string }
+        streams:
+          type: object
+          additionalProperties: { $ref: "#/components/schemas/Stream" }
+        enabled: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    StreamInput:
+      type: object
+      required: [url]
+      properties:
+        url: { type: string, description: "rtsp://host[:port]/path without credentials" }
+        profile_token: { type: string }
+        codec: { type: string }
+        width: { type: integer }
+        height: { type: integer }
+    Discovered:
+      type: object
+      required: [xaddr, name, scopes]
+      properties:
+        xaddr: { type: string, description: "ONVIF device service URL" }
+        name: { type: string }
+        scopes: { type: array, items: { type: string } }
+    ProbeResult:
+      type: object
+      required: [device, profiles]
+      properties:
+        device:
+          type: object
+          properties:
+            Manufacturer: { type: string }
+            Model: { type: string }
+            FirmwareVersion: { type: string }
+            SerialNumber: { type: string }
+            HardwareID: { type: string }
+        profiles:
+          type: array
+          items:
+            type: object
+            required: [token, name, encoding, width, height, fps, url]
+            properties:
+              token: { type: string }
+              name: { type: string }
+              encoding: { type: string }
+              width: { type: integer }
+              height: { type: integer }
+              fps: { type: integer }
+              url: { type: string, description: "RTSP URL for this profile (credentials removed)" }
+    CameraCreate:
+      type: object
+      required: [name, source]
+      properties:
+        streams:
+          type: object
+          description: Stream URLs per name (main, sub) for ONVIF cameras, picked from a probe.
+          additionalProperties: { $ref: "#/components/schemas/StreamInput" }
+        name: { type: string }
+        group: { type: string }
+        source: { $ref: "#/components/schemas/Source" }
+        credentials: { $ref: "#/components/schemas/Credentials" }
+    Segment:
+      type: object
+      properties:
+        start: { type: string, format: date-time }
+        duration_ms: { type: integer }
+        bytes: { type: integer }
+        complete: { type: boolean, description: false for the file still being written }
+    ExportCreate:
+      type: object
+      required: [start, duration_seconds]
+      properties:
+        stream: { type: string, enum: [main, sub], default: main }
+        start: { type: string, format: date-time }
+        duration_seconds: { type: integer, minimum: 1, maximum: 86400 }
+    Export:
+      type: object
+      properties:
+        id: { type: string, example: exp_1a2b3c4d5e6f }
+        camera: { type: string }
+        stream: { type: string }
+        start: { type: string, format: date-time }
+        duration_seconds: { type: integer }
+        status: { type: string, enum: [running, done, failed] }
+        error: { type: string }
+        bytes: { type: integer }
+        file_name: { type: string }
+        created_at: { type: string, format: date-time }
+    StreamHealth:
+      type: object
+      properties:
+        stream: { type: string }
+        online: { type: boolean }
+        since: { type: string, format: date-time }
+        bitrate_kbps: { type: integer }
+        bytes_received: { type: integer }
+        tracks: { type: array, items: { type: string } }
+        readers: { type: integer }
+        last_error: { type: string }
+    CameraHealth:
+      type: object
+      properties:
+        camera: { type: string }
+        enabled: { type: boolean }
+        online: { type: boolean, description: follows the main stream }
+        streams: { type: object, additionalProperties: { $ref: "#/components/schemas/StreamHealth" } }
+    Event:
+      type: object
+      properties:
+        id: { type: integer }
+        camera: { type: string }
+        kind: { type: string, enum: [camera.online, camera.offline, storage.low, motion] }
+        at: { type: string, format: date-time }
+        data: { type: object }
+    CameraPatch:
+      type: object
+      properties:
+        name: { type: string }
+        group: { type: string }
+        enabled: { type: boolean }
+        credentials: { $ref: "#/components/schemas/Credentials" }
+  responses:
+    Unauthorized:
+      description: Missing, invalid, expired or foreign token.
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    Forbidden:
+      description: The token's role does not allow this.
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    NotFound:
+      description: Unknown camera, or a camera the token does not cover.
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+paths:
+  /healthz:
+    get:
+      security: []
+      summary: Liveness and version
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { status: { type: string }, version: { type: string } }
+  /v0/cameras:
+    get:
+      summary: Cameras the token may view
+      responses:
+        "200":
+          description: "OK"
+          content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Camera" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      summary: Add a camera (owner)
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/CameraCreate" } } }
+      responses:
+        "201":
+          description: "Created"
+          content: { application/json: { schema: { $ref: "#/components/schemas/Camera" } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422":
+          description: "Validation failed (`code: invalid`)."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  /v0/cameras/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      summary: One camera
+      responses:
+        "200": { description: "OK", content: { application/json: { schema: { $ref: "#/components/schemas/Camera" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      summary: Change name, group, enabled or credentials (owner)
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/CameraPatch" } } }
+      responses:
+        "200": { description: "OK", content: { application/json: { schema: { $ref: "#/components/schemas/Camera" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: "Validation failed (`code: invalid`)."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    delete:
+      summary: Remove a camera (owner); recordings are kept
+      responses:
+        "204": { description: Removed (or already absent). }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v0/cameras/{id}/archive/calendar:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+      - { name: stream, in: query, schema: { type: string, enum: [main, sub], default: main } }
+      - { name: tz, in: query, schema: { type: string }, description: IANA zone for day boundaries; default is the hive's zone }
+    get:
+      summary: Days with footage (viewer)
+      responses:
+        "200":
+          description: "OK"
+          content: { application/json: { schema: { type: array, items: { type: object, properties: { day: { type: string, example: "2026-11-09" } } } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v0/cameras/{id}/archive/timeline:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+      - { name: stream, in: query, schema: { type: string, enum: [main, sub], default: main } }
+      - { name: from, in: query, required: true, schema: { type: string, format: date-time } }
+      - { name: to, in: query, required: true, schema: { type: string, format: date-time } }
+    get:
+      summary: Segments overlapping [from, to) (viewer)
+      responses:
+        "200": { description: "OK", content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Segment" } } } } }
+        "400": { description: "`code: invalid`" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v0/cameras/{id}/archive/play:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+      - { name: stream, in: query, schema: { type: string, enum: [main, sub], default: main } }
+      - { name: start, in: query, required: true, schema: { type: string, format: date-time } }
+      - { name: duration, in: query, required: true, schema: { type: integer, minimum: 1, maximum: 86400 }, description: seconds }
+    get:
+      summary: Archive playback as fragmented MP4 (viewer; through the relay a sub-quality token gets the sub stream)
+      responses:
+        "200": { description: "OK", content: { video/mp4: {} } }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { description: "`code: engine` — playback unavailable" }
+  /v0/cameras/{id}/exports:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      summary: Start an export of a time span (operator; through the relay the token's quality and export cap apply)
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/ExportCreate" } } }
+      responses:
+        "202": { description: "Accepted", content: { application/json: { schema: { $ref: "#/components/schemas/Export" } } } }
+        "403": { description: "`code: forbidden` (not an operator) or `code: plan_limit` (longer than the token allows, through the relay only)", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { description: "`code: invalid`" }
+  /v0/exports:
+    get:
+      summary: The caller's exports, newest first
+      responses:
+        "200": { description: "OK", content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Export" } } } } }
+  /v0/exports/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      summary: Export status (own jobs only; others look absent)
+      responses:
+        "200": { description: "OK", content: { application/json: { schema: { $ref: "#/components/schemas/Export" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v0/exports/{id}/file:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      summary: Download the finished file
+      responses:
+        "200": { description: "OK", content: { video/mp4: {} }, headers: { Content-Disposition: { schema: { type: string } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: "`code: not_ready` — still running or failed" }
+  /v0/cameras/{id}/health:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      summary: Live health of one camera (viewer)
+      responses:
+        "200": { description: "OK", content: { application/json: { schema: { $ref: "#/components/schemas/CameraHealth" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v0/health/cameras:
+    get:
+      summary: Health of every camera the token may view
+      responses:
+        "200": { description: "OK", content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/CameraHealth" } } } } }
+  /v0/cameras/{id}/events:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+      - { name: from, in: query, required: true, schema: { type: string, format: date-time } }
+      - { name: to, in: query, required: true, schema: { type: string, format: date-time } }
+    get:
+      summary: Timeline events in [from, to) (viewer)
+      responses:
+        "200": { description: "OK", content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Event" } } } } }
+        "400": { description: "`code: invalid`" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v0/cameras/{id}/ptz:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      summary: Whether the camera supports PTZ (viewer)
+      responses:
+        "200": { description: "OK", content: { application/json: { schema: { type: object, properties: { supported: { type: boolean } } } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v0/cameras/{id}/ptz/move:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      summary: Start continuous movement (operator); call stop to end it
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, properties: { pan: { type: number, minimum: -1, maximum: 1 }, tilt: { type: number, minimum: -1, maximum: 1 }, zoom: { type: number, minimum: -1, maximum: 1 } } } } }
+      responses:
+        "204": { description: Moving. }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { description: "`code: unsupported`" }
+        "422": { description: "`code: invalid`" }
+        "502": { description: "`code: camera` — the camera rejected the command" }
+  /v0/cameras/{id}/ptz/stop:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      summary: Stop movement (operator)
+      responses:
+        "204": { description: Stopped. }
+        "409": { description: "`code: unsupported`" }
+  /v0/cameras/{id}/ptz/presets:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      summary: Stored positions (operator)
+      responses:
+        "200": { description: "OK", content: { application/json: { schema: { type: array, items: { type: object, properties: { token: { type: string }, name: { type: string } } } } } } }
+  /v0/cameras/{id}/ptz/presets/{preset}/goto:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+      - { name: preset, in: path, required: true, schema: { type: string } }
+    post:
+      summary: Move to a stored position (operator)
+      responses:
+        "204": { description: Moving to the preset. }
+        "502": { description: "`code: camera`" }
+  /v0/cameras/{id}/live/offer:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      summary: Local WebRTC signalling — forward a WHEP offer to the engine and return its answer (viewer; the app uses it at home, on the LAN path or in local mode, ADR-0013)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sdp]
+              properties:
+                sdp: { type: string }
+                stream: { type: string, enum: [main, sub], default: main }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sdp, session]
+                properties:
+                  sdp: { type: string }
+                  session: { type: string, description: "opaque handle for /v0/live/candidates and /v0/live/close" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: "`code: invalid`"
+        "502":
+          description: "`code: engine`"
+        "503":
+          description: "`code: not_ready` — engine not running"
+  /v0/live/candidates:
+    post:
+      summary: Trickle ICE candidates for a local signalling session (RFC 8840 fragment)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session, candidates]
+              properties:
+                session: { type: string }
+                candidates: { type: string }
+      responses:
+        "204": { description: Forwarded. }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: "`code: invalid`"
+  /v0/live/close:
+    post:
+      summary: End a local signalling session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session]
+              properties:
+                session: { type: string }
+      responses:
+        "204": { description: Closed. }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: "`code: invalid`"
+  /v0/discovery:
+    get:
+      summary: ONVIF cameras answering WS-Discovery on the LAN (owner)
+      responses:
+        "200":
+          description: OK
+          content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Discovered" } } } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "502":
+          description: "`code: camera` — discovery failed"
+        "503":
+          description: "`code: not_ready` — discovery not available"
+  /v0/discovery/probe:
+    post:
+      summary: Read an ONVIF device's information and profiles with stream URLs (owner)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [address]
+              properties:
+                address: { type: string, description: "ONVIF device service URL" }
+                credentials: { $ref: "#/components/schemas/Credentials" }
+      responses:
+        "200":
+          description: OK
+          content: { application/json: { schema: { $ref: "#/components/schemas/ProbeResult" } } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422":
+          description: "`code: invalid`"
+        "502":
+          description: "`code: camera_auth` when the camera rejected the credentials, `code: camera` otherwise"
+  /v0/actions:
+    parameters:
+      - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 1000, default: 100 } }
+    get:
+      summary: Activity on this hive, newest first (owner)
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: integer }
+                    at: { type: string, format: date-time }
+                    actor: { type: string, description: "account id, system or cloud" }
+                    action: { type: string, example: camera.add }
+                    target: { type: string }
+                    details: { type: object }
+        "403": { $ref: "#/components/responses/Forbidden" }
