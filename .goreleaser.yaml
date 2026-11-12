@@ -75,7 +75,8 @@ nfpms:
   homepage: https://camhive.app
   maintainer: Camhive <hello@camhive.app>
   description: Camhive video surveillance agent. Records your cameras and keeps footage at home.
-  license: Proprietary
+  license: AGPL-3.0-only
+  file_name_template: '{{ .PackageName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
   formats:
   - deb
   - rpm
@@ -113,3 +114,6 @@ changelog:
     - ^docs
 release:
   draft: true
+  github:
+    owner: camhive
+    name: hive
