@@ -101,7 +101,8 @@
     "camera": "The camera did not answer.",
     "camera_auth": "The camera refused the login.",
     "unexpected_code": "Unexpected error ({{code}}).",
-    "export_running": "An export of this footage is still being made; delete again when it has finished."
+    "export_running": "An export of this footage is still being made; delete again when it has finished.",
+    "camera_mismatch": "Another device answers at that address. If you replaced the camera, confirm it below."
   },
   "account": {
     "title": "Account",
@@ -321,7 +322,15 @@
     "noSub": "none",
     "editCamera": "Edit camera",
     "turnOff": "Turn off",
-    "turnOn": "Turn on"
+    "turnOn": "Turn on",
+    "host": "Address (IP or host name)",
+    "serial": "serial {{serial}}",
+    "mac": "MAC {{mac}}",
+    "network": {
+      "local": "If the router gives this camera a new address, the hive finds it again.",
+      "routed": "This camera is in another network than the hive: if its address changes, the hive cannot find it. Reserve its address in the router."
+    },
+    "replaceCamera": "It is a new camera, use it"
   },
   "members": {
     "title": "Members",

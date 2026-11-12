@@ -64,10 +64,45 @@ stream when a camera has only one.
   pulls the camera and records it. Switch it off to stop recording while
   keeping the camera and its history. Switched-off cameras stay visible to the
   owner so they can be switched back on.
-- **Edit** changes name, group and login. Leave the password empty to keep
-  the current one.
+- **Edit** changes name, group, login and address. Leave the password empty
+  to keep the current one. A new address (IP or host name) keeps the camera,
+  its recordings and its shares; ports and paths stay. If another device
+  answers there, the hive says so and moves the camera only when you confirm
+  it is a new camera (then it learns the new device).
 - **Remove** deletes the camera from the hive. Its recordings stay on disk
   until retention removes them.
+
+## When a camera gets a new address
+
+Home routers hand out addresses that can change, for example after a power
+cut. The hive remembers what each camera is: its network card (MAC), and for
+ONVIF cameras its device id and serial number. When a camera on the hive's
+own network has been offline for two minutes, the hive looks for it: it asks
+ONVIF cameras to announce themselves and quietly touches every address of its
+network (at most 254) to see which device has which MAC. Then it searches
+again after 2, 5 and 15 minutes and hourly while the camera stays missing.
+
+It moves the camera only when the device it found matches everything it
+knows and accepts the camera's login. The login is sent only to a device
+whose MAC or device id already matches, and only in digest form, never as
+plain text. The camera keeps its id, recordings and shares; the timeline
+shows a *camera.address_changed* event.
+
+The camera's edit form shows what the hive knows of it and whether it can be
+found this way:
+
+- *If the router gives this camera a new address, the hive finds it again* —
+  it is on the hive's network.
+- *This camera is in another network than the hive* — behind a router or on
+  another VLAN. The hive cannot search there; reserve the camera's address
+  in your router and change it by hand if it moves.
+
+Reserving camera addresses in the router (DHCP reservation, "always assign
+this IP") is the most reliable setup either way. Cameras added before this
+version learn their identity on their next connection; until then a move
+cannot be healed automatically. Two identical RTSP cameras behind a Wi-Fi
+repeater that rewrites MAC addresses cannot be told apart; change their
+address by hand.
 
 ## Status
 

@@ -250,7 +250,7 @@ components:
         enabled: { type: boolean }
         record_audio: { type: boolean, description: "Pull and record the camera's sound (ADR-0015); off unless the owner switches it on" }
         host: { type: string, description: "Move the camera to this host or IP, keeping ports and paths (ADR-0017)", example: "192.168.1.23" }
-        replace_identity: { type: boolean, default: false, description: "Accept a device at the new host that is not the known camera (it was replaced)" }
+        replace_identity: { type: boolean, description: "Accept a device at the new host that is not the known camera (it was replaced)" }
         credentials: { $ref: "#/components/schemas/Credentials" }
   responses:
     Unauthorized:

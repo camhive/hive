@@ -24,18 +24,24 @@ export function useCameraActions(camera: HiveCamera, client: HiveClient | null, 
   const qc = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // ADR-0017: a change of address the hive refused because another device answers there.
+  const [mismatch, setMismatch] = useState<hiveComponents["schemas"]["CameraPatch"] | null>(null);
   const refresh = () => qc.invalidateQueries({ queryKey: ["hive"] });
   async function patch(body: hiveComponents["schemas"]["CameraPatch"]) {
     if (!client) return;
     setError(null);
+    setMismatch(null);
     try {
       unwrapHive(await client.PATCH("/v0/cameras/{id}", { params: { path: { id: camera.id } }, body }));
       await refresh();
       setEditing(false);
     } catch (err) {
+      if (err instanceof CamhiveError && err.code === "camera_mismatch") setMismatch(body);
       setError(errorMessage(t, err));
     }
   }
+  /** The owner says the device at the new address is a replacement camera. */
+  const replace = () => (mismatch ? patch({ ...mismatch, replace_identity: true }) : Promise.resolve());
   async function remove() {
     if (!client || !window.confirm(t("cameras.confirmRemove", { name: camera.name }))) return;
     try {
@@ -46,13 +52,13 @@ export function useCameraActions(camera: HiveCamera, client: HiveClient | null, 
       setError(errorMessage(t, err));
     }
   }
-  return { editing, setEditing, error, patch, remove };
+  return { editing, setEditing, error, mismatch: !!mismatch, replace, patch, remove };
 }
 
 /** One camera in the list layout: name (opens it), source, health; management for the owner. */
 export function CameraRow({ camera, online, client, editable, onOpen }: { camera: HiveCamera; online: boolean | undefined; client: HiveClient | null; editable: boolean; onOpen: () => void }) {
   const { t } = useTranslation();
-  const { editing, setEditing, error, patch, remove } = useCameraActions(camera, client);
+  const { editing, setEditing, error, mismatch, replace, patch, remove } = useCameraActions(camera, client);
   const main = camera.streams?.main;
   return (
     <li className="py-3" data-testid="camera" data-camera={camera.id}>
@@ -73,6 +79,7 @@ export function CameraRow({ camera, online, client, editable, onOpen }: { camera
         </div>
       </div>
       {error && <p role="alert" className="error text-sm mt-2">{error}</p>}
+      {mismatch && <ReplaceButton onReplace={replace} />}
       {editing && <CameraEditForm camera={camera} onSubmit={patch} />}
     </li>
   );
@@ -84,10 +91,12 @@ export function CameraEditForm({ camera, onSubmit }: { camera: HiveCamera; onSub
   const [group, setGroup] = useState(camera.group ?? "");
   const [creds, setCreds] = useState<Creds>({ username: camera.credentials?.username ?? "", password: "" });
   const [recordAudio, setRecordAudio] = useState(camera.record_audio ?? false);
+  const [host, setHost] = useState(hostOf(camera.source.address));
   function submit(e: FormEvent) {
     e.preventDefault();
     const p: hiveComponents["schemas"]["CameraPatch"] = { name, group, record_audio: recordAudio };
     if (creds.password) p.credentials = creds;
+    if (host.trim() && host.trim() !== hostOf(camera.source.address)) p.host = host.trim();
     void onSubmit(p);
   }
   return (
@@ -96,6 +105,8 @@ export function CameraEditForm({ camera, onSubmit }: { camera: HiveCamera; onSub
       <Field label={t("cameras.group")} name={`group-${camera.id}`} maxLength={100} value={group} onChange={(e) => setGroup(e.target.value)} />
       <Field label={t("cameras.username")} name={`user-${camera.id}`} autoComplete="off" value={creds.username} onChange={(e) => setCreds({ ...creds, username: e.target.value })} />
       <Field label={t("cameras.password")} name={`pass-${camera.id}`} type="password" autoComplete="new-password" hint={t("cameras.passwordKeep")} value={creds.password} onChange={(e) => setCreds({ ...creds, password: e.target.value })} />
+      <Field label={t("cameras.host")} name={`host-${camera.id}`} autoComplete="off" spellCheck={false} value={host} onChange={(e) => setHost(e.target.value)} />
+      <CameraIdentity camera={camera} />
       <label className="sm:col-span-2 flex items-start gap-2 text-sm mb-3">
         <input type="checkbox" className="mt-1" checked={recordAudio} onChange={(e) => setRecordAudio(e.target.checked)} aria-describedby={`audio-hint-${camera.id}`} />
         <span>{t("cameras.recordAudio")}<span id={`audio-hint-${camera.id}`} className="block muted text-xs">{t("cameras.recordAudioHint")}</span></span>
@@ -260,4 +271,32 @@ function DiscoverFlow({ client, onDone }: { client: HiveClient; onDone: () => vo
       )}
     </div>
   );
+}
+
+/** The host of a camera address (IP or name), or "" when it cannot be read. */
+export function hostOf(address: string): string {
+  try {
+    return new URL(address).hostname.replace(/^\[|\]$/g, "");
+  } catch {
+    return "";
+  }
+}
+
+/** What the hive knows of the camera and whether it can find it again (ADR-0017). */
+function CameraIdentity({ camera }: { camera: HiveCamera }) {
+  const { t } = useTranslation();
+  const id = camera.identity ?? {};
+  const parts = [[id.manufacturer, id.model].filter(Boolean).join(" "), id.serial && t("cameras.serial", { serial: id.serial }), id.mac && t("cameras.mac", { mac: id.mac })].filter(Boolean);
+  return (
+    <div className="text-xs muted mb-3 space-y-1 self-end">
+      {parts.length > 0 && <p data-testid="camera-identity">{parts.join(" · ")}</p>}
+      {camera.network && <p data-testid="camera-network">{t(`cameras.network.${camera.network}`)}</p>}
+    </div>
+  );
+}
+
+/** Confirms that the device at the new address is a replacement camera. */
+export function ReplaceButton({ onReplace }: { onReplace: () => Promise<void> }) {
+  const { t } = useTranslation();
+  return <button type="button" className="btn btn-secondary btn-sm mt-2" onClick={() => void onReplace()}>{t("cameras.replaceCamera")}</button>;
 }

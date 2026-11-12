@@ -10,7 +10,7 @@ const known = new Set([
   "bad_invitation", "wrong_account", "promo_invalid", "promo_redeemed", "hive_unreachable", "hive_not_ready", "internal",
   // hive local API
   "token_missing", "token_invalid", "token_expired", "clock_skew", "wrong_hive", "license_required", "forbidden",
-  "not_ready", "engine", "unsupported", "camera", "camera_auth", "no_audio", "audio_unsupported", "export_running",
+  "not_ready", "engine", "unsupported", "camera", "camera_auth", "no_audio", "audio_unsupported", "export_running", "camera_mismatch",
 ]);
 
 export function errorKey(err: unknown): string {

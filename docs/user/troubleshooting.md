@@ -25,6 +25,7 @@ Hive (recordings, cameras, live):
 | The hive is still starting up | Engine or storage not ready | Wait ten seconds; if it stays, check MediaMTX is installed |
 | The hive's video engine reported an error | MediaMTX rejected a camera or path | `engine/mediamtx.log` in the data directory |
 | The camera did not answer / refused the login | Network or credentials | `ffprobe` the RTSP URL from another computer |
+| Another device answers at that address | Changing a camera's address to one where a different camera or device answers | Check the IP; if you replaced the camera, confirm *It is a new camera* |
 | Unexpected error (code) | Something we did not translate | Send the code with your report |
 
 ## Hive offline
@@ -52,6 +53,11 @@ Live works and Archive says the hive did not answer:
   name. Allow `h.camhive.app` in its DNS rebind settings.
 
 ## Cameras not found
+
+- A camera that worked and went offline after a router restart probably got a
+  new address. On the hive's own network the hive finds it again within
+  minutes (see [When a camera gets a new address](cameras.md#when-a-camera-gets-a-new-address));
+  otherwise enter its new address in *Edit* and reserve it in the router.
 
 - Discovery uses multicast on your LAN; cameras on another subnet or on guest
   Wi-Fi are invisible to it. Use the manual address.

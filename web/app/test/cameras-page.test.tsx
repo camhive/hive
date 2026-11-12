@@ -12,7 +12,8 @@ beforeEach(() => { resetCloudForTest(); localStorage.clear(); });
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const hive = { id: "hv_1", name: "Home", status: "active", online: true, claimed_at: "2026-11-09T00:00:00Z", lan: { host: "hv_1.h.camhive.app", port: 16017, addrs: ["192.168.1.20"] }, relay_host: "hv_1.relay.camhive.app" };
-type Cam = { id: string; name: string; group: string; enabled: boolean; source: { kind: string; address: string }; streams: Record<string, { URL: string; Codec?: string; Width?: number; Height?: number }>; created_at: string; updated_at: string; credentials?: { username: string } };
+type Cam = { id: string; name: string; group: string; enabled: boolean; source: { kind: string; address: string }; streams: Record<string, { URL: string; Codec?: string; Width?: number; Height?: number }>; created_at: string; updated_at: string; credentials?: { username: string };
+  identity?: Record<string, string>; network?: string };
 
 function stub(role: "owner" | "viewer") {
   const cams: Cam[] = [{ id: "cam_1", name: "Door", group: "Outside", enabled: true, source: { kind: "rtsp", address: "rtsp://10.0.0.9/s" }, streams: { main: { URL: "rtsp://10.0.0.9/s", Codec: "H264", Width: 1920, Height: 1080 } }, created_at: "", updated_at: "", credentials: { username: "admin" } }];
@@ -47,7 +48,10 @@ function stub(role: "owner" | "viewer") {
           return json(201, c);
         }
         case "PATCH /v0/cameras/cam_1": {
-          const b = body as { enabled?: boolean; name?: string; group?: string };
+          const { host, replace_identity, ...b } = body as { enabled?: boolean; name?: string; group?: string; host?: string; replace_identity?: boolean };
+          // ADR-0017: another device answers at 10.0.0.50.
+          if (host === "10.0.0.50" && !replace_identity) return json(409, { code: "camera_mismatch", message: "" });
+          if (host) cams[0]!.source.address = `rtsp://${host}/s`;
           Object.assign(cams[0]!, b);
           return json(200, cams[0]);
         }
@@ -152,6 +156,38 @@ describe("camera management on the hive page", () => {
     await user.click(within(door).getByRole("button", { name: "Remove" }));
     await waitFor(() => expect(cams).toHaveLength(2));
   }, 20_000);
+
+  it("moves a camera to another address, asking before it takes a different device, and explains what it knows of the camera", async () => {
+    const { cams, bodies } = stub("owner");
+    cams[0]!.identity = { mac: "aa:bb:cc:00:11:22", serial: "S1", manufacturer: "Acme", model: "X1" };
+    cams[0]!.network = "local";
+    const user = mount();
+    await user.click(await screen.findByRole("button", { name: "List" }));
+    const door = await screen.findByTestId("camera");
+    await user.click(within(door).getByRole("button", { name: "Edit" }));
+    const edit = within(door).getByRole("form", { name: "Edit Door" });
+    expect(within(edit).getByTestId("camera-identity")).toHaveTextContent("Acme X1 · serial S1 · MAC aa:bb:cc:00:11:22");
+    expect(within(edit).getByTestId("camera-network")).toHaveTextContent("finds it again");
+    const address = within(edit).getByLabelText("Address (IP or host name)");
+    expect(address).toHaveValue("10.0.0.9");
+    await user.clear(address);
+    await user.type(address, "10.0.0.50");
+    await user.click(within(edit).getByRole("button", { name: "Save" }));
+    expect(await within(door).findByRole("alert")).toHaveTextContent("Another device answers at that address");
+    await user.click(within(door).getByRole("button", { name: "It is a new camera, use it" }));
+    await waitFor(() => expect(bodies["PATCH /v0/cameras/cam_1"]!.at(-1)).toEqual({ name: "Door", group: "Outside", record_audio: false, host: "10.0.0.50", replace_identity: true }));
+    await waitFor(() => expect(cams[0]!.source.address).toBe("rtsp://10.0.0.50/s"));
+  });
+
+  it("tells the owner to reserve the address of a camera behind a router", async () => {
+    const { cams } = stub("owner");
+    cams[0]!.network = "routed";
+    const user = mount();
+    await user.click(await screen.findByRole("button", { name: "List" }));
+    const door = await screen.findByTestId("camera");
+    await user.click(within(door).getByRole("button", { name: "Edit" }));
+    expect(within(door).getByTestId("camera-network")).toHaveTextContent("Reserve its address in the router");
+  });
 
   it("hides management from members", async () => {
     stub("viewer");

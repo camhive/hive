@@ -16,7 +16,7 @@ import { LiveTile } from "@/components/LiveTile";
 import { PtzPad } from "@/components/PtzPad";
 import { Timeline } from "@/components/Timeline";
 import { Field } from "@/components/Field";
-import { CameraEditForm, useCameraActions } from "@/components/CameraManage";
+import { CameraEditForm, ReplaceButton, useCameraActions } from "@/components/CameraManage";
 
 export type CameraDetailProps = {
   hive: Hive;
@@ -208,6 +208,7 @@ export function CameraDetail({ hive, grant, quality, client, camera, health, sig
         </div>
       </div>
       {actions.error && <p role="alert" className="error text-sm">{actions.error}</p>}
+      {actions.mismatch && <ReplaceButton onReplace={actions.replace} />}
       {actions.editing && <div className="card"><CameraEditForm camera={camera} onSubmit={actions.patch} /></div>}
 
       {live && (

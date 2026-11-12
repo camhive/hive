@@ -101,7 +101,8 @@
     "camera": "Die Kamera hat nicht geantwortet.",
     "camera_auth": "Die Kamera hat die Anmeldung abgelehnt.",
     "unexpected_code": "Unerwarteter Fehler ({{code}}).",
-    "export_running": "Ein Export dieser Aufnahmen läuft noch; bitte nach dessen Ende erneut löschen."
+    "export_running": "Ein Export dieser Aufnahmen läuft noch; bitte nach dessen Ende erneut löschen.",
+    "camera_mismatch": "An dieser Adresse antwortet ein anderes Gerät. Wenn Sie die Kamera ersetzt haben, bestätigen Sie es unten."
   },
   "account": {
     "title": "Konto",
@@ -321,7 +322,15 @@
     "noSub": "keiner",
     "editCamera": "Kamera bearbeiten",
     "turnOff": "Ausschalten",
-    "turnOn": "Einschalten"
+    "turnOn": "Einschalten",
+    "host": "Adresse (IP oder Hostname)",
+    "serial": "Seriennummer {{serial}}",
+    "mac": "MAC {{mac}}",
+    "network": {
+      "local": "Bekommt die Kamera vom Router eine neue Adresse, findet der Hive sie wieder.",
+      "routed": "Diese Kamera ist in einem anderen Netz als der Hive: Ändert sich ihre Adresse, findet der Hive sie nicht. Reservieren Sie ihre Adresse im Router."
+    },
+    "replaceCamera": "Es ist eine neue Kamera, verwenden"
   },
   "members": {
     "title": "Mitglieder",

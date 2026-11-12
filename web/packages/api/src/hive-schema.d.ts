@@ -1687,11 +1687,8 @@ export interface components {
              * @example 192.168.1.23
              */
             host?: string;
-            /**
-             * @description Accept a device at the new host that is not the known camera (it was replaced)
-             * @default false
-             */
-            replace_identity: boolean;
+            /** @description Accept a device at the new host that is not the known camera (it was replaced) */
+            replace_identity?: boolean;
             credentials?: components["schemas"]["Credentials"];
         };
     };
