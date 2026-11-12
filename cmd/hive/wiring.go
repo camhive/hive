@@ -40,6 +40,8 @@ type runtimeParts struct {
 	sweeper *retention.Sweeper
 	health  *health.Monitor
 	locator *locate.Locator // nil when the video engine is unavailable
+	store   *store.Store
+	dataDir string
 	archive string
 	close   func()
 }
@@ -67,7 +69,7 @@ func assemble(ctx context.Context, cfg hiveconfig.Config, paths hiveconfig.Paths
 	licensing := hiveagent.NewLicensing(nil)
 	verifier := auth.NewVerifier(hiveID, keys, auth.WithLicenseValid(licensing.Usable))
 
-	parts := &runtimeParts{close: func() { _ = st.Close() }}
+	parts := &runtimeParts{close: func() { _ = st.Close() }, store: st, dataDir: paths.Data}
 	eng, err := newEngine(cfg, paths, log)
 	if err != nil {
 		_ = st.Close()
