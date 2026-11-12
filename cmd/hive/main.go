@@ -203,6 +203,7 @@ func (p *program) serve(ctx context.Context, app *hiveapp.App, parts *runtimePar
 		go parts.index.Run(ctx, parts.archive, time.Minute)
 		go parts.sweeper.Run(ctx, 5*time.Minute)
 		go parts.health.Run(ctx)
+		go parts.locator.Run(ctx, time.Minute)
 	}
 	if err := app.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		log.Error("hive exited", "err", err)

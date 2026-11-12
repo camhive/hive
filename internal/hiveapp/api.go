@@ -42,6 +42,9 @@ type Deps struct {
 	// Deletions removes footage on the owner's request (ADR-0016); nil
 	// answers 503 not_ready.
 	Deletions Deleter
+	// Locator tells what device answers at a host (ADR-0017); nil skips the
+	// identity check when the owner changes a camera's address.
+	Locator CameraLocator
 	// WHEP is the client for the engine's WebRTC endpoint (local live
 	// signalling); nil uses a default with a short timeout.
 	WHEP *http.Client
@@ -188,6 +191,8 @@ type cameraView struct {
 	Streams     map[string]camera.StreamSpec `json:"streams"`
 	Enabled     bool                         `json:"enabled"`
 	RecordAudio bool                         `json:"record_audio"`
+	Identity    *camera.Identity             `json:"identity,omitempty"` // owner only (ADR-0017)
+	Network     string                       `json:"network,omitempty"`
 	CreatedAt   time.Time                    `json:"created_at"`
 	UpdatedAt   time.Time                    `json:"updated_at"`
 }
@@ -205,7 +210,11 @@ func toView(c camera.Camera, claims auth.Claims) cameraView {
 	v := cameraView{
 		ID: string(c.ID), Name: c.Name, Group: c.Group,
 		Source:  sourceView{Kind: string(c.Source.Kind), Address: c.Source.Address},
-		Streams: map[string]camera.StreamSpec{}, Enabled: c.Enabled, RecordAudio: c.RecordAudio, CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
+		Streams: map[string]camera.StreamSpec{}, Enabled: c.Enabled, RecordAudio: c.RecordAudio, Network: string(c.Network), CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
+	}
+	if claims.Role == auth.RoleOwner {
+		id := c.Identity
+		v.Identity = &id
 	}
 	for k, s := range c.Streams {
 		v.Streams[string(k)] = s
@@ -246,6 +255,28 @@ type cameraPatch struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
 	} `json:"credentials"`
+	// Host moves the camera to another host (ADR-0017); ReplaceIdentity
+	// accepts a device that is not the known camera (a replacement).
+	Host            *string `json:"host"`
+	ReplaceIdentity bool    `json:"replace_identity"`
+}
+
+func (in cameraPatch) patch() camera.Patch {
+	p := camera.Patch{Name: in.Name, Group: in.Group, Enabled: in.Enabled, RecordAudio: in.RecordAudio}
+	if in.Credentials != nil {
+		p.Credentials = &camera.Credentials{Username: in.Credentials.Username, Password: in.Credentials.Password}
+	}
+	return p
+}
+
+// recordPatch logs a move and an update separately, each only when it happened.
+func (a *api) recordPatch(r *http.Request, old, now camera.Camera, in cameraPatch) {
+	if now.Host() != old.Host() {
+		a.record(r, "camera.move", string(now.ID), map[string]any{"old": old.Host(), "new": now.Host(), "replaced_identity": in.ReplaceIdentity})
+	}
+	if in.Name != nil || in.Group != nil || in.Enabled != nil || in.RecordAudio != nil || in.Credentials != nil {
+		a.record(r, "camera.update", string(now.ID), map[string]any{"name": in.Name, "group": in.Group, "enabled": in.Enabled, "record_audio": in.RecordAudio, "credentials_changed": in.Credentials != nil})
+	}
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
@@ -348,20 +379,22 @@ func (a *api) patchCamera(w http.ResponseWriter, r *http.Request) {
 	if a.storeErr(w, err) {
 		return
 	}
-	patch := camera.Patch{Name: in.Name, Group: in.Group, Enabled: in.Enabled, RecordAudio: in.RecordAudio}
-	if in.Credentials != nil {
-		patch.Credentials = &camera.Credentials{Username: in.Credentials.Username, Password: in.Credentials.Password}
-	}
-	u, err := c.Update(patch, time.Now())
+	u, err := c.Update(in.patch(), time.Now())
 	if err != nil {
 		writeError(w, http.StatusUnprocessableEntity, "invalid", err.Error())
 		return
+	}
+	if in.Host != nil && *in.Host != c.Host() {
+		var ok bool
+		if u, ok = a.moveCamera(w, r, u, *in.Host, in.ReplaceIdentity); !ok {
+			return
+		}
 	}
 	if err := a.d.Store.Cameras().Put(r.Context(), u); err != nil {
 		a.internal(w, err)
 		return
 	}
-	a.record(r, "camera.update", string(u.ID), map[string]any{"name": in.Name, "group": in.Group, "enabled": in.Enabled, "record_audio": in.RecordAudio, "credentials_changed": in.Credentials != nil})
+	a.recordPatch(r, c, u, in)
 	a.d.Notify()
 	writeJSON(w, http.StatusOK, toView(u, claims))
 }

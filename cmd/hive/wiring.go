@@ -16,6 +16,7 @@ import (
 	"github.com/camhive/hive/internal/archive"
 	"github.com/camhive/hive/internal/auth"
 	"github.com/camhive/hive/internal/diag"
+	"github.com/camhive/hive/internal/domain/camera"
 	"github.com/camhive/hive/internal/entitlements"
 	"github.com/camhive/hive/internal/export"
 	"github.com/camhive/hive/internal/health"
@@ -23,6 +24,7 @@ import (
 	"github.com/camhive/hive/internal/hiveapp"
 	"github.com/camhive/hive/internal/hiveconfig"
 	"github.com/camhive/hive/internal/ingest"
+	"github.com/camhive/hive/internal/locate"
 	"github.com/camhive/hive/internal/ptz"
 	"github.com/camhive/hive/internal/retention"
 	"github.com/camhive/hive/internal/store"
@@ -37,6 +39,7 @@ type runtimeParts struct {
 	index   *archive.Index   // nil when the video engine is unavailable
 	sweeper *retention.Sweeper
 	health  *health.Monitor
+	locator *locate.Locator // nil when the video engine is unavailable
 	archive string
 	close   func()
 }
@@ -116,6 +119,8 @@ func assemble(ctx context.Context, cfg hiveconfig.Config, paths hiveconfig.Paths
 			},
 		})
 		deps.Health = parts.health
+		parts.locator = newLocator(st, parts, log)
+		deps.Locator = parts.locator
 		parts.agent.SetHealth(parts.health)
 		parts.agent.SetEngine(eng)
 	}
@@ -187,4 +192,33 @@ func mediamtxNextTo(exe string) string {
 		return ""
 	}
 	return candidate
+}
+
+// newLocator finds cameras again after an address change (ADR-0017) and
+// reports what it did as Events, in the action log and to the cloud.
+func newLocator(st *store.Store, parts *runtimeParts, log *slog.Logger) *locate.Locator {
+	report := func(kind string, cam camera.ID, data map[string]any) {
+		raw, _ := json.Marshal(data)
+		if _, err := st.Events().Append(context.Background(), store.Event{Camera: string(cam), Kind: kind, At: time.Now().UTC(), Data: raw}); err != nil {
+			log.Error("store event", "err", err)
+		}
+		if err := st.Actions().Append(context.Background(), store.Action{Actor: "hive", Action: kind, Target: string(cam), Details: raw}); err != nil {
+			log.Error("action log", "err", err)
+		}
+		parts.agent.Emit(kind, map[string]any{"camera": cam, "data": data})
+	}
+	health := func(id camera.ID) (bool, time.Time) {
+		h := parts.health.Camera(string(id))
+		return h.Online, h.Streams[string(camera.Main)].Since
+	}
+	return locate.New(st.Cameras(), locate.System{}, locate.Credentials{}, health, locate.Options{
+		Logger: log.With("component", "locate"),
+		OnMoved: func(old, moved camera.Camera) {
+			report("camera.address_changed", moved.ID, map[string]any{"old": old.Host(), "new": moved.Host()})
+			parts.ingest.Notify() // pull from the new address
+		},
+		OnConflict: func(c camera.Camera, fields []string) {
+			report("camera.identity_changed", c.ID, map[string]any{"host": c.Host(), "fields": fields})
+		},
+	})
 }

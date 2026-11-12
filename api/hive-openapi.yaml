@@ -79,8 +79,23 @@ components:
           additionalProperties: { $ref: "#/components/schemas/Stream" }
         enabled: { type: boolean }
         record_audio: { type: boolean, description: "Sound is pulled and recorded only when true (ADR-0015); false by default" }
+        identity:
+          description: "What the camera is, learned by the hive (ADR-0017); owners only, read-only"
+          allOf: [{ $ref: "#/components/schemas/CameraIdentity" }]
+        network:
+          type: string
+          enum: [local, routed]
+          description: "local: in one of the hive's networks, found again after an address change; routed: behind a router, reserve its address. Absent until known."
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    CameraIdentity:
+      type: object
+      properties:
+        mac: { type: string, example: "aa:bb:cc:00:11:22" }
+        onvif_endpoint: { type: string, example: "urn:uuid:5f0c…" }
+        serial: { type: string }
+        manufacturer: { type: string }
+        model: { type: string }
     StreamInput:
       type: object
       required: [url]
@@ -224,7 +239,7 @@ components:
       properties:
         id: { type: integer }
         camera: { type: string }
-        kind: { type: string, enum: [camera.online, camera.offline, storage.low, motion] }
+        kind: { type: string, enum: [camera.online, camera.offline, camera.address_changed, camera.identity_changed, storage.low, motion] }
         at: { type: string, format: date-time }
         data: { type: object }
     CameraPatch:
@@ -234,6 +249,8 @@ components:
         group: { type: string }
         enabled: { type: boolean }
         record_audio: { type: boolean, description: "Pull and record the camera's sound (ADR-0015); off unless the owner switches it on" }
+        host: { type: string, description: "Move the camera to this host or IP, keeping ports and paths (ADR-0017)", example: "192.168.1.23" }
+        replace_identity: { type: boolean, default: false, description: "Accept a device at the new host that is not the known camera (it was replaced)" }
         credentials: { $ref: "#/components/schemas/Credentials" }
   responses:
     Unauthorized:
@@ -290,7 +307,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
     patch:
-      summary: Change name, group, enabled or credentials (owner)
+      summary: Change name, group, enabled, sound, credentials or host (owner)
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: "#/components/schemas/CameraPatch" } } }
@@ -299,6 +316,9 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: "`code: camera_mismatch` — another device answers at the new host; resend with replace_identity if the camera was replaced."
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
         "422":
           description: "Validation failed (`code: invalid`)."
           content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }

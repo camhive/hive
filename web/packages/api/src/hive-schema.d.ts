@@ -176,7 +176,7 @@ export interface paths {
         };
         options?: never;
         head?: never;
-        /** Change name, group, enabled or credentials (owner) */
+        /** Change name, group, enabled, sound, credentials or host (owner) */
         patch: {
             parameters: {
                 query?: never;
@@ -204,6 +204,15 @@ export interface paths {
                 401: components["responses"]["Unauthorized"];
                 403: components["responses"]["Forbidden"];
                 404: components["responses"]["NotFound"];
+                /** @description `code: camera_mismatch` — another device answers at the new host; resend with replace_identity if the camera was replaced. */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
                 /** @description Validation failed (`code: invalid`). */
                 422: {
                     headers: {
@@ -1481,10 +1490,26 @@ export interface components {
             enabled: boolean;
             /** @description Sound is pulled and recorded only when true (ADR-0015); false by default */
             record_audio: boolean;
+            /** @description What the camera is, learned by the hive (ADR-0017); owners only, read-only */
+            identity?: components["schemas"]["CameraIdentity"];
+            /**
+             * @description local: in one of the hive's networks, found again after an address change; routed: behind a router, reserve its address. Absent until known.
+             * @enum {string}
+             */
+            network?: "local" | "routed";
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        CameraIdentity: {
+            /** @example aa:bb:cc:00:11:22 */
+            mac?: string;
+            /** @example urn:uuid:5f0c… */
+            onvif_endpoint?: string;
+            serial?: string;
+            manufacturer?: string;
+            model?: string;
         };
         StreamInput: {
             /** @description rtsp://host[:port]/path without credentials */
@@ -1646,7 +1671,7 @@ export interface components {
             id?: number;
             camera?: string;
             /** @enum {string} */
-            kind?: "camera.online" | "camera.offline" | "storage.low" | "motion";
+            kind?: "camera.online" | "camera.offline" | "camera.address_changed" | "camera.identity_changed" | "storage.low" | "motion";
             /** Format: date-time */
             at?: string;
             data?: Record<string, never>;
@@ -1657,6 +1682,16 @@ export interface components {
             enabled?: boolean;
             /** @description Pull and record the camera's sound (ADR-0015); off unless the owner switches it on */
             record_audio?: boolean;
+            /**
+             * @description Move the camera to this host or IP, keeping ports and paths (ADR-0017)
+             * @example 192.168.1.23
+             */
+            host?: string;
+            /**
+             * @description Accept a device at the new host that is not the known camera (it was replaced)
+             * @default false
+             */
+            replace_identity: boolean;
             credentials?: components["schemas"]["Credentials"];
         };
     };
