@@ -154,6 +154,9 @@ func (c *Config) RTSPURL(cam Camera, s Stream) string {
 	return fmt.Sprintf("rtsp://%s:%d/%s", c.Host, c.RTSPPort, cam.StreamPath(s))
 }
 
+// DeviceServiceURL is the simulator's ONVIF device service address.
+func (c *Config) DeviceServiceURL() string { return c.deviceServiceURL() }
+
 func (c *Config) deviceServiceURL() string {
 	return fmt.Sprintf("http://%s:%d/onvif/device_service", c.Host, c.ONVIFPort)
 }

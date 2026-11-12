@@ -101,7 +101,9 @@ type Camera struct {
 	Credentials Credentials
 	Streams     map[Stream]StreamSpec
 	Enabled     bool
-	RecordAudio bool // ADR-0015: sound is pulled from the camera only when on; off by default
+	RecordAudio bool     // ADR-0015: sound is pulled from the camera only when on; off by default
+	Identity    Identity // ADR-0017: what the camera is, learned by the Hive
+	Network     Network  // ADR-0017: local or routed; empty until known
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }

@@ -19,11 +19,15 @@ type Cameras struct {
 	s *Store
 }
 
-const cameraColumns = `id, name, grp, source_kind, source_addr, username, password_enc, streams_json, enabled, created_at, updated_at, record_audio`
+const cameraColumns = `id, name, grp, source_kind, source_addr, username, password_enc, streams_json, enabled, created_at, updated_at, record_audio, identity_json, network`
 
 // Put inserts or replaces a camera (idempotent on ID).
 func (r *Cameras) Put(ctx context.Context, c camera.Camera) error {
 	streams, err := json.Marshal(c.Streams)
+	if err != nil {
+		return err
+	}
+	identity, err := json.Marshal(c.Identity)
 	if err != nil {
 		return err
 	}
@@ -32,13 +36,15 @@ func (r *Cameras) Put(ctx context.Context, c camera.Camera) error {
 		pw = r.s.seal(c.Credentials.Password)
 	}
 	_, err = r.s.db.ExecContext(ctx, `
-		INSERT INTO camera (`+cameraColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+		INSERT INTO camera (`+cameraColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(id) DO UPDATE SET
 		  name=excluded.name, grp=excluded.grp, source_kind=excluded.source_kind, source_addr=excluded.source_addr,
 		  username=excluded.username, password_enc=excluded.password_enc, streams_json=excluded.streams_json,
-		  enabled=excluded.enabled, updated_at=excluded.updated_at, record_audio=excluded.record_audio`,
+		  enabled=excluded.enabled, updated_at=excluded.updated_at, record_audio=excluded.record_audio,
+		  identity_json=excluded.identity_json, network=excluded.network`,
 		string(c.ID), c.Name, c.Group, string(c.Source.Kind), c.Source.Address, c.Credentials.Username, pw, string(streams),
-		boolInt(c.Enabled), c.CreatedAt.UTC().Format(time.RFC3339Nano), c.UpdatedAt.UTC().Format(time.RFC3339Nano), boolInt(c.RecordAudio))
+		boolInt(c.Enabled), c.CreatedAt.UTC().Format(time.RFC3339Nano), c.UpdatedAt.UTC().Format(time.RFC3339Nano), boolInt(c.RecordAudio),
+		string(identity), string(c.Network))
 	if err != nil {
 		return fmt.Errorf("store: put camera: %w", err)
 	}
@@ -90,9 +96,14 @@ func (r *Cameras) scan(row scanner) (camera.Camera, error) {
 		pw                   []byte
 		enabled, audio       int
 		created, updated     string
+		identityRaw, network string
 	)
-	if err := row.Scan(&id, &c.Name, &c.Group, &kind, &c.Source.Address, &c.Credentials.Username, &pw, &streamsRaw, &enabled, &created, &updated, &audio); err != nil {
+	if err := row.Scan(&id, &c.Name, &c.Group, &kind, &c.Source.Address, &c.Credentials.Username, &pw, &streamsRaw, &enabled, &created, &updated, &audio, &identityRaw, &network); err != nil {
 		return camera.Camera{}, err
+	}
+	c.Network = camera.Network(network)
+	if err := json.Unmarshal([]byte(identityRaw), &c.Identity); err != nil {
+		return camera.Camera{}, fmt.Errorf("store: camera %s identity: %w", id, err)
 	}
 	c.ID, c.Source.Kind, c.Enabled, c.RecordAudio = camera.ID(id), camera.SourceKind(kind), enabled != 0, audio != 0
 	if len(pw) > 0 {
@@ -120,4 +131,27 @@ func boolInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// SetIdentity stores what the hive learned about a camera (ADR-0017) and
+// nothing else.
+func (r *Cameras) SetIdentity(ctx context.Context, id camera.ID, identity camera.Identity, network camera.Network) error {
+	raw, err := json.Marshal(identity)
+	if err != nil {
+		return err
+	}
+	_, err = r.s.db.ExecContext(ctx, `UPDATE camera SET identity_json = ?, network = ? WHERE id = ?`, string(raw), string(network), string(id))
+	return err
+}
+
+// SetAddress stores a camera's new source and stream addresses after it was
+// found at another host (ADR-0017), and nothing else.
+func (r *Cameras) SetAddress(ctx context.Context, c camera.Camera) error {
+	streams, err := json.Marshal(c.Streams)
+	if err != nil {
+		return err
+	}
+	_, err = r.s.db.ExecContext(ctx, `UPDATE camera SET source_addr = ?, streams_json = ?, updated_at = ? WHERE id = ?`,
+		c.Source.Address, string(streams), c.UpdatedAt.UTC().Format(time.RFC3339Nano), string(c.ID))
+	return err
 }

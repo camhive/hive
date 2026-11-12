@@ -18,9 +18,10 @@ type DiscoverOptions struct {
 
 // Discovered is one camera that answered a probe.
 type Discovered struct {
-	XAddr  string // device service address (first XAddr)
-	Name   string // from scope onvif://www.onvif.org/name/<name>, if present
-	Scopes []string
+	XAddr    string // device service address (first XAddr)
+	Endpoint string // EndpointReference address, a stable id such as urn:uuid:…
+	Name     string // from scope onvif://www.onvif.org/name/<name>, if present
+	Scopes   []string
 }
 
 // Discover sends a WS-Discovery Probe for NetworkVideoTransmitter devices and
@@ -87,8 +88,9 @@ func parseProbeMatches(raw []byte, msgID string) []Discovered {
 	var env struct {
 		RelatesTo string `xml:"Header>RelatesTo"`
 		Matches   []struct {
-			Scopes string `xml:"Scopes"`
-			XAddrs string `xml:"XAddrs"`
+			Endpoint string `xml:"EndpointReference>Address"`
+			Scopes   string `xml:"Scopes"`
+			XAddrs   string `xml:"XAddrs"`
 		} `xml:"Body>ProbeMatches>ProbeMatch"`
 	}
 	if err := xml.Unmarshal(raw, &env); err != nil || strings.TrimSpace(env.RelatesTo) != msgID {
@@ -97,7 +99,7 @@ func parseProbeMatches(raw []byte, msgID string) []Discovered {
 	var out []Discovered
 	for _, m := range env.Matches {
 		xaddrs := strings.Fields(m.XAddrs)
-		d := Discovered{Scopes: strings.Fields(m.Scopes)}
+		d := Discovered{Endpoint: strings.TrimSpace(m.Endpoint), Scopes: strings.Fields(m.Scopes)}
 		if len(xaddrs) > 0 {
 			d.XAddr = xaddrs[0]
 		}

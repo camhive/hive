@@ -36,7 +36,7 @@ func startDiscovery(ctx context.Context, cfg *Config, addr string) (*discovery, 
 	if err != nil {
 		return nil, fmt.Errorf("camsim: discovery listen %s: %w", addr, err)
 	}
-	d := &discovery{conn: conn, cfg: cfg, uuid: newUUID()}
+	d := &discovery{conn: conn, cfg: cfg, uuid: cfg.endpointUUID()}
 	go d.serve(ctx)
 	return d, nil
 }
@@ -85,4 +85,11 @@ func newUUID() string {
 	b[6] = (b[6] & 0x0f) | 0x40
 	b[8] = (b[8] & 0x3f) | 0x80
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
+
+// endpointUUID is the simulated device's stable WS-Discovery id: like a real
+// camera's, it stays the same when the device moves to another address
+// (ADR-0017), and like its serial number it follows the ONVIF port.
+func (c Config) endpointUUID() string {
+	return fmt.Sprintf("00000000-0000-4000-8000-%012d", c.ONVIFPort)
 }

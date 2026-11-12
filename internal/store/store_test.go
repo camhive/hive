@@ -70,6 +70,8 @@ func TestCameraRoundTripKeepsEverythingIncludingCredentials(t *testing.T) {
 	ctx := context.Background()
 	in := sample(t, "Front")
 	in.RecordAudio = true
+	in.Identity = camera.Identity{MAC: "aa:bb:cc:00:11:22", ONVIFEndpoint: "urn:uuid:1", Serial: "SN1", Manufacturer: "Acme", Model: "X1"}
+	in.Network = camera.NetworkLocal
 	if err := s.Cameras().Put(ctx, in); err != nil {
 		t.Fatal(err)
 	}
@@ -79,6 +81,9 @@ func TestCameraRoundTripKeepsEverythingIncludingCredentials(t *testing.T) {
 	}
 	if out.ID != in.ID || out.Name != in.Name || out.Group != in.Group || out.Source != in.Source || out.Enabled != in.Enabled || !out.RecordAudio {
 		t.Fatalf("got %+v\nwant %+v", out, in)
+	}
+	if out.Identity != in.Identity || out.Network != camera.NetworkLocal {
+		t.Fatalf("identity = %+v network %q", out.Identity, out.Network)
 	}
 	if out.Credentials != in.Credentials {
 		t.Fatalf("credentials = %+v", out.Credentials)

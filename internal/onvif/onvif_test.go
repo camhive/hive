@@ -171,7 +171,7 @@ func TestDiscoverFindsTheMockByUnicastProbe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(found) != 1 || !strings.Contains(found[0].XAddr, "127.0.0.1:18089/onvif/device_service") || found[0].Name != "camsim" {
+	if len(found) != 1 || !strings.Contains(found[0].XAddr, "127.0.0.1:18089/onvif/device_service") || found[0].Name != "camsim" || !strings.HasPrefix(found[0].Endpoint, "urn:uuid:") {
 		t.Fatalf("found = %+v", found)
 	}
 }
