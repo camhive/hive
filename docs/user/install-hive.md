@@ -123,6 +123,7 @@ With a custom data directory, prefix every command with
 | 16443/tcp | all interfaces | TLS local API for the web app on your network and for the relay |
 | 8889/tcp, 8890/udp | all interfaces | WebRTC live video |
 | 9996, 9997/tcp | localhost only | MediaMTX internals |
+| one free port/tcp, chosen at start | localhost only | Camera streams handed from the hive to MediaMTX |
 
 Open 16443, 8889 and 8890 on the computer's own firewall if it has one. Nothing
 needs to be opened on your router.

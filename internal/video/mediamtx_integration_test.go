@@ -12,6 +12,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bluenviron/gortsplib/v5"
+	"github.com/bluenviron/gortsplib/v5/pkg/description"
+	"github.com/bluenviron/gortsplib/v5/pkg/format"
 	"github.com/pion/webrtc/v4"
 
 	"github.com/camhive/hive/internal/camsim"
@@ -118,6 +121,73 @@ func TestMediaMTXEngineRecordsPlaysBackAndStreamsWebRTC(t *testing.T) {
 	if err := eng.RemoveSource(ctx, "front", video.Main); err != nil {
 		t.Fatalf("second RemoveSource: %v", err)
 	}
+}
+
+// ADR-0015 with H.265: the Hive pulls the camera and publishes video only
+// when audio is off, live and recording work, and nobody else may publish
+// into the engine's loopback RTSP server.
+func TestMediaMTXEnginePullsH265WithoutAudioAndRefusesStrangers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test")
+	}
+	ports := testports.Get(t, 7)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+
+	sim, err := camsim.New(camsim.Config{
+		Host: "127.0.0.1", RTSPPort: ports[0], APIPort: ports[1], ONVIFPort: ports[2],
+		Cameras: []camsim.Camera{{Name: "yard", Codec: camsim.H265, FPS: 10, Audio: true, Main: camsim.Resolution{Width: 640, Height: 360}}},
+		WorkDir: t.TempDir(),
+	}, camsim.WithLogger(log))
+	requireTools(t, err)
+	t.Cleanup(sim.Stop)
+	if err := sim.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	eng, err := video.NewMediaMTX(video.MediaMTXConfig{
+		Host: "127.0.0.1", APIPort: ports[3], PlaybackPort: ports[4], WebRTCPort: ports[5], RTSPPort: ports[6],
+		ArchiveDir: t.TempDir(), SegmentDuration: 3 * time.Second, WorkDir: t.TempDir(),
+	}, video.WithLogger(log))
+	requireTools(t, err)
+	t.Cleanup(func() { _ = eng.Stop() })
+	if err := eng.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	src := video.Source{Camera: "yard", Stream: video.Main, URL: fmt.Sprintf("rtsp://127.0.0.1:%d/yard/main", ports[0])}
+	if err := eng.AddSource(ctx, src); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, ctx, 20*time.Second, func() bool {
+		st, err := eng.Status(ctx, "yard", video.Main)
+		return err == nil && st.Ready && st.BytesReceived > 0
+	}, "H.265 source ready")
+	if st, _ := eng.Status(ctx, "yard", video.Main); len(st.Tracks) != 1 || st.Tracks[0] != "H265" {
+		t.Fatalf("tracks = %v, want [H265] (audio off)", st.Tracks)
+	}
+	if n := whepReceive(t, ctx, eng.WHEPURL("yard", video.Main), 5); n < 5 {
+		t.Fatalf("received %d RTP packets over WebRTC, want >= 5", n)
+	}
+
+	// A stranger on this machine cannot publish into a camera's path.
+	stranger := gortsplib.Client{}
+	desc := &description.Session{Medias: []*description.Media{{Type: description.MediaTypeVideo, Formats: []format.Format{&format.H264{PayloadTyp: 96, PacketizationMode: 1}}}}}
+	for _, u := range []string{
+		fmt.Sprintf("rtsp://127.0.0.1:%d/yard/main", ports[6]),
+		fmt.Sprintf("rtsp://hive:guess@127.0.0.1:%d/yard/main", ports[6]),
+	} {
+		if err := stranger.StartRecording(u, desc); err == nil {
+			stranger.Close()
+			t.Fatalf("publishing to %s was accepted", u)
+		}
+	}
+
+	// A known source whose camera is gone reports not ready, not unknown.
+	sim.Stop()
+	waitFor(t, ctx, 20*time.Second, func() bool {
+		st, err := eng.Status(ctx, "yard", video.Main)
+		return err == nil && !st.Ready
+	}, "not ready (without error) while the camera is gone")
 }
 
 func requireTools(t *testing.T, err error) {

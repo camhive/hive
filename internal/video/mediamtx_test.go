@@ -2,6 +2,8 @@ package video
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -20,13 +22,15 @@ func TestPathNameIsCameraSlashStream(t *testing.T) {
 	}
 }
 
+var testPub = publisher{port: 18554, user: "hive", pass: "0e12"}
+
 func TestBaseYAMLEnablesOnlyWhatTheHiveUses(t *testing.T) {
-	y := testCfg().baseYAML()
+	y := testCfg().baseYAML(testPub)
 	for _, want := range []string{
 		"api: yes", "apiAddress: 127.0.0.1:19997",
 		"playback: yes", "playbackAddress: 127.0.0.1:19996",
 		"webrtc: yes", "webrtcAddress: :18889",
-		"rtsp: no", "rtmp: no", "hls: no", "srt: no", "moq: no",
+		"rtmp: no", "hls: no", "srt: no", "moq: no",
 		"paths: {}",
 	} {
 		if !strings.Contains(y, want) {
@@ -35,16 +39,59 @@ func TestBaseYAMLEnablesOnlyWhatTheHiveUses(t *testing.T) {
 	}
 }
 
+// The Hive publishes camera streams to the engine over RTSP on loopback
+// (ADR-0015). Only the Hive, holding this start's random password, may
+// publish; reading (WHEP) and playback stay open as before and the API stays
+// loopback-only.
+func TestBaseYAMLOpensLoopbackRTSPForTheHiveOnly(t *testing.T) {
+	y := testCfg().baseYAML(testPub)
+	for _, want := range []string{
+		"rtsp: yes\nrtspAddress: 127.0.0.1:18554\nrtspTransports: [tcp]\nrtspEncryption: \"no\"\n",
+		"authMethod: internal\n",
+		"  - user: any\n    pass: \"\"\n    ips: []\n    permissions:\n      - action: read\n      - action: playback\n",
+		"  - user: any\n    pass: \"\"\n    ips: [127.0.0.1, \"::1\"]\n    permissions:\n      - action: api\n",
+		"  - user: \"hive\"\n    pass: \"0e12\"\n    ips: [127.0.0.1, \"::1\"]\n    permissions:\n      - action: publish\n",
+	} {
+		if !strings.Contains(y, want) {
+			t.Errorf("yaml missing %q\n%s", want, y)
+		}
+	}
+	if strings.Count(y, "action: publish") != 1 {
+		t.Errorf("publish must be granted exactly once, to the hive\n%s", y)
+	}
+}
+
+func TestPublisherURLCarriesCredentialsAndPath(t *testing.T) {
+	got := testPub.url("cam_1/main")
+	if got != "rtsp://hive:0e12@127.0.0.1:18554/cam_1/main" {
+		t.Fatalf("url = %s", got)
+	}
+	p, err := newPublisher(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q, _ := newPublisher(0)
+	if p.port == 0 || len(p.pass) < 32 || p.pass == q.pass {
+		t.Fatalf("publisher must get a free port and a fresh random password: %+v %+v", p, q)
+	}
+	if fixed, _ := newPublisher(18555); fixed.port != 18555 {
+		t.Fatalf("configured port ignored: %d", fixed.port)
+	}
+}
+
 func TestPathConfigRecordsFMP4UnderArchiveDirWithoutAutoDelete(t *testing.T) {
 	cfg := testCfg()
-	body := cfg.pathConfig(Source{Camera: "front", Stream: Main, URL: "rtsp://u:p@cam/main"})
+	body := cfg.pathConfig()
+	if strings.Contains(string(body), "rtsp://") {
+		t.Fatalf("camera URL (and its credentials) must not reach the engine: %s", body)
+	}
 	var m map[string]any
 	if err := json.Unmarshal(body, &m); err != nil {
 		t.Fatal(err)
 	}
 	checks := map[string]any{
-		"source":                "rtsp://u:p@cam/main",
-		"sourceOnDemand":        false,
+		"source":                "publisher", // the Hive pulls the camera and publishes (ADR-0015)
+		"overridePublisher":     true,
 		"record":                true,
 		"recordFormat":          "fmp4",
 		"recordSegmentDuration": "10s",
@@ -71,6 +118,15 @@ func TestPlaybackAndWHEPURLs(t *testing.T) {
 	}
 	if got := cfg.WHEPURL("front", Main); got != "http://127.0.0.1:18889/front/main/whep" {
 		t.Fatalf("WHEPURL = %s", got)
+	}
+}
+
+func TestSameSourceComparesEverythingThatNeedsANewPull(t *testing.T) {
+	a := Source{Camera: "front", Stream: Main, URL: "rtsp://cam/main"}
+	b := a
+	b.Audio = true
+	if a == b {
+		t.Fatal("switching audio must count as a different source")
 	}
 }
 
@@ -131,7 +187,7 @@ func TestBaseYAMLRendersICEServersForTURN(t *testing.T) {
 		{URL: "turn:turn.camhive.app:3478", Username: "hive", Password: "s3cret"},
 		{URL: "stun:stun.camhive.app:3478"},
 	}
-	y := cfg.baseYAML()
+	y := cfg.baseYAML(testPub)
 	for _, want := range []string{
 		"webrtcICEServers2:",
 		"  - url: turn:turn.camhive.app:3478\n    username: hive\n    password: s3cret\n",
@@ -141,7 +197,38 @@ func TestBaseYAMLRendersICEServersForTURN(t *testing.T) {
 			t.Errorf("yaml missing %q\n%s", want, y)
 		}
 	}
-	if strings.Contains(testCfg().baseYAML(), "webrtcICEServers2:\n  -") {
+	if strings.Contains(testCfg().baseYAML(testPub), "webrtcICEServers2:\n  -") {
 		t.Error("no ICE servers configured must render none")
+	}
+}
+
+func TestWriteConfigCreatesDirectoriesAndRejectsUnusableOnes(t *testing.T) {
+	m := &MediaMTX{MediaMTXConfig: testCfg()}
+	m.ArchiveDir = filepath.Join(t.TempDir(), "archive")
+	path, pub, err := m.writeConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(m.WorkDir) })
+	y, _ := os.ReadFile(path) //nolint:gosec // test temp dir
+	if pub.pass == "" || !strings.Contains(string(y), pub.pass) {
+		t.Fatalf("config at %s does not carry this start's publisher", path)
+	}
+	if _, err := os.Stat(m.ArchiveDir); err != nil {
+		t.Fatalf("archive dir not created: %v", err)
+	}
+
+	file := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	bad := &MediaMTX{MediaMTXConfig: testCfg()}
+	bad.WorkDir = filepath.Join(file, "work")
+	if _, _, err := bad.writeConfig(); err == nil {
+		t.Error("a work dir under a file must fail")
+	}
+	bad.WorkDir, bad.ArchiveDir = t.TempDir(), filepath.Join(file, "archive")
+	if _, _, err := bad.writeConfig(); err == nil {
+		t.Error("an archive dir under a file must fail")
 	}
 }

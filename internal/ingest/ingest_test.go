@@ -81,6 +81,11 @@ func (f *fakeEngine) keys() []string {
 	sort.Strings(out)
 	return out
 }
+func (f *fakeEngine) source(key string) video.Source {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.sources[key]
+}
 func (f *fakeEngine) startCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -174,6 +179,32 @@ func TestReconcileSkipsCamerasWithoutStreamsAndIsIdempotent(t *testing.T) {
 	}
 	if got := eng.keys(); len(got) != 1 {
 		t.Fatalf("sources = %v, want one (x/main)", got)
+	}
+}
+
+// ADR-0015: the camera's audio setting reaches the engine, and switching it
+// re-adds the source so the pull restarts with the new set of media.
+func TestReconcileCarriesRecordAudioAndReaddsWhenItChanges(t *testing.T) {
+	eng := newFakeEngine()
+	st := &memStore{}
+	c := cam(t, "a", true, false)
+	st.set(c)
+	ing := ingest.New(st, eng, ingest.Options{})
+	if err := ing.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	key := string(c.ID) + "/main"
+	if eng.source(key).Audio {
+		t.Fatal("audio must be off by default")
+	}
+	on := true
+	c, _ = c.Update(camera.Patch{RecordAudio: &on}, time.Now())
+	st.set(c)
+	if err := ing.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !eng.source(key).Audio {
+		t.Fatal("switching record_audio on must re-add the source with audio")
 	}
 }
 

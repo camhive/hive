@@ -3,6 +3,8 @@ package video
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +21,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/camhive/hive/internal/pull"
 )
 
 // MediaMTXConfig configures the MediaMTX-backed engine.
@@ -27,6 +31,7 @@ type MediaMTXConfig struct {
 	APIPort         int    // MediaMTX control API; default 9997
 	PlaybackPort    int    // archive playback server; default 9996
 	WebRTCPort      int    // WHEP endpoint; default 8889
+	RTSPPort        int    // loopback RTSP port the Hive publishes camera streams to; a free one at every Start when 0
 	ArchiveDir      string // where fMP4 segments are written (required)
 	SegmentDuration time.Duration
 	WorkDir         string // generated config and logs; temp dir when empty
@@ -75,9 +80,49 @@ func pathName(cam CameraID, s Stream) string {
 	return string(cam) + "/" + string(s)
 }
 
+// publisher is how the Hive reaches the engine's loopback RTSP server to
+// publish camera streams (ADR-0015). The password is random per engine
+// start, so other local users cannot publish into a camera's path.
+type publisher struct {
+	port       int
+	user, pass string
+}
+
+// newPublisher returns credentials for one engine start, on port or, when
+// port is 0, on a free loopback port.
+func newPublisher(port int) (publisher, error) {
+	if port == 0 {
+		var err error
+		if port, err = freeLoopbackPort(); err != nil {
+			return publisher{}, fmt.Errorf("video: rtsp port: %w", err)
+		}
+	}
+	secret := make([]byte, 24)
+	if _, err := rand.Read(secret); err != nil {
+		return publisher{}, err
+	}
+	return publisher{port: port, user: "hive", pass: hex.EncodeToString(secret)}, nil
+}
+
+// url is where the Hive publishes one engine path.
+func (p publisher) url(path string) string {
+	u := url.URL{Scheme: "rtsp", User: url.UserPassword(p.user, p.pass), Host: net.JoinHostPort("127.0.0.1", strconv.Itoa(p.port)), Path: "/" + path}
+	return u.String()
+}
+
+func freeLoopbackPort() (int, error) {
+	lc := net.ListenConfig{}
+	ln, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = ln.Close() }()
+	return ln.Addr().(*net.TCPAddr).Port, nil
+}
+
 // baseYAML is the static server configuration; paths are added at runtime
 // through the API so sources can change without a restart.
-func (c MediaMTXConfig) baseYAML() string {
+func (c MediaMTXConfig) baseYAML(pub publisher) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "logLevel: warn\napi: yes\napiAddress: %s:%d\n", c.Host, c.APIPort)
 	fmt.Fprintf(&b, "playback: yes\nplaybackAddress: %s:%d\n", c.Host, c.PlaybackPort)
@@ -91,21 +136,35 @@ func (c MediaMTXConfig) baseYAML() string {
 			}
 		}
 	}
-	b.WriteString("rtsp: no\nrtmp: no\nhls: no\nsrt: no\nmoq: no\nmetrics: no\npprof: no\n")
+	fmt.Fprintf(&b, "rtsp: yes\nrtspAddress: 127.0.0.1:%d\nrtspTransports: [tcp]\nrtspEncryption: \"no\"\n", pub.port)
+	b.WriteString("rtmp: no\nhls: no\nsrt: no\nmoq: no\nmetrics: no\npprof: no\n")
+	writeAuth(&b, pub)
 	b.WriteString("paths: {}\n")
 	return b.String()
 }
 
-// pathConfig is the per-source MediaMTX path configuration: pull the RTSP
-// source permanently and record fMP4 segments under ArchiveDir. Deletion is
-// disabled; retention belongs to the Hive.
-func (c MediaMTXConfig) pathConfig(src Source) []byte {
+// writeAuth renders MediaMTX's defaults minus publishing for anyone: anyone
+// may read (WHEP) and play back as before, the API answers loopback only,
+// and only the Hive may publish.
+func writeAuth(b *strings.Builder, pub publisher) {
+	const loopback = "    ips: [127.0.0.1, \"::1\"]\n"
+	b.WriteString("authMethod: internal\nauthInternalUsers:\n")
+	b.WriteString("  - user: any\n    pass: \"\"\n    ips: []\n    permissions:\n      - action: read\n      - action: playback\n")
+	b.WriteString("  - user: any\n    pass: \"\"\n" + loopback + "    permissions:\n      - action: api\n")
+	fmt.Fprintf(b, "  - user: %q\n    pass: %q\n"+loopback+"    permissions:\n      - action: publish\n", pub.user, pub.pass)
+}
+
+// pathConfig is the per-source MediaMTX path configuration: the Hive
+// publishes the camera stream (ADR-0015) and the engine records fMP4
+// segments under ArchiveDir. Deletion is disabled; retention belongs to the
+// Hive.
+func (c MediaMTXConfig) pathConfig() []byte {
 	// %z carries the UTC offset: MediaMTX formats the name in local time and
 	// the archive index must recover the instant exactly (ADR-0009).
 	recordPath := filepath.ToSlash(filepath.Join(c.ArchiveDir, "%path", "%Y-%m-%d_%H-%M-%S-%f_%z"))
 	body, _ := json.Marshal(map[string]any{
-		"source":                src.URL,
-		"sourceOnDemand":        false,
+		"source":                "publisher",
+		"overridePublisher":     true,
 		"record":                true,
 		"recordPath":            recordPath,
 		"recordFormat":          "fmp4",
@@ -180,6 +239,22 @@ type MediaMTX struct {
 	cmd    *exec.Cmd
 	cancel context.CancelFunc
 	exited chan struct{} // closed when the current process has exited
+	pub    publisher     // this start's loopback RTSP credentials
+
+	pullsMu sync.Mutex
+	pulls   map[string]*pullHandle // by path name
+}
+
+// pullHandle is one running camera pull (internal/pull).
+type pullHandle struct {
+	src    Source
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
+func (h *pullHandle) stop() {
+	h.cancel()
+	<-h.done
 }
 
 // Option customises a MediaMTX engine.
@@ -203,7 +278,7 @@ func NewMediaMTX(cfg MediaMTXConfig, opts ...Option) (*MediaMTX, error) {
 	} else if _, err := os.Stat(cfg.Binary); err != nil {
 		return nil, fmt.Errorf("%w: %s: %w", ErrMissingTool, cfg.Binary, err)
 	}
-	m := &MediaMTX{MediaMTXConfig: cfg, log: slog.New(slog.DiscardHandler), client: &http.Client{Timeout: 5 * time.Second}}
+	m := &MediaMTX{MediaMTXConfig: cfg, log: slog.New(slog.DiscardHandler), client: &http.Client{Timeout: 5 * time.Second}, pulls: map[string]*pullHandle{}}
 	for _, o := range opts {
 		o(m)
 	}
@@ -217,20 +292,8 @@ func (m *MediaMTX) Start(ctx context.Context) error {
 	if m.cmd != nil {
 		return nil
 	}
-	if m.WorkDir == "" {
-		dir, err := os.MkdirTemp("", "camhive-video-")
-		if err != nil {
-			return err
-		}
-		m.WorkDir = dir
-	} else if err := os.MkdirAll(m.WorkDir, 0o750); err != nil {
-		return fmt.Errorf("video: workdir: %w", err)
-	}
-	if err := os.MkdirAll(m.ArchiveDir, 0o750); err != nil {
-		return fmt.Errorf("video: archive dir: %w", err)
-	}
-	confPath := filepath.Join(m.WorkDir, "mediamtx.yml")
-	if err := os.WriteFile(confPath, []byte(m.baseYAML()), 0o600); err != nil {
+	confPath, pub, err := m.writeConfig()
+	if err != nil {
 		return err
 	}
 	logFile, err := os.Create(filepath.Join(m.WorkDir, "mediamtx.log")) //nolint:gosec // WorkDir is ours
@@ -248,7 +311,7 @@ func (m *MediaMTX) Start(ctx context.Context) error {
 		return fmt.Errorf("video: start mediamtx: %w", err)
 	}
 	exited := make(chan struct{})
-	m.cmd, m.cancel, m.exited = cmd, cancel, exited
+	m.cmd, m.cancel, m.exited, m.pub = cmd, cancel, exited, pub
 	m.log.Info("mediamtx started", "pid", cmd.Process.Pid, "config", confPath)
 	go func() {
 		err := cmd.Wait()
@@ -261,6 +324,29 @@ func (m *MediaMTX) Start(ctx context.Context) error {
 		return fmt.Errorf("video: mediamtx API did not come up: %w", err)
 	}
 	return nil
+}
+
+// writeConfig prepares the work and archive directories and writes this
+// start's configuration with fresh publisher credentials.
+func (m *MediaMTX) writeConfig() (string, publisher, error) {
+	if m.WorkDir == "" {
+		dir, err := os.MkdirTemp("", "camhive-video-")
+		if err != nil {
+			return "", publisher{}, err
+		}
+		m.WorkDir = dir
+	} else if err := os.MkdirAll(m.WorkDir, 0o750); err != nil {
+		return "", publisher{}, fmt.Errorf("video: workdir: %w", err)
+	}
+	if err := os.MkdirAll(m.ArchiveDir, 0o750); err != nil {
+		return "", publisher{}, fmt.Errorf("video: archive dir: %w", err)
+	}
+	pub, err := newPublisher(m.RTSPPort)
+	if err != nil {
+		return "", publisher{}, err
+	}
+	confPath := filepath.Join(m.WorkDir, "mediamtx.yml")
+	return confPath, pub, os.WriteFile(confPath, []byte(m.baseYAML(pub)), 0o600)
 }
 
 // Exited returns a channel closed when the current MediaMTX process exits
@@ -286,8 +372,10 @@ func (m *MediaMTX) PID() int {
 	return m.cmd.Process.Pid
 }
 
-// Stop implements Engine.
+// Stop implements Engine: camera pulls end with the process; a restarted
+// engine gets its sources again through AddSource.
 func (m *MediaMTX) Stop() error {
+	m.stopPulls()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.cmd == nil {
@@ -301,10 +389,21 @@ func (m *MediaMTX) Stop() error {
 	return nil
 }
 
-// AddSource implements Engine: add, or replace when the path already exists.
+// AddSource implements Engine: add the path, or replace it when it exists,
+// and pull the camera into it. A changed source (URL, audio) restarts the
+// pull; the same source again leaves it running.
 func (m *MediaMTX) AddSource(ctx context.Context, src Source) error {
-	body := m.pathConfig(src)
 	name := pathName(src.Camera, src.Stream)
+	if err := m.putPath(ctx, name); err != nil {
+		return err
+	}
+	m.startPull(name, src)
+	return nil
+}
+
+// putPath creates or replaces an engine path that waits for a publisher.
+func (m *MediaMTX) putPath(ctx context.Context, name string) error {
+	body := m.pathConfig()
 	status, resp, err := m.api(ctx, http.MethodPost, "/v3/config/paths/add/"+name, body)
 	if err != nil {
 		return err
@@ -321,8 +420,63 @@ func (m *MediaMTX) AddSource(ctx context.Context, src Source) error {
 	return nil
 }
 
+// startPull runs the camera pull for a path unless the same source is
+// already being pulled.
+func (m *MediaMTX) startPull(name string, src Source) {
+	m.mu.Lock()
+	target := m.pub.url(name)
+	m.mu.Unlock()
+
+	m.pullsMu.Lock()
+	defer m.pullsMu.Unlock()
+	if h, ok := m.pulls[name]; ok {
+		if h.src == src {
+			return
+		}
+		h.stop()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	h := &pullHandle{src: src, cancel: cancel, done: make(chan struct{})}
+	m.pulls[name] = h
+	go func() {
+		defer close(h.done)
+		pull.Run(ctx, pull.Config{Source: src.URL, Target: target, Audio: src.Audio,
+			Logger: m.log.With("camera", src.Camera, "stream", src.Stream)})
+	}()
+}
+
+// stopPull ends a path's pull; it reports whether there was one.
+func (m *MediaMTX) stopPull(name string) bool {
+	m.pullsMu.Lock()
+	defer m.pullsMu.Unlock()
+	h, ok := m.pulls[name]
+	if ok {
+		h.stop()
+		delete(m.pulls, name)
+	}
+	return ok
+}
+
+func (m *MediaMTX) stopPulls() {
+	m.pullsMu.Lock()
+	defer m.pullsMu.Unlock()
+	for name, h := range m.pulls {
+		h.stop()
+		delete(m.pulls, name)
+	}
+}
+
+// pulling reports whether the Hive pulls a camera into the path.
+func (m *MediaMTX) pulling(name string) bool {
+	m.pullsMu.Lock()
+	defer m.pullsMu.Unlock()
+	_, ok := m.pulls[name]
+	return ok
+}
+
 // RemoveSource implements Engine.
 func (m *MediaMTX) RemoveSource(ctx context.Context, cam CameraID, s Stream) error {
+	m.stopPull(pathName(cam, s))
 	status, resp, err := m.api(ctx, http.MethodDelete, "/v3/config/paths/delete/"+pathName(cam, s), nil)
 	if err != nil {
 		return err
@@ -333,13 +487,19 @@ func (m *MediaMTX) RemoveSource(ctx context.Context, cam CameraID, s Stream) err
 	return nil
 }
 
-// Status implements Engine.
+// Status implements Engine. A source whose camera is not publishing (yet)
+// has no engine path; it reports not ready, as an unreachable camera did
+// when the engine pulled it itself.
 func (m *MediaMTX) Status(ctx context.Context, cam CameraID, s Stream) (Status, error) {
-	status, resp, err := m.api(ctx, http.MethodGet, "/v3/paths/get/"+pathName(cam, s), nil)
+	name := pathName(cam, s)
+	status, resp, err := m.api(ctx, http.MethodGet, "/v3/paths/get/"+name, nil)
 	if err != nil {
 		return Status{}, err
 	}
 	if status == http.StatusNotFound {
+		if m.pulling(name) {
+			return Status{}, nil
+		}
 		return Status{}, ErrNotFound
 	}
 	if status != http.StatusOK {

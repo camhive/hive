@@ -27,6 +27,7 @@ type Source struct {
 	Camera CameraID
 	Stream Stream
 	URL    string // rtsp://[user:pass@]host[:port]/path
+	Audio  bool   // also take the camera's audio; off means the camera is never asked for it (ADR-0015)
 }
 
 // Status is the live state of a source as seen by the engine.

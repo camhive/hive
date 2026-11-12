@@ -1,5 +1,6 @@
 // Package ingest keeps the video engine in step with the camera store: every
-// enabled camera's streams are engine sources, nothing else is. It also
+// enabled camera's streams are engine sources, nothing else is. A source
+// carries the camera's audio setting; changing it re-adds the source. It also
 // supervises the engine process, restarting it and re-adding sources when it
 // dies. Reconcile is idempotent and runs periodically, on demand (Notify)
 // and after an engine restart.
@@ -113,7 +114,8 @@ func (i *Ingest) Reconcile(ctx context.Context) error {
 }
 
 // desiredSources maps enabled cameras with known streams to engine sources,
-// with credentials placed in the URL as the engine's RTSP client expects.
+// with credentials placed in the URL for the RTSP client that pulls them and
+// the camera's audio setting (ADR-0015).
 func desiredSources(cams []camera.Camera) map[sourceKey]video.Source {
 	out := map[sourceKey]video.Source{}
 	for _, c := range cams {
@@ -125,7 +127,7 @@ func desiredSources(cams []camera.Camera) map[sourceKey]video.Source {
 				continue
 			}
 			key := sourceKey{cam: video.CameraID(c.ID), stream: video.Stream(name)}
-			out[key] = video.Source{Camera: key.cam, Stream: key.stream, URL: withCredentials(s.URL, c.Credentials)}
+			out[key] = video.Source{Camera: key.cam, Stream: key.stream, URL: withCredentials(s.URL, c.Credentials), Audio: c.RecordAudio}
 		}
 	}
 	return out
