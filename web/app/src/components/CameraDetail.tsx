@@ -7,7 +7,7 @@ import { transport } from "@/lib/transport";
 import { errorMessage } from "@/lib/errors";
 import { streamFor } from "@/lib/reconnect";
 import type { PeerFactory, Signalling } from "@/lib/live";
-import { coverage, dayKey, dayStart, exportCapMinutes, nextRecorded, recordedAt, useCalendar, useEvents, useExports, useTimeline, type ExportJob, type StreamName } from "@/lib/archive";
+import { activityRuns, coverage, dayKey, dayStart, exportCapMinutes, nextRecorded, recordedAt, useCalendar, useEvents, useExports, useTimeline, type ExportJob, type StreamName } from "@/lib/archive";
 import { ArchivePlayer, DEFAULT_WINDOW_S, type PlayerDeps } from "@/lib/archivePlayer";
 import { LiveTile } from "@/components/LiveTile";
 import { PtzPad } from "@/components/PtzPad";
@@ -48,6 +48,7 @@ export function CameraDetail({ hive, grant, quality, client, camera, health, sig
   const timeline = useTimeline(client, camera.id, stream, day);
   const events = useEvents(client, camera.id, day);
   const ranges = useMemo(() => coverage(timeline.data ?? [], dayStart(day)), [timeline.data, day]);
+  const activity = useMemo(() => activityRuns(timeline.data ?? [], dayStart(day)), [timeline.data, day]);
   const [position, setPosition] = useState<Date | null>(null);
   const [playError, setPlayError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -151,7 +152,7 @@ export function CameraDetail({ hive, grant, quality, client, camera, health, sig
         </div>
       </div>
       {calendar.data && days.length === 0 && <p className="muted text-sm">{t("archive.noFootage")}</p>}
-      <Timeline day={day} ranges={ranges} events={(events.data ?? []).map((e) => Date.parse(e.at ?? ""))} position={live ? (day === today ? new Date() : null) : position} onSeek={(at) => void seek(at)} />
+      <Timeline day={day} ranges={ranges} events={(events.data ?? []).map((e) => Date.parse(e.at ?? ""))} position={live ? (day === today ? new Date() : null) : position} onSeek={(at) => void seek(at)} activity={activity} />
 
       {operator && client && (
         <div aria-label={t("archive.export")} role="region">

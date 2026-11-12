@@ -248,6 +248,8 @@
   "archive": {
     "stream": "Stream",
     "calendar": "Days with footage",
+    "activity": "activity",
+    "soundLevel": "sound level",
     "noFootage": "No recordings yet.",
     "timeline": "Timeline",
     "noFootageHere": "Nothing recorded at this time; pick a highlighted part of the bar.",

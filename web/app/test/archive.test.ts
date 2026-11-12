@@ -1,9 +1,29 @@
 import { describe, expect, it } from "vitest";
-import { DAY_MS, clock, coverage, dayKey, dayStart, exportCapMinutes, nextRecorded, recordedAt, ticks, timeAt, zoomWindow } from "../src/lib/archive";
+import { DAY_MS, activityRuns, clock, coverage, dayKey, dayStart, exportCapMinutes, nextRecorded, recordedAt, ticks, timeAt, zoomWindow } from "../src/lib/archive";
 import { mimeFor, playPath } from "../src/lib/archivePlayer";
 
 const day = dayStart("2026-11-09");
 const at = (h: number, m = 0) => new Date(day.getTime() + (h * 60 + m) * 60_000).toISOString();
+
+describe("activity on the timeline (ADR-0015)", () => {
+  it("turns segment profiles into runs of points scaled 0..1, one run per segment", () => {
+    const runs = activityRuns([
+      { start: at(10), duration_ms: 30_000, activity: { step_s: 10, video_kbps: [100, 400, 0], sound_db: [-90, -30, 0] } },
+      { start: at(11), duration_ms: 20_000, activity: { step_s: 10, video_kbps: [200, 200] } }, // no audio recorded
+      { start: at(12), duration_ms: 600_000 }, // not profiled yet
+      { start: new Date(day.getTime() - 60_000).toISOString(), duration_ms: 30_000, activity: { step_s: 10, video_kbps: [9999] } }, // yesterday
+    ], day);
+    const t0 = Date.parse(at(10));
+    // Points sit in the middle of their 10 s; video is scaled to the day's busiest value.
+    expect(runs.video).toEqual([
+      [{ at: t0 + 5_000, v: 0.25 }, { at: t0 + 15_000, v: 1 }, { at: t0 + 25_000, v: 0 }],
+      [{ at: Date.parse(at(11)) + 5_000, v: 0.5 }, { at: Date.parse(at(11)) + 15_000, v: 0.5 }],
+    ]);
+    // Sound from -60 dBFS (quiet room) to 0 dBFS; silence and quieter sit at 0.
+    expect(runs.sound).toEqual([[{ at: t0 + 5_000, v: 0 }, { at: t0 + 15_000, v: 0.5 }, { at: t0 + 25_000, v: 1 }]]);
+    expect(activityRuns([], day)).toEqual({ video: [], sound: [] });
+  });
+});
 
 describe("timeline math", () => {
   it("builds a zoom window inside the day and ruler ticks that scale with it", () => {

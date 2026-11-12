@@ -48,7 +48,9 @@ archive page. It starts live, and the timeline below shows today.
    Playback in the browser is silent: cameras send audio in formats browsers
    cannot play, so the hive sends the video only. Exports keep the sound.
 3. The **timeline** shows the day: recorded spans as blocks, camera events
-   (online/offline) as marks, and the playhead with its time. Hover to read the
+   (online/offline) as marks, an *activity* wave (how much the picture
+   changed; a hint, not motion detection) and, for cameras that record sound,
+   a *sound level* line, and the playhead with its time. Hover to read the
    time under the cursor; click to seek. Zoom buttons switch between the whole
    day, 6 hours and 1 hour around the playhead; the ruler labels adapt. Arrow
    keys step a minute, with Shift ten minutes.

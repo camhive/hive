@@ -29,7 +29,7 @@ function stub(opts: { exportMax: number }) {
         case "GET /healthz": return json(200, {});
         case "GET /v0/cameras": return json(200, [{ id: "cam_1", name: "Door", group: "", enabled: true, source: { kind: "rtsp", address: "" }, streams: { main: { Codec: "H264" } }, created_at: "", updated_at: "" }]);
         case "GET /v0/cameras/cam_1/archive/calendar": return json(200, [{ day: "2026-11-08" }, { day: "2026-11-09" }]);
-        case "GET /v0/cameras/cam_1/archive/timeline": return json(200, [{ start: at(8), duration_ms: 3_600_000, bytes: 1, complete: true }, { start: at(20), duration_ms: 600_000, bytes: 1, complete: false }]);
+        case "GET /v0/cameras/cam_1/archive/timeline": return json(200, [{ start: at(8), duration_ms: 3_600_000, bytes: 1, complete: true, activity: { step_s: 10, video_kbps: [100, 900, 300], sound_db: [-90, -20, -40] } }, { start: at(20), duration_ms: 600_000, bytes: 1, complete: false }]);
         case "GET /v0/cameras/cam_1/events": return json(200, [{ id: 1, kind: "motion", at: at(8, 15), camera: "cam_1", data: {} }]);
         case "GET /v0/cameras/cam_1/archive/play": return new Response(new Uint8Array([0, 0, 0, 1]), { status: 200, headers: { "Content-Type": "video/mp4" } });
         case "POST /v0/cameras/cam_1/exports": {
@@ -81,6 +81,10 @@ describe("archive on the hive page", () => {
     const timeline = await screen.findByTestId("timeline");
     await waitFor(() => expect(within(timeline).getAllByTestId("segment")).toHaveLength(2));
     expect(within(timeline).getAllByTestId("event")).toHaveLength(1);
+    // ADR-0015: the profiled segment draws an activity wave and a sound line; the other has none.
+    expect(within(timeline).getAllByTestId("activity-video")).toHaveLength(1);
+    expect(within(timeline).getAllByTestId("activity-sound")).toHaveLength(1);
+    expect(screen.getByTestId("activity-legend")).toHaveTextContent("activitysound level");
 
     // Clicking at 08:30 (fraction 8.5/24) plays from that minute; the window stops at the segment end.
     vi.spyOn(timeline, "getBoundingClientRect").mockReturnValue({ left: 0, width: 240, top: 0, height: 32, right: 240, bottom: 32, x: 0, y: 0, toJSON: () => ({}) });

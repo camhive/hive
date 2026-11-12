@@ -248,6 +248,8 @@
   "archive": {
     "stream": "Stream",
     "calendar": "Tage mit Aufnahmen",
+    "activity": "Aktivität",
+    "soundLevel": "Lautstärke",
     "noFootage": "Noch keine Aufnahmen.",
     "timeline": "Zeitleiste",
     "noFootageHere": "Zu dieser Zeit gibt es keine Aufnahme; wählen Sie einen markierten Bereich der Leiste.",

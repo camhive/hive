@@ -49,6 +49,38 @@ export function coverage(segments: Segment[], day: Date): Array<[number, number]
   return out;
 }
 
+/** A value of a segment's activity profile placed in time, scaled 0..1. */
+export type ActivityPoint = { at: number; v: number };
+
+/** Quietest sound the timeline shows above its baseline, in dBFS. */
+const SOUND_FLOOR_DB = -60;
+
+/**
+ * The day's activity profiles (ADR-0015) as runs of points, one run per
+ * segment so gaps stay gaps. Video is scaled to the day's busiest value
+ * (a hint of movement, relative to this camera); sound from SOUND_FLOOR_DB
+ * to 0 dBFS. Points sit in the middle of their step.
+ */
+export function activityRuns(segments: Segment[], day: Date): { video: ActivityPoint[][]; sound: ActivityPoint[][] } {
+  const d0 = day.getTime();
+  const d1 = d0 + DAY_MS;
+  const shown = segments.filter((s) => {
+    const a = Date.parse(s.start ?? "");
+    return s.activity && Number.isFinite(a) && a + (s.duration_ms ?? 0) > d0 && a < d1;
+  });
+  const busiest = Math.max(1, ...shown.flatMap((s) => s.activity!.video_kbps));
+  const run = (s: Segment, values: number[], scale: (x: number) => number) => {
+    const t = Date.parse(s.start!);
+    const step = s.activity!.step_s * 1000;
+    return values.map((x, k) => ({ at: t + k * step + step / 2, v: scale(x) })).filter((p) => p.at >= d0 && p.at < d1);
+  };
+  const clamp = (x: number) => Math.min(1, Math.max(0, x));
+  return {
+    video: shown.map((s) => run(s, s.activity!.video_kbps, (x) => clamp(x / busiest))),
+    sound: shown.filter((s) => s.activity!.sound_db).map((s) => run(s, s.activity!.sound_db!, (db) => clamp((db - SOUND_FLOOR_DB) / -SOUND_FLOOR_DB))),
+  };
+}
+
 /** Fraction of the day (0..1) → absolute time. */
 export function timeAt(day: Date, fraction: number): Date {
   return new Date(day.getTime() + Math.min(1, Math.max(0, fraction)) * DAY_MS);
