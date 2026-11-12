@@ -109,6 +109,11 @@ func writeBundle(dst, tag string) error {
 
 func supervisor(t *testing.T, hives *fakeHives, src *fakeSource) (*update.Supervisor, *update.Versions, func() []string) {
 	t.Helper()
+	return supervisorWith(t, hives, src, nil)
+}
+
+func supervisorWith(t *testing.T, hives *fakeHives, src update.Channel, with func(*update.SupervisorConfig)) (*update.Supervisor, *update.Versions, func() []string) {
+	t.Helper()
 	dir := t.TempDir()
 	vs := update.OpenVersions(dir)
 	seed := t.TempDir()
@@ -121,12 +126,16 @@ func supervisor(t *testing.T, hives *fakeHives, src *fakeSource) (*update.Superv
 	var events []string
 	var mu sync.Mutex
 	w, _ := update.ParseWindow("00:00-23:59")
-	s := update.NewSupervisor(update.SupervisorConfig{
+	cfg := update.SupervisorConfig{
 		Versions: vs, Runner: hives, Health: hives.Health, Source: src,
 		Hive: "hv_1", Updater: v(t, "0.1.4"), Window: w, Mode: update.Automatic,
 		CheckEvery: time.Hour, HealthTimeout: 300 * time.Millisecond, Poll: 10 * time.Millisecond, Restart: 10 * time.Millisecond,
 		Report: func(kind string, data map[string]any) { mu.Lock(); events = append(events, kind); mu.Unlock() },
-	})
+	}
+	if with != nil {
+		with(&cfg)
+	}
+	s := update.NewSupervisor(cfg)
 	return s, vs, func() []string { mu.Lock(); defer mu.Unlock(); return append([]string(nil), events...) }
 }
 

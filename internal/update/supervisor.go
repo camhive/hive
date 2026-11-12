@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"time"
 )
 
@@ -52,6 +51,10 @@ type SupervisorConfig struct {
 	Report        func(kind string, data map[string]any)
 	Logger        *slog.Logger
 	Now           func() time.Time
+	// NotBefore: no update check while the clock reads earlier (the
+	// updater's build time). A clock in the past would accept expired
+	// metadata (security review).
+	NotBefore time.Time
 }
 
 // Supervisor runs the current Hive version, restarts it when it dies, and
@@ -152,6 +155,17 @@ func (s *Supervisor) start(ctx context.Context) {
 		s.exited <- exit{gen: gen, err: err}
 		return
 	}
+	if err := s.cfg.Versions.Verify(cur); err != nil {
+		// Never run a bundle that changed since it was installed; go back.
+		s.cfg.Logger.Error("refusing to start a changed bundle", "version", cur, "err", err)
+		s.cfg.Report("update.integrity_failed", map[string]any{"version": cur.String()})
+		if prev, rerr := s.cfg.Versions.Rollback(); rerr == nil && s.cfg.Versions.Verify(prev) == nil {
+			cur = prev
+		} else {
+			s.exited <- exit{gen: gen, err: err}
+			return
+		}
+	}
 	p, err := s.cfg.Runner.Start(ctx, cur, s.cfg.Versions.File(cur, BundleFiles[0]))
 	if err != nil {
 		s.exited <- exit{gen: gen, err: err}
@@ -176,6 +190,10 @@ func (s *Supervisor) restart(ctx context.Context) {
 
 // check asks the channel and installs what the policy says to.
 func (s *Supervisor) check(ctx context.Context) {
+	if now := s.cfg.Now(); now.Before(s.cfg.NotBefore) {
+		s.cfg.Logger.Warn("update check skipped: the clock reads earlier than this updater was built", "now", now, "built", s.cfg.NotBefore)
+		return
+	}
 	target, err := s.cfg.Source.Check(ctx)
 	if err != nil {
 		s.cfg.Logger.Info("update check", "err", err)
@@ -196,7 +214,11 @@ func (s *Supervisor) check(ctx context.Context) {
 // install downloads, switches, and keeps the new version only when it is
 // healthy in time; otherwise it rolls back and marks the version failed.
 func (s *Supervisor) install(ctx context.Context, from Version, t Target) {
-	tmp := filepath.Join(s.cfg.Versions.dir, "download")
+	tmp, err := os.MkdirTemp(s.cfg.Versions.dir, "download-") // fresh, never a path someone prepared
+	if err != nil {
+		s.cfg.Logger.Warn("update download", "err", err)
+		return
+	}
 	defer func() { _ = os.RemoveAll(tmp) }()
 	if err := s.cfg.Source.Fetch(ctx, tmp); err != nil {
 		s.cfg.Logger.Warn("update download", "version", t.Version, "err", err)

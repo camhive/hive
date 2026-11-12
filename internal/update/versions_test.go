@@ -65,9 +65,13 @@ func TestSeedSelectsThePackageUnlessANewerVersionRuns(t *testing.T) {
 	if cur, _ := s.Current(); cur.String() != "0.1.6" {
 		t.Fatalf("an older package downgraded: %v", cur)
 	}
-	// Seeding the same version again changes nothing.
-	if err := s.Seed(v(t, "0.1.6"), bundleDir(t, "other")); err != nil || !strings.HasPrefix(read(t, s.File(v(t, "0.1.6"), update.BundleFiles[0])), "pkg6") {
+	// Seeding the same version again copies the package's files again: the
+	// store follows the package, it never trusts what it already holds.
+	if err := s.Seed(v(t, "0.1.6"), bundleDir(t, "repkg6")); err != nil || !strings.HasPrefix(read(t, s.File(v(t, "0.1.6"), update.BundleFiles[0])), "repkg6") {
 		t.Fatalf("re-seed: %v", err)
+	}
+	if cur, _ := s.Current(); cur.String() != "0.1.6" || s.Verify(cur) != nil {
+		t.Fatalf("after re-seed: %v", cur)
 	}
 }
 

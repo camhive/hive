@@ -14,11 +14,11 @@ import (
 // reportUpdates hands what hive-updater did (ADR-0018 §7) to the action log
 // and the cloud, now and every minute: the updater writes "applied" only
 // after this hive has started and passed its health check.
-func reportUpdates(ctx context.Context, dataDir string, st *store.Store, agent *hiveagent.Agent, log *slog.Logger) {
+func reportUpdates(ctx context.Context, dir string, st *store.Store, agent *hiveagent.Agent, log *slog.Logger) {
 	t := time.NewTicker(time.Minute)
 	defer t.Stop()
 	for {
-		entries, err := journal.Drain(dataDir)
+		entries, err := journal.Drain(dir)
 		if err != nil {
 			log.Warn("update journal", "err", err)
 		}

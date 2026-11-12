@@ -262,3 +262,76 @@ func TestBundleWithPathTricksOrMissingFilesIsRefused(t *testing.T) {
 		t.Fatal("wrote outside the destination")
 	}
 }
+
+// rotateRoot replaces the root key: root v(n+1) lists a new key and is
+// signed by the old and the new one.
+func (r *tufRepo) rotateRoot(t *testing.T) {
+	t.Helper()
+	old := r.keys["root"]
+	_, fresh, _ := ed25519.GenerateKey(rand.Reader)
+	oldKey, _ := metadata.KeyFromPublicKey(old.Public())
+	newKey, _ := metadata.KeyFromPublicKey(fresh.Public())
+	root := r.roles.Root()
+	oldID, _ := oldKey.ID()
+	if err := root.Signed.RevokeKey(oldID, "root"); err != nil {
+		t.Fatal(err)
+	}
+	if err := root.Signed.AddKey(newKey, "root"); err != nil {
+		t.Fatal(err)
+	}
+	root.Signed.Version++
+	root.Signatures = nil
+	for _, k := range []ed25519.PrivateKey{old, fresh} {
+		s, _ := signature.LoadSigner(k, crypto.Hash(0))
+		if _, err := root.Sign(s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := root.ToFile(filepath.Join(r.dir, fmt.Sprintf("%d.root.json", root.Signed.Version)), false); err != nil {
+		t.Fatal(err)
+	}
+	r.keys["root"] = fresh
+}
+
+// Security review: a hive that has seen a root rotation trusts the new
+// root from then on; the rotated-out key can no longer sign a root it
+// accepts, even though the hive shipped with the old root.
+func TestRotatedOutRootKeyCannotTakeOverAHiveThatSawTheRotation(t *testing.T) {
+	ctx := context.Background()
+	legit := newRepo(t)
+	shipped := legit.rootJSON(t) // the root embedded in the hive's build
+	legit.release(t, "linux_arm64", "0.1.5", tarGz(t, "good"), nil)
+	cache := t.TempDir()
+	src := update.Source{MetadataURL: legit.srv.URL + "/meta", Root: shipped, CacheDir: cache}
+	if _, err := src.Offer(ctx, "linux_arm64"); err != nil {
+		t.Fatal(err)
+	}
+	stolen := legit.keys["root"]
+	legit.rotateRoot(t)
+	if _, err := src.Offer(ctx, "linux_arm64"); err != nil { // the hive learns root v2
+		t.Fatal(err)
+	}
+
+	// The attacker holds the old root key and runs the metadata host: a root
+	// v2 of their own, signed by the old key, and their own release.
+	evil := newRepo(t)
+	root := evil.roles.Root()
+	root.Signed.Version = 2
+	root.Signatures = nil
+	for _, k := range []ed25519.PrivateKey{stolen, evil.keys["root"]} {
+		s, _ := signature.LoadSigner(k, crypto.Hash(0))
+		if _, err := root.Sign(s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := root.ToFile(filepath.Join(evil.dir, "2.root.json"), false); err != nil {
+		t.Fatal(err)
+	}
+	evil.release(t, "linux_arm64", "0.1.9", tarGz(t, "evil"), nil)
+	src.MetadataURL = evil.srv.URL + "/meta"
+	if o, err := src.Offer(ctx, "linux_arm64"); err == nil {
+		t.Fatalf("the hive took the attacker's release %s", o.Target.Version)
+	}
+	// A hive that never saw the rotation is exposed: that is why the
+	// compromised key's root must be rotated quickly and hives check often.
+}

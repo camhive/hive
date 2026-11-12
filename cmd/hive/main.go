@@ -31,6 +31,7 @@ import (
 	"github.com/camhive/hive/internal/hiveconfig"
 	"github.com/camhive/hive/internal/hivetls"
 	"github.com/camhive/hive/internal/logging"
+	"github.com/camhive/hive/internal/update/journal"
 	"github.com/camhive/hive/internal/version"
 )
 
@@ -205,7 +206,7 @@ func (p *program) serve(ctx context.Context, app *hiveapp.App, parts *runtimePar
 		go parts.health.Run(ctx)
 		go parts.locator.Run(ctx, time.Minute)
 	}
-	go reportUpdates(ctx, parts.dataDir, parts.store, parts.agent, log)
+	go reportUpdates(ctx, journal.DefaultDir(), parts.store, parts.agent, log)
 	if err := app.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		log.Error("hive exited", "err", err)
 	}

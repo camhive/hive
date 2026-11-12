@@ -57,7 +57,7 @@ func BundleTarget(platform string) string { return "bundles/" + platform }
 // Offer refreshes the channel's metadata (root rotation, expiry, rollback
 // and freeze protection by TUF) and returns the platform's bundle.
 func (s Source) Offer(_ context.Context, platform string) (Offer, error) {
-	cfg, err := config.New(s.MetadataURL, s.Root)
+	cfg, err := config.New(s.MetadataURL, trustedRoot(s.Root, s.CacheDir))
 	if err != nil {
 		return Offer{}, err
 	}
@@ -83,6 +83,23 @@ func (s Source) Offer(_ context.Context, platform string) (Offer, error) {
 		return Offer{}, fmt.Errorf("%w: %s", ErrNoBundle, platform)
 	}
 	return offerOf(tf)
+}
+
+// trustedRoot is the newest root this Hive has verified: the one it shipped
+// with, or a later one go-tuf stored after following a rotation. Starting
+// from the shipped root every time would let rotated-out keys sign a new
+// "next" root (security review); TUF clients must keep the latest.
+func trustedRoot(shipped []byte, cacheDir string) []byte {
+	cached, err := os.ReadFile(filepath.Join(cacheDir, "root.json")) //nolint:gosec // the updater's private directory
+	if err != nil {
+		return shipped
+	}
+	a, err1 := (&metadata.Metadata[metadata.RootType]{}).FromBytes(shipped)
+	b, err2 := (&metadata.Metadata[metadata.RootType]{}).FromBytes(cached)
+	if err1 != nil || err2 != nil || b.Signed.Version <= a.Signed.Version {
+		return shipped
+	}
+	return cached
 }
 
 func offerOf(tf *metadata.TargetFiles) (Offer, error) {

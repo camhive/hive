@@ -1,6 +1,8 @@
 package update
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,6 +26,15 @@ var BundleFiles = func() []string {
 // ErrNoVersion means there is no version to run or to go back to.
 var ErrNoVersion = errors.New("update: no version")
 
+// ErrUnsafeDir means the updater's directory could be written by others.
+var ErrUnsafeDir = errors.New("update: directory not private to the updater")
+
+// ErrChanged means a stored bundle no longer matches what was installed.
+var ErrChanged = errors.New("update: stored bundle changed since it was installed")
+
+// manifest records each bundle file's SHA-256 when a version is added.
+const manifest = "MANIFEST.json"
+
 // Versions is the updater's store under the data directory:
 // versions/<version>/ holds a bundle, `current` names the one to run and
 // state.json remembers the previous one and the versions that failed.
@@ -46,7 +57,7 @@ func (s *Versions) File(v Version, name string) string { return filepath.Join(s.
 
 // Has reports whether a complete bundle of v is stored.
 func (s *Versions) Has(v Version) bool {
-	for _, n := range BundleFiles {
+	for _, n := range append([]string{manifest}, BundleFiles...) {
 		if _, err := os.Stat(s.File(v, n)); err != nil {
 			return false
 		}
@@ -54,12 +65,10 @@ func (s *Versions) Has(v Version) bool {
 	return true
 }
 
-// Add copies a bundle from src into the store (idempotent: an existing
-// version is kept as it is).
+// Add copies a bundle from src into the store with a manifest of its
+// hashes. A directory already there for v is replaced, never trusted:
+// whatever put it there was not this updater installing a verified bundle.
 func (s *Versions) Add(v Version, src string) error {
-	if s.Has(v) {
-		return nil
-	}
 	tmp := s.path(v) + ".partial"
 	if err := os.RemoveAll(tmp); err != nil {
 		return err
@@ -67,14 +76,60 @@ func (s *Versions) Add(v Version, src string) error {
 	if err := os.MkdirAll(tmp, 0o750); err != nil {
 		return err
 	}
+	sums := map[string]string{}
 	for _, n := range BundleFiles {
 		if err := copyFile(filepath.Join(src, n), filepath.Join(tmp, n)); err != nil {
 			_ = os.RemoveAll(tmp)
 			return fmt.Errorf("update: add %s: %w", v, err)
 		}
+		sum, err := fileSHA256(filepath.Join(tmp, n))
+		if err != nil {
+			_ = os.RemoveAll(tmp)
+			return err
+		}
+		sums[n] = sum
 	}
-	_ = os.RemoveAll(s.path(v))
+	raw, _ := json.Marshal(sums)
+	if err := os.WriteFile(filepath.Join(tmp, manifest), raw, 0o600); err != nil {
+		_ = os.RemoveAll(tmp)
+		return err
+	}
+	if err := os.RemoveAll(s.path(v)); err != nil {
+		return err
+	}
 	return os.Rename(tmp, s.path(v))
+}
+
+// Verify checks a stored bundle against the manifest written by Add.
+func (s *Versions) Verify(v Version) error {
+	raw, err := os.ReadFile(filepath.Join(s.path(v), manifest))
+	if err != nil {
+		return fmt.Errorf("%w: %s: %w", ErrChanged, v, err)
+	}
+	var sums map[string]string
+	if err := json.Unmarshal(raw, &sums); err != nil {
+		return fmt.Errorf("%w: %s manifest", ErrChanged, v)
+	}
+	for _, n := range BundleFiles {
+		got, err := fileSHA256(s.File(v, n))
+		if err != nil || got != sums[n] {
+			return fmt.Errorf("%w: %s %s", ErrChanged, v, n)
+		}
+	}
+	return nil
+}
+
+func fileSHA256(p string) (string, error) {
+	f, err := os.Open(p) //nolint:gosec // a file in the updater's private store
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = f.Close() }()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 func copyFile(from, to string) error {
@@ -107,7 +162,8 @@ func (s *Versions) Current() (Version, error) {
 }
 
 // Seed adds the bundle a package installed and selects it unless a newer
-// version is already selected (ADR-0018 §5).
+// version is already selected (ADR-0018 §5). The package's copy is copied
+// again on every start, so the stored one always matches the package.
 func (s *Versions) Seed(v Version, src string) error {
 	if err := s.Add(v, src); err != nil {
 		return err
