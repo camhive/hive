@@ -28,16 +28,10 @@ var ErrUnauthorized = errors.New("netscan: credentials rejected")
 // credentials with digest authentication only. A device that needs no
 // credentials passes too.
 func CheckRTSP(ctx context.Context, rawURL, user, pass string) error {
-	u, err := url.Parse(rawURL)
-	if err != nil || u.Scheme != "rtsp" {
-		return fmt.Errorf("netscan: %q is not an rtsp URL", rawURL)
+	target, host, err := rtspTarget(rawURL)
+	if err != nil {
+		return err
 	}
-	host := u.Host
-	if u.Port() == "" {
-		host = net.JoinHostPort(u.Hostname(), "554")
-	}
-	u.User = nil
-	target := u.String()
 	var d net.Dialer
 	conn, err := d.DialContext(ctx, "tcp", host)
 	if err != nil {
@@ -49,20 +43,39 @@ func CheckRTSP(ctx context.Context, rawURL, user, pass string) error {
 		deadline = time.Now().Add(5 * time.Second)
 	}
 	_ = conn.SetDeadline(deadline)
-	r := textproto.NewReader(bufio.NewReader(conn))
+	return handshake(conn, target, user, pass)
+}
 
-	status, h, err := describe(conn, r, target, 1, "")
+// rtspTarget is the URL without credentials and the host:port to dial.
+func rtspTarget(rawURL string) (target, host string, err error) {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Scheme != "rtsp" || u.Host == "" {
+		return "", "", fmt.Errorf("netscan: %q is not an rtsp URL", rawURL)
+	}
+	host = u.Host
+	if u.Port() == "" {
+		host = net.JoinHostPort(u.Hostname(), "554")
+	}
+	u.User = nil
+	return u.String(), host, nil
+}
+
+// handshake: DESCRIBE without credentials, then once more answering a
+// digest challenge if the device asks for one.
+func handshake(rw io.ReadWriter, target, user, pass string) error {
+	r := textproto.NewReader(bufio.NewReader(rw))
+	status, h, err := describe(rw, r, target, 1, "")
 	if err != nil || status == 200 {
 		return err
 	}
 	if status != 401 {
-		return fmt.Errorf("netscan: DESCRIBE answered %d", status)
+		return unexpected(status)
 	}
 	ch, ok := digestChallenge(h.Values("WWW-Authenticate"))
 	if !ok {
 		return ErrNoDigest
 	}
-	status, _, err = describe(conn, r, target, 2, ch.authorization(user, pass, "DESCRIBE", target))
+	status, _, err = describe(rw, r, target, 2, ch.authorization(user, pass, "DESCRIBE", target))
 	switch {
 	case err != nil:
 		return err
@@ -71,9 +84,12 @@ func CheckRTSP(ctx context.Context, rawURL, user, pass string) error {
 	case status == 401:
 		return ErrUnauthorized
 	}
-	return fmt.Errorf("netscan: DESCRIBE answered %d", status)
+	return unexpected(status)
 }
 
+func unexpected(status int) error { return fmt.Errorf("netscan: DESCRIBE answered %d", status) }
+
+// describe sends one DESCRIBE and reads the answer, skipping its body.
 func describe(w io.Writer, r *textproto.Reader, target string, cseq int, auth string) (int, textproto.MIMEHeader, error) {
 	req := fmt.Sprintf("DESCRIBE %s RTSP/1.0\r\nCSeq: %d\r\nAccept: application/sdp\r\nUser-Agent: camhive\r\n", target, cseq)
 	if auth != "" {
@@ -82,6 +98,20 @@ func describe(w io.Writer, r *textproto.Reader, target string, cseq int, auth st
 	if _, err := io.WriteString(w, req+"\r\n"); err != nil {
 		return 0, nil, err
 	}
+	status, h, err := readResponse(r)
+	if err != nil {
+		return 0, nil, err
+	}
+	if n, _ := strconv.Atoi(h.Get("Content-Length")); n > 0 {
+		if _, err := io.CopyN(io.Discard, r.R, int64(n)); err != nil {
+			return 0, nil, err
+		}
+	}
+	return status, h, nil
+}
+
+// readResponse reads an RTSP status line and headers.
+func readResponse(r *textproto.Reader) (int, textproto.MIMEHeader, error) {
 	line, err := r.ReadLine()
 	if err != nil {
 		return 0, nil, err
@@ -92,18 +122,10 @@ func describe(w io.Writer, r *textproto.Reader, target string, cseq int, auth st
 	}
 	status, err := strconv.Atoi(f[1])
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, fmt.Errorf("netscan: bad RTSP status %q", f[1])
 	}
 	h, err := r.ReadMIMEHeader()
-	if err != nil {
-		return 0, nil, err
-	}
-	if n, _ := strconv.Atoi(h.Get("Content-Length")); n > 0 {
-		if _, err := io.CopyN(io.Discard, r.R, int64(n)); err != nil {
-			return 0, nil, err
-		}
-	}
-	return status, h, nil
+	return status, h, err
 }
 
 type challenge struct {

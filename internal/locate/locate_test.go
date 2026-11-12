@@ -305,3 +305,68 @@ func TestRoutedCameraIsFlaggedAndNotSearched(t *testing.T) {
 		t.Fatal("searched for a routed camera")
 	}
 }
+
+func (w *world) askedCount() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return len(w.asked)
+}
+
+// A camera whose identity is complete is not asked again; one that cannot
+// tell everything (here: no endpoint) is asked at most hourly.
+func TestIdentityIsAskedOnlyWhileIncompleteAndAtMostHourly(t *testing.T) {
+	ctx := context.Background()
+	w, l, now, c := setup(t, camera.SourceONVIF)
+	l.Tick(ctx)
+	n := w.askedCount()
+	now.t = now.t.Add(2 * time.Hour)
+	l.Tick(ctx)
+	if w.askedCount() != n || w.cam(c.ID).Identity.ONVIFEndpoint == "" {
+		t.Fatalf("complete identity asked again: %d → %d", n, w.askedCount())
+	}
+
+	w2, l2, now2, c2 := setup(t, camera.SourceONVIF)
+	w2.mu.Lock()
+	d := w2.devices["192.168.1.10"]
+	d.endpoint = "" // a camera that never announces itself
+	w2.devices["192.168.1.10"] = d
+	w2.mu.Unlock()
+	l2.Tick(ctx)
+	first := w2.askedCount()
+	now2.t = now2.t.Add(30 * time.Minute)
+	l2.Tick(ctx)
+	if w2.askedCount() != first {
+		t.Fatal("asked again within the hour")
+	}
+	now2.t = now2.t.Add(31 * time.Minute)
+	l2.Tick(ctx)
+	if w2.askedCount() != first+1 || w2.cam(c2.ID).Identity.Serial != "SN1" {
+		t.Fatalf("not asked after an hour: %d", w2.askedCount())
+	}
+
+	// A switched-off camera is left alone.
+	off := w2.cam(c2.ID)
+	off.Enabled = false
+	w2.cams[c2.ID] = off
+	now2.t = now2.t.Add(2 * time.Hour)
+	l2.Tick(ctx)
+	if w2.askedCount() != first+1 {
+		t.Fatal("asked a switched-off camera")
+	}
+}
+
+func TestRunTicksUntilCancelled(t *testing.T) {
+	w, l, _, c := setup(t, camera.SourceRTSP)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { l.Run(ctx, time.Hour); close(done) }()
+	deadline := time.Now().Add(5 * time.Second)
+	for w.cam(c.ID).Identity.MAC == "" && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	<-done
+	if w.cam(c.ID).Network != camera.NetworkLocal {
+		t.Fatalf("no tick ran: %+v", w.cam(c.ID))
+	}
+}

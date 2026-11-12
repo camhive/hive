@@ -151,16 +151,9 @@ func (s *Sweeper) Sweep(ctx context.Context) (Report, error) {
 	if err := s.pruneExports(ctx, now, &rep); err != nil {
 		return rep, err
 	}
-	remaining := segs[:0:0]
-	for _, seg := range segs {
-		if s.expired(seg, now) {
-			if err := s.remove(ctx, seg, "age", &rep); err != nil {
-				return rep, err
-			}
-			rep.ByAge++
-			continue
-		}
-		remaining = append(remaining, seg)
+	remaining, err := s.byAge(ctx, segs, now, &rep)
+	if err != nil {
+		return rep, err
 	}
 	if s.policy.MinFreeBytes > 0 {
 		if err := s.freeSpace(ctx, remaining, &rep); err != nil {
@@ -181,6 +174,22 @@ func (s *Sweeper) pruneExports(ctx context.Context, now time.Time, rep *Report) 
 	}
 	rep.Exports, rep.ExportBytes = p.Jobs, p.Bytes
 	return nil
+}
+
+// byAge deletes the segments past their camera's day limit and returns the rest.
+func (s *Sweeper) byAge(ctx context.Context, segs []archive.Segment, now time.Time, rep *Report) ([]archive.Segment, error) {
+	remaining := segs[:0:0]
+	for _, seg := range segs {
+		if !s.expired(seg, now) {
+			remaining = append(remaining, seg)
+			continue
+		}
+		if err := s.remove(ctx, seg, "age", rep); err != nil {
+			return nil, err
+		}
+		rep.ByAge++
+	}
+	return remaining, nil
 }
 
 func (s *Sweeper) expired(seg archive.Segment, now time.Time) bool {

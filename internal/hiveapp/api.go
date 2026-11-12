@@ -261,6 +261,20 @@ type cameraPatch struct {
 	ReplaceIdentity bool    `json:"replace_identity"`
 }
 
+// applyPatch returns the camera with the patch applied and, when the host
+// changes, moved there; it writes the error response when it refuses.
+func (a *api) applyPatch(w http.ResponseWriter, r *http.Request, c camera.Camera, in cameraPatch) (camera.Camera, bool) {
+	u, err := c.Update(in.patch(), time.Now())
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "invalid", err.Error())
+		return camera.Camera{}, false
+	}
+	if in.Host == nil || *in.Host == c.Host() {
+		return u, true
+	}
+	return a.moveCamera(w, r, u, *in.Host, in.ReplaceIdentity)
+}
+
 func (in cameraPatch) patch() camera.Patch {
 	p := camera.Patch{Name: in.Name, Group: in.Group, Enabled: in.Enabled, RecordAudio: in.RecordAudio}
 	if in.Credentials != nil {
@@ -379,16 +393,9 @@ func (a *api) patchCamera(w http.ResponseWriter, r *http.Request) {
 	if a.storeErr(w, err) {
 		return
 	}
-	u, err := c.Update(in.patch(), time.Now())
-	if err != nil {
-		writeError(w, http.StatusUnprocessableEntity, "invalid", err.Error())
+	u, ok := a.applyPatch(w, r, c, in)
+	if !ok {
 		return
-	}
-	if in.Host != nil && *in.Host != c.Host() {
-		var ok bool
-		if u, ok = a.moveCamera(w, r, u, *in.Host, in.ReplaceIdentity); !ok {
-			return
-		}
 	}
 	if err := a.d.Store.Cameras().Put(r.Context(), u); err != nil {
 		a.internal(w, err)

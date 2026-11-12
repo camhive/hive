@@ -6,14 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"net/http/httptest"
-	"path/filepath"
 	"testing"
 
 	"github.com/camhive/hive/internal/auth"
 	"github.com/camhive/hive/internal/hiveapp"
 	"github.com/camhive/hive/internal/onvif"
-	"github.com/camhive/hive/internal/store"
 )
 
 type fakeDiscovery struct {
@@ -38,16 +35,7 @@ func (f *fakeDiscovery) Probe(_ context.Context, xaddr string, creds onvif.Crede
 
 func newAPIWithDiscovery(t *testing.T, d hiveapp.Discoverer) *apiFixture {
 	t.Helper()
-	iss, _ := auth.NewIssuer("k1")
-	st, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "hive.db"), make([]byte, 32))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	ver := auth.NewVerifier("hv_1", auth.Keys{"k1": iss.PublicKey()})
-	srv := httptest.NewServer(hiveapp.NewAPI(hiveapp.Deps{Store: st, Verifier: ver, Version: "test", Notify: func() {}, Discovery: d}))
-	t.Cleanup(srv.Close)
-	return &apiFixture{srv: srv, iss: iss, st: st}
+	return newAPIWith(t, func(deps *hiveapp.Deps) { deps.Discovery = d })
 }
 
 func (f *apiFixture) call(t *testing.T, method, path, token string, body any) (int, []byte) {

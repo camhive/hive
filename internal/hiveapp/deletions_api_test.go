@@ -2,8 +2,6 @@ package hiveapp_test
 
 import (
 	"context"
-	"net/http/httptest"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -11,7 +9,6 @@ import (
 	"github.com/camhive/hive/internal/export"
 	"github.com/camhive/hive/internal/hiveapp"
 	"github.com/camhive/hive/internal/retention"
-	"github.com/camhive/hive/internal/store"
 )
 
 // deleterFake records the scopes it is asked to delete.
@@ -29,16 +26,7 @@ func (d *deleterFake) Delete(_ context.Context, sc retention.Scope, dryRun bool)
 
 func newDeletionAPI(t *testing.T, d hiveapp.Deleter) *apiFixture {
 	t.Helper()
-	iss, _ := auth.NewIssuer("k1")
-	st, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "hive.db"), make([]byte, 32))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	ver := auth.NewVerifier("hv_1", auth.Keys{"k1": iss.PublicKey()})
-	srv := httptest.NewServer(hiveapp.NewAPI(hiveapp.Deps{Store: st, Verifier: ver, Version: "test", Deletions: d}))
-	t.Cleanup(srv.Close)
-	return &apiFixture{srv: srv, iss: iss, st: st}
+	return newAPIWith(t, func(deps *hiveapp.Deps) { deps.Deletions = d })
 }
 
 // ADR-0016: the owner previews, then deletes; the deletion is audited.

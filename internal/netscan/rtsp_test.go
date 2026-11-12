@@ -109,3 +109,51 @@ func TestCheckRTSPWithoutAuthIsFine(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// answers replays canned answers to whatever is sent.
+type answers struct {
+	in  strings.Builder
+	out *strings.Reader
+}
+
+func (a *answers) Read(p []byte) (int, error)  { return a.out.Read(p) }
+func (a *answers) Write(p []byte) (int, error) { return a.in.Write(p) }
+
+func TestHandshakeOddAnswers(t *testing.T) {
+	sdp := "v=0\r\n"
+	for name, tc := range map[string]struct {
+		reply string
+		ok    bool
+	}{
+		"200 with an SDP body":        {fmt.Sprintf("RTSP/1.0 200 OK\r\nContent-Length: %d\r\n\r\n%s", len(sdp), sdp), true},
+		"an HTTP server":              {"HTTP/1.1 400 Bad Request\r\n\r\n", false},
+		"a broken status":             {"RTSP/1.0 abc\r\n\r\n", false},
+		"not found":                   {"RTSP/1.0 404 Not Found\r\n\r\n", false},
+		"refused after the challenge": {"RTSP/1.0 401 x\r\nWWW-Authenticate: Digest realm=\"r\", nonce=\"n\"\r\n\r\nRTSP/1.0 403 Forbidden\r\n\r\n", false},
+		"a cut-off body":              {"RTSP/1.0 200 OK\r\nContent-Length: 50\r\n\r\nv=0", false},
+		"silence":                     {"", false},
+	} {
+		err := handshake(&answers{out: strings.NewReader(tc.reply)}, "rtsp://h/x", "u", "p")
+		if (err == nil) != tc.ok {
+			t.Errorf("%s: err = %v", name, err)
+		}
+	}
+}
+
+func TestRTSPTargetDropsCredentialsAndDefaultsThePort(t *testing.T) {
+	target, host, err := rtspTarget("rtsp://admin:pw@10.0.0.5/live")
+	if err != nil || target != "rtsp://10.0.0.5/live" || host != "10.0.0.5:554" {
+		t.Fatalf("%q %q %v", target, host, err)
+	}
+	for _, bad := range []string{"http://h/x", "rtsp://", "::"} {
+		if _, _, err := rtspTarget(bad); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+		if err := CheckRTSP(context.Background(), bad, "u", "p"); err == nil {
+			t.Errorf("CheckRTSP %q accepted", bad)
+		}
+	}
+	if err := CheckRTSP(ctx(t), "rtsp://127.0.0.1:1/x", "u", "p"); err == nil {
+		t.Fatal("dialled a closed port without an error")
+	}
+}

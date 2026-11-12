@@ -1,6 +1,9 @@
 package netscan
 
 import (
+	"context"
+	"errors"
+	"net"
 	"net/netip"
 	"testing"
 )
@@ -43,5 +46,37 @@ func TestSearchablePrefixIsAtMostA24AroundTheHive(t *testing.T) {
 	hosts := hostsOf(netip.MustParsePrefix("192.168.1.16/28"))
 	if len(hosts) != 14 || hosts[0].String() != "192.168.1.17" || hosts[13].String() != "192.168.1.30" {
 		t.Fatalf("hosts = %v", hosts)
+	}
+}
+
+func TestOnlyUnicastIPv4NetworksOfTheHiveAreSearched(t *testing.T) {
+	cidr := func(s string) net.Addr {
+		ip, n, err := net.ParseCIDR(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n.IP = ip
+		return n
+	}
+	got := searchablePrefixes([]net.Addr{
+		cidr("127.0.0.1/8"), cidr("169.254.3.4/16"), cidr("fe80::1/64"), cidr("2001:db8::5/64"),
+		cidr("192.168.1.20/24"), cidr("10.1.2.3/16"), &net.IPAddr{IP: net.ParseIP("192.168.5.5")},
+	})
+	if len(got) != 2 || got[0].String() != "192.168.1.0/24" || got[1].String() != "10.1.2.0/24" {
+		t.Fatalf("got %v", got)
+	}
+	if _, err := Subnets(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSweepTouchesEveryHostAndStopsWhenCancelled(t *testing.T) {
+	if err := Sweep(context.Background(), netip.MustParsePrefix("127.0.0.0/30")); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := Sweep(ctx, netip.MustParsePrefix("127.0.0.0/24")); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v", err)
 	}
 }

@@ -169,3 +169,22 @@ func TestOwnerDeletionRejectsAnEmptyOrBackwardsRange(t *testing.T) {
 		}
 	}
 }
+
+// Run sweeps at once, which also finishes waiting owner deletions, and
+// stops with its context.
+func TestRunSweepsAtOnceAndStopsWithItsContext(t *testing.T) {
+	f := newFixture(t)
+	old := f.put(t, "cam_a", "main", 40*24*time.Hour, true)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { f.sweeper(retention.Policy{DefaultDays: 30}).Run(ctx, time.Hour); close(done) }()
+	deadline := time.Now().Add(5 * time.Second)
+	for f.has(old.Path) && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	<-done
+	if f.has(old.Path) {
+		t.Fatal("Run did not sweep")
+	}
+}

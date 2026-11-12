@@ -25,6 +25,12 @@ func Subnets() ([]netip.Prefix, error) {
 	if err != nil {
 		return nil, err
 	}
+	return searchablePrefixes(addrs), nil
+}
+
+// searchablePrefixes keeps the unicast, non-loopback, non-link-local IPv4
+// networks among interface addresses, each narrowed to its /24.
+func searchablePrefixes(addrs []net.Addr) []netip.Prefix {
 	var out []netip.Prefix
 	for _, a := range addrs {
 		n, ok := a.(*net.IPNet)
@@ -38,7 +44,7 @@ func Subnets() ([]netip.Prefix, error) {
 		ones, _ := n.Mask.Size()
 		out = append(out, searchable(netip.PrefixFrom(ip.Unmap(), ones)))
 	}
-	return out, nil
+	return out
 }
 
 // searchable narrows a prefix to at most the /24 around its address.

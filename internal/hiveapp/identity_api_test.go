@@ -2,15 +2,12 @@ package hiveapp_test
 
 import (
 	"context"
-	"net/http/httptest"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/camhive/hive/internal/auth"
 	"github.com/camhive/hive/internal/domain/camera"
 	"github.com/camhive/hive/internal/hiveapp"
-	"github.com/camhive/hive/internal/store"
 )
 
 // locatorFake answers what the device at a host is.
@@ -26,21 +23,15 @@ func (l *locatorFake) Probe(_ context.Context, _ camera.Camera, host string) (ca
 
 func newLocatorAPI(t *testing.T, l hiveapp.CameraLocator) (*apiFixture, camera.Camera) {
 	t.Helper()
-	iss, _ := auth.NewIssuer("k1")
-	st, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "hive.db"), make([]byte, 32))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
 	c, _ := camera.New(camera.Spec{Name: "Door", Source: camera.Source{Kind: camera.SourceRTSP, Address: "rtsp://192.168.1.10:554/main"}}, time.Now())
 	c.Identity, c.Network = camera.Identity{MAC: "aa:bb:cc:00:11:22", Serial: "SN1", Model: "X1"}, camera.NetworkLocal
-	if err := st.Cameras().Put(context.Background(), c); err != nil {
-		t.Fatal(err)
-	}
-	ver := auth.NewVerifier("hv_1", auth.Keys{"k1": iss.PublicKey()})
-	srv := httptest.NewServer(hiveapp.NewAPI(hiveapp.Deps{Store: st, Verifier: ver, Version: "test", Locator: l}))
-	t.Cleanup(srv.Close)
-	return &apiFixture{srv: srv, iss: iss, st: st}, c
+	f := newAPIWith(t, func(d *hiveapp.Deps) {
+		d.Locator = l
+		if err := d.Store.Cameras().Put(context.Background(), c); err != nil {
+			t.Fatal(err)
+		}
+	})
+	return f, c
 }
 
 // ADR-0017: identity and network are shown read-only; the identity to the owner only.

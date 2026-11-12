@@ -22,7 +22,11 @@ type apiFixture struct {
 	st  *store.Store
 }
 
-func newAPI(t *testing.T) *apiFixture {
+func newAPI(t *testing.T) *apiFixture { return newAPIWith(t, nil) }
+
+// newAPIWith serves the API over a fresh store; with lets a test add
+// dependencies (and fill the store) before the server starts.
+func newAPIWith(t *testing.T, with func(d *hiveapp.Deps)) *apiFixture {
 	t.Helper()
 	iss, _ := auth.NewIssuer("k1")
 	st, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "hive.db"), make([]byte, 32))
@@ -30,9 +34,11 @@ func newAPI(t *testing.T) *apiFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	ver := auth.NewVerifier("hv_1", auth.Keys{"k1": iss.PublicKey()})
-	h := hiveapp.NewAPI(hiveapp.Deps{Store: st, Verifier: ver, Version: "test", Notify: func() {}})
-	srv := httptest.NewServer(h)
+	d := hiveapp.Deps{Store: st, Verifier: auth.NewVerifier("hv_1", auth.Keys{"k1": iss.PublicKey()}), Version: "test", Notify: func() {}}
+	if with != nil {
+		with(&d)
+	}
+	srv := httptest.NewServer(hiveapp.NewAPI(d))
 	t.Cleanup(srv.Close)
 	return &apiFixture{srv: srv, iss: iss, st: st}
 }
