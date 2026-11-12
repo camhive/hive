@@ -82,14 +82,58 @@ func (m *Manager) Prune(ctx context.Context, now time.Time) (Pruned, error) {
 	}
 	var p Pruned
 	for _, j := range expired(all, now, m.keep) {
-		if err := os.Remove(m.path(j.ID)); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return p, err
-		}
-		if err := m.jobs.Delete(ctx, j.ID); err != nil {
+		if err := m.removeJob(ctx, j); err != nil {
 			return p, err
 		}
 		p.Jobs++
 		p.Bytes += j.Bytes
 	}
 	return p, nil
+}
+
+// ErrRunning means an export of the footage being deleted is still being
+// made; deleting now would leave its copy behind (ADR-0016).
+var ErrRunning = errors.New("export: an export of that footage is still running")
+
+// Footage selects exports by camera and the span they cover.
+type Footage func(camera string, from, to time.Time) bool
+
+// Remove deletes the exports whose footage matches, file first, then the
+// row, and reports what it removed; with dryRun it only reports. It refuses
+// with ErrRunning while a matching export is still running.
+func (m *Manager) Remove(ctx context.Context, match Footage, dryRun bool) (Pruned, error) {
+	rows, err := m.jobs.All(ctx)
+	if err != nil {
+		return Pruned{}, err
+	}
+	var hit []Job
+	for _, r := range rows {
+		j := fromRow(r)
+		if !match(j.Request.Camera, j.Request.Start, j.Request.Start.Add(j.Request.Duration)) {
+			continue
+		}
+		if j.Status == StatusRunning {
+			return Pruned{}, ErrRunning
+		}
+		hit = append(hit, j)
+	}
+	var p Pruned
+	for _, j := range hit {
+		if !dryRun {
+			if err := m.removeJob(ctx, j); err != nil {
+				return p, err
+			}
+		}
+		p.Jobs++
+		p.Bytes += j.Bytes
+	}
+	return p, nil
+}
+
+// removeJob deletes a job's file (already gone is fine) and its row.
+func (m *Manager) removeJob(ctx context.Context, j Job) error {
+	if err := os.Remove(m.path(j.ID)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return m.jobs.Delete(ctx, j.ID)
 }

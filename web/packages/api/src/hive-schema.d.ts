@@ -566,6 +566,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v0/archive/deletions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview or delete recordings (owner, ADR-0016); irreversible without dry_run, and audited as archive.delete */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["DeletionRequest"];
+                };
+            };
+            responses: {
+                /** @description What was (or, with dry_run, would be) deleted */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Deletion"];
+                    };
+                };
+                403: components["responses"]["Forbidden"];
+                /** @description `code: export_running` — an export of that footage is still being made */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description `code: invalid` — no cameras, or the start is not before the end */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description `code: not_ready` — the archive is not available yet */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v0/exports/{id}": {
         parameters: {
             query?: never;
@@ -1504,6 +1572,55 @@ export interface components {
             file_name?: string;
             /** Format: date-time */
             created_at?: string;
+        };
+        /** @description What to delete (ADR-0016): every stream of the cameras between from and to. Whole segments that touch the range go, so the deleted span can be wider than asked, never narrower. */
+        DeletionRequest: {
+            /** @description Absent: every camera with footage; must not be empty */
+            cameras?: string[];
+            /**
+             * Format: date-time
+             * @description Absent: from the beginning
+             */
+            from?: string;
+            /**
+             * Format: date-time
+             * @description Absent or in the future: now
+             */
+            to?: string;
+            /**
+             * @description Also delete exports of that footage
+             * @default false
+             */
+            include_exports: boolean;
+            /**
+             * @description Only report what would be deleted
+             * @default false
+             */
+            dry_run: boolean;
+        };
+        Deletion: {
+            cameras?: {
+                camera?: string;
+                /**
+                 * Format: date-time
+                 * @description Start of the first whole segment deleted
+                 */
+                from?: string;
+                /**
+                 * Format: date-time
+                 * @description End of the last whole segment deleted
+                 */
+                to?: string;
+                /** @description Files, both streams, including pending */
+                segments?: number;
+                bytes?: number;
+                /** @description Files still being written; deleted once closed */
+                pending?: number;
+            }[];
+            exports?: {
+                count?: number;
+                bytes?: number;
+            };
         };
         StreamHealth: {
             stream?: string;

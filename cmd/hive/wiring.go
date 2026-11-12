@@ -101,6 +101,7 @@ func assemble(ctx context.Context, cfg hiveconfig.Config, paths hiveconfig.Paths
 					log.Error("storage low: archive disk below min_free_gb and nothing left to delete", "free_bytes", free)
 					parts.agent.Emit(hiveagent.EventStorageLow, map[string]any{"free_bytes": free, "min_free_gb": cfg.MinFreeGB})
 				}})
+		deps.Deletions = parts.sweeper
 		deps.Notify = parts.ingest.Notify
 		deps.Index = parts.index
 		deps.Engine = eng

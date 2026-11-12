@@ -1,5 +1,5 @@
 // Package retention is the only code in the hive that deletes footage
-// (ADR-0009). Old exports go first (#59): they are copies, so footage is
+// (ADR-0009): by its rules, and when the owner asks (ADR-0016, owner.go). Old exports go first (#59): they are copies, so footage is
 // deleted for space only when that was not enough. Then two rules, in order:
 // segments older than the camera's day limit go; then, while free space on
 // the archive disk is below the threshold, the oldest complete segment
@@ -16,6 +16,7 @@ import (
 	"log/slog"
 	"os"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/camhive/hive/internal/archive"
@@ -74,7 +75,8 @@ func (p Policy) cap(days int) int {
 // FS is the filesystem the sweeper acts on (real disk or a test double).
 type FS interface {
 	Remove(path string) error
-	Free(dir string) (int64, error) // bytes available to us on dir's volume
+	Free(dir string) (int64, error)          // bytes available to us on dir's volume
+	Modified(path string) (time.Time, error) // last write to a file
 }
 
 // Options tune the sweeper.
@@ -90,12 +92,14 @@ type Options struct {
 // Exports is what the sweeper needs from the export manager.
 type Exports interface {
 	Prune(ctx context.Context, now time.Time) (export.Pruned, error)
+	Remove(ctx context.Context, match export.Footage, dryRun bool) (export.Pruned, error)
 }
 
 // Report says what a sweep deleted.
 type Report struct {
 	ByAge       int
 	BySpace     int
+	ByOwner     int   // waiting owner deletions finished (ADR-0016)
 	Bytes       int64 // footage
 	Exports     int
 	ExportBytes int64
@@ -103,6 +107,7 @@ type Report struct {
 
 // Sweeper applies a Policy.
 type Sweeper struct {
+	mu     sync.Mutex // one writer: sweeps and owner deletions never overlap
 	idx    *archive.Index
 	repo   *store.Segments
 	policy Policy
@@ -132,11 +137,16 @@ func (s *Sweeper) Sweep(ctx context.Context) (Report, error) {
 	if err := s.policy.Validate(); err != nil {
 		return Report{}, err
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var rep Report
+	if err := s.finishPending(ctx, &rep); err != nil {
+		return rep, err
+	}
 	segs, err := s.idx.All(ctx)
 	if err != nil {
-		return Report{}, err
+		return rep, err
 	}
-	var rep Report
 	now := s.opts.Now()
 	if err := s.pruneExports(ctx, now, &rep); err != nil {
 		return rep, err
@@ -236,8 +246,8 @@ func (s *Sweeper) Run(ctx context.Context, interval time.Duration) {
 	for {
 		if rep, err := s.Sweep(ctx); err != nil {
 			s.log.Warn("retention sweep", "err", err)
-		} else if rep.ByAge+rep.BySpace+rep.Exports > 0 {
-			s.log.Info("retention sweep", "by_age", rep.ByAge, "by_space", rep.BySpace, "bytes", rep.Bytes, "exports", rep.Exports, "export_bytes", rep.ExportBytes)
+		} else if rep.ByAge+rep.BySpace+rep.ByOwner+rep.Exports > 0 {
+			s.log.Info("retention sweep", "by_age", rep.ByAge, "by_space", rep.BySpace, "by_owner", rep.ByOwner, "bytes", rep.Bytes, "exports", rep.Exports, "export_bytes", rep.ExportBytes)
 		}
 		select {
 		case <-ctx.Done():
@@ -255,3 +265,12 @@ type osFS struct{}
 
 // Remove deletes a file.
 func (osFS) Remove(path string) error { return os.Remove(path) }
+
+// Modified returns a file's last write time.
+func (osFS) Modified(path string) (time.Time, error) {
+	st, err := os.Stat(path)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return st.ModTime(), nil
+}

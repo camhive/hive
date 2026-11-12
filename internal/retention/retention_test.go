@@ -21,6 +21,16 @@ type fakeFS struct {
 	mu    sync.Mutex
 	files map[string]int64
 	free  int64
+	mod   map[string]time.Time // last write; zero: long ago
+}
+
+func (f *fakeFS) Modified(path string) (time.Time, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.files[path]; !ok {
+		return time.Time{}, os.ErrNotExist
+	}
+	return f.mod[path], nil
 }
 
 func (f *fakeFS) Remove(path string) error {
@@ -68,7 +78,7 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	return &fixture{st: st, idx: archive.NewIndex(st), fs: &fakeFS{files: map[string]int64{}, free: 1 << 40}, now: time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)}
+	return &fixture{st: st, idx: archive.NewIndex(st), fs: &fakeFS{files: map[string]int64{}, mod: map[string]time.Time{}, free: 1 << 40}, now: time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)}
 }
 
 // add indexes a 10-minute, 100-byte main-stream segment that started `age` ago.
@@ -226,6 +236,11 @@ type exportsFake struct {
 	f     *fixture
 	calls []time.Time
 	frees int64
+	// Remove (ADR-0016)
+	removes   []bool // dryRun of each call
+	removeErr error
+	match     func(export.Footage) []bool // probes the matcher it was given
+	matched   []bool
 }
 
 func (e *exportsFake) Prune(_ context.Context, now time.Time) (export.Pruned, error) {
@@ -234,6 +249,17 @@ func (e *exportsFake) Prune(_ context.Context, now time.Time) (export.Pruned, er
 	e.f.fs.free += e.frees
 	e.f.fs.mu.Unlock()
 	return export.Pruned{Jobs: 2, Bytes: e.frees}, nil
+}
+
+func (e *exportsFake) Remove(_ context.Context, match export.Footage, dryRun bool) (export.Pruned, error) {
+	e.removes = append(e.removes, dryRun)
+	if e.removeErr != nil {
+		return export.Pruned{}, e.removeErr
+	}
+	if e.match != nil {
+		e.matched = e.match(match)
+	}
+	return export.Pruned{Jobs: 1, Bytes: 7}, nil
 }
 
 // #59: old exports go in every sweep, and before the space rule: they are

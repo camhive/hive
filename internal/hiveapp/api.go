@@ -39,6 +39,9 @@ type Deps struct {
 	Licensed func() entitlements.Set
 	// Discovery finds LAN cameras for the owner; nil answers 503 not_ready.
 	Discovery Discoverer
+	// Deletions removes footage on the owner's request (ADR-0016); nil
+	// answers 503 not_ready.
+	Deletions Deleter
 	// WHEP is the client for the engine's WebRTC endpoint (local live
 	// signalling); nil uses a default with a short timeout.
 	WHEP *http.Client
@@ -78,6 +81,7 @@ func NewAPI(d Deps) http.Handler {
 	mux.Handle("GET /v0/cameras/{id}/archive/audio", api.auth(api.audio))
 	mux.Handle("POST /v0/cameras/{id}/exports", api.auth(api.createExport))
 	mux.Handle("GET /v0/exports", api.auth(api.listExports))
+	mux.Handle("POST /v0/archive/deletions", api.auth(api.deleteRecordings))
 	mux.Handle("GET /v0/exports/{id}", api.auth(api.getExport))
 	mux.Handle("GET /v0/exports/{id}/file", api.auth(api.exportFile))
 	mux.Handle("GET /v0/cameras/{id}/health", api.auth(api.cameraHealth))

@@ -170,6 +170,37 @@ components:
         bytes: { type: integer }
         file_name: { type: string }
         created_at: { type: string, format: date-time }
+    DeletionRequest:
+      type: object
+      description: >-
+        What to delete (ADR-0016): every stream of the cameras between from and
+        to. Whole segments that touch the range go, so the deleted span can be
+        wider than asked, never narrower.
+      properties:
+        cameras: { type: array, items: { type: string }, description: "Absent: every camera with footage; must not be empty" }
+        from: { type: string, format: date-time, description: "Absent: from the beginning" }
+        to: { type: string, format: date-time, description: "Absent or in the future: now" }
+        include_exports: { type: boolean, default: false, description: "Also delete exports of that footage" }
+        dry_run: { type: boolean, default: false, description: "Only report what would be deleted" }
+    Deletion:
+      type: object
+      properties:
+        cameras:
+          type: array
+          items:
+            type: object
+            properties:
+              camera: { type: string }
+              from: { type: string, format: date-time, description: "Start of the first whole segment deleted" }
+              to: { type: string, format: date-time, description: "End of the last whole segment deleted" }
+              segments: { type: integer, description: "Files, both streams, including pending" }
+              bytes: { type: integer }
+              pending: { type: integer, description: "Files still being written; deleted once closed" }
+        exports:
+          type: object
+          properties:
+            count: { type: integer }
+            bytes: { type: integer }
     StreamHealth:
       type: object
       properties:
@@ -353,6 +384,18 @@ paths:
       summary: The caller's exports, newest first
       responses:
         "200": { description: "OK", content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Export" } } } } }
+  /v0/archive/deletions:
+    post:
+      summary: Preview or delete recordings (owner, ADR-0016); irreversible without dry_run, and audited as archive.delete
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/DeletionRequest" } } }
+      responses:
+        "200": { description: "What was (or, with dry_run, would be) deleted", content: { application/json: { schema: { $ref: "#/components/schemas/Deletion" } } } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { description: "`code: export_running` — an export of that footage is still being made", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "422": { description: "`code: invalid` — no cameras, or the start is not before the end", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "503": { description: "`code: not_ready` — the archive is not available yet", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
   /v0/exports/{id}:
     parameters:
       - { name: id, in: path, required: true, schema: { type: string } }
