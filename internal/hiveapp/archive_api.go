@@ -82,7 +82,7 @@ func (a *api) calendar(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	stream, ok := streamParam(w, r)
+	stream, ok := a.archiveStream(w, r, id)
 	if !ok {
 		return
 	}
@@ -122,7 +122,7 @@ func (a *api) timeline(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	stream, ok := streamParam(w, r)
+	stream, ok := a.archiveStream(w, r, id)
 	if !ok {
 		return
 	}
@@ -153,6 +153,21 @@ func servedStream(r *http.Request, cam *camera.Camera, want string) string {
 		want = auth.RemoteStream(claimsFrom(r).Quality, want)
 	}
 	return string(hiveagent.ResolveStream(cam, want))
+}
+
+// servedStreamHeader names the stream an archive answer is for.
+const servedStreamHeader = "X-Camhive-Stream"
+
+// archiveStream is the stream calendar, timeline and playback answer for:
+// the requested one as served (servedStream), so a remote viewer sees the
+// coverage of the footage they can play.
+func (a *api) archiveStream(w http.ResponseWriter, r *http.Request, id string) (string, bool) {
+	want, ok := streamParam(w, r)
+	if !ok {
+		return "", false
+	}
+	cam, _ := a.camera(r, id)
+	return servedStream(r, cam, want), true
 }
 
 // liveCamera is the camera a live offer may use: known and switched on.
@@ -198,7 +213,7 @@ func (a *api) play(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	stream, ok := streamParam(w, r)
+	stream, ok := a.archiveStream(w, r, id)
 	if !ok {
 		return
 	}
@@ -206,8 +221,6 @@ func (a *api) play(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	cam, _ := a.camera(r, id)
-	stream = servedStream(r, cam, stream)
 	body, err := PlaybackFetch(a.d.Engine)(r.Context(), export.Request{Camera: id, Stream: stream, Start: start, Duration: span, Owner: claimsFrom(r).Account})
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "engine", "playback unavailable")
@@ -215,6 +228,7 @@ func (a *api) play(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = body.Close() }()
 	w.Header().Set("Content-Type", "video/mp4")
+	w.Header().Set(servedStreamHeader, stream) // the player needs this stream's codec, not the one it asked for
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.Copy(w, body)

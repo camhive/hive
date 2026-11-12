@@ -208,3 +208,67 @@ func TestPlaybackSpanLimits(t *testing.T) {
 		}
 	}
 }
+
+// The archive a remote viewer sees is the archive they can play: through the
+// relay calendar, timeline and playback all answer for the served stream, and
+// playback names it (X-Camhive-Stream) so the player picks that stream's
+// codec. Without this a Free viewer saw main's coverage, got sub's bytes
+// decoded as main's codec, and the player sat at 0:00.
+func TestRemoteArchiveAnswersForTheServedStream(t *testing.T) {
+	q := newQualityAPI(t)
+	free := q.freeToken(t)
+	idx := archive.NewIndex(q.direct.st)
+	base := time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC)
+	_ = idx.Upsert(context.Background(), archive.Segment{Camera: string(q.both.ID), Stream: "main", Start: base, Duration: 10 * time.Minute, Bytes: 1, Path: "/m", Complete: true})
+	_ = idx.Upsert(context.Background(), archive.Segment{Camera: string(q.both.ID), Stream: "sub", Start: base.Add(30 * time.Minute), Duration: 10 * time.Minute, Bytes: 1, Path: "/s", Complete: true})
+	timeline := "/v0/cameras/" + string(q.both.ID) + "/archive/timeline?stream=main&from=2026-11-09T09:00:00Z&to=2026-11-09T12:00:00Z"
+
+	if r := q.relayed.do(t, "GET", timeline, free, nil); r.Status != 200 || len(r.List) != 1 || r.List[0]["start"] != "2026-11-09T10:30:00Z" {
+		t.Fatalf("relayed timeline shows sub: %d %v", r.Status, r.List)
+	}
+	if r := q.direct.do(t, "GET", timeline, free, nil); r.Status != 200 || len(r.List) != 1 || r.List[0]["start"] != "2026-11-09T10:00:00Z" {
+		t.Fatalf("LAN timeline shows main: %d %v", r.Status, r.List)
+	}
+	cal := "/v0/cameras/" + string(q.both.ID) + "/archive/calendar?stream=main"
+	if r := q.relayed.do(t, "GET", cal, free, nil); r.Status != 200 || len(r.List) != 1 {
+		t.Fatalf("relayed calendar: %d %v", r.Status, r.List)
+	}
+
+	for _, c := range []struct {
+		name string
+		f    *apiFixture
+		cam  camera.Camera
+		want string
+	}{
+		{"relayed", q.relayed, q.both, "sub"},
+		{"relayed, camera without sub", q.relayed, q.mainOnly, "main"},
+		{"LAN", q.direct, q.both, "main"},
+	} {
+		if got := servedHeader(t, c.f, free, c.cam); got != c.want {
+			t.Errorf("%s: X-Camhive-Stream = %q, want %q", c.name, got, c.want)
+		}
+	}
+	// A browser on another origin may read it.
+	req, _ := http.NewRequestWithContext(context.Background(), "GET", q.direct.srv.URL+"/healthz", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if !strings.Contains(resp.Header.Get("Access-Control-Expose-Headers"), "X-Camhive-Stream") {
+		t.Fatalf("expose headers: %q", resp.Header.Get("Access-Control-Expose-Headers"))
+	}
+}
+
+func servedHeader(t *testing.T, f *apiFixture, tok string, cam camera.Camera) string {
+	t.Helper()
+	req, _ := http.NewRequestWithContext(context.Background(), "GET", f.srv.URL+"/v0/cameras/"+string(cam.ID)+"/archive/play?stream=main&start=2026-11-09T10:00:00Z&duration=60", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
+	return resp.Header.Get("X-Camhive-Stream")
+}

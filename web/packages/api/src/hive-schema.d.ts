@@ -230,7 +230,7 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** Days with footage (viewer) */
+        /** Days with footage (viewer; through the relay for the stream the token's quality serves, like playback) */
         get: {
             parameters: {
                 query?: {
@@ -282,7 +282,7 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** Segments overlapping [from, to) (viewer) */
+        /** Segments overlapping [from, to) (viewer; through the relay for the stream the token's quality serves, like playback) */
         get: {
             parameters: {
                 query: {
@@ -359,6 +359,8 @@ export interface paths {
                 /** @description OK */
                 200: {
                     headers: {
+                        /** @description The stream actually served (main or sub); differs from the request through the relay or for a camera without the requested stream */
+                        "X-Camhive-Stream"?: "main" | "sub";
                         [name: string]: unknown;
                     };
                     content: {

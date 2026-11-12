@@ -272,7 +272,7 @@ paths:
       - { name: stream, in: query, schema: { type: string, enum: [main, sub], default: main } }
       - { name: tz, in: query, schema: { type: string }, description: IANA zone for day boundaries; default is the hive's zone }
     get:
-      summary: Days with footage (viewer)
+      summary: Days with footage (viewer; through the relay for the stream the token's quality serves, like playback)
       responses:
         "200":
           description: "OK"
@@ -285,7 +285,7 @@ paths:
       - { name: from, in: query, required: true, schema: { type: string, format: date-time } }
       - { name: to, in: query, required: true, schema: { type: string, format: date-time } }
     get:
-      summary: Segments overlapping [from, to) (viewer)
+      summary: Segments overlapping [from, to) (viewer; through the relay for the stream the token's quality serves, like playback)
       responses:
         "200": { description: "OK", content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Segment" } } } } }
         "400": { description: "`code: invalid`" }
@@ -299,7 +299,11 @@ paths:
     get:
       summary: Archive playback as fragmented MP4 (viewer; through the relay a sub-quality token gets the sub stream)
       responses:
-        "200": { description: "OK", content: { video/mp4: {} } }
+        "200":
+          description: OK
+          headers:
+            X-Camhive-Stream: { description: "The stream actually served (main or sub); differs from the request through the relay or for a camera without the requested stream", schema: { type: string, enum: [main, sub] } }
+          content: { video/mp4: {} }
         "404": { $ref: "#/components/responses/NotFound" }
         "502": { description: "`code: engine` — playback unavailable" }
   /v0/cameras/{id}/exports:
