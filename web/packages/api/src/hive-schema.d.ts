@@ -385,6 +385,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v0/cameras/{id}/archive/audio": {
+        parameters: {
+            query: {
+                stream?: "main" | "sub";
+                start: string;
+                /** @description seconds */
+                duration: number;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** Recorded sound of a span as WAV, for the player's sound button (viewer; ADR-0015). Same stream rules as playback. */
+        get: {
+            parameters: {
+                query: {
+                    stream?: "main" | "sub";
+                    start: string;
+                    /** @description seconds */
+                    duration: number;
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        /** @description The stream actually served (main or sub) */
+                        "X-Camhive-Stream"?: "main" | "sub";
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "audio/wav": unknown;
+                    };
+                };
+                /** @description `code: invalid` — bad span, or longer than 60 s */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description `code: no_audio` — no sound recorded (camera without microphone or recording sound switched off); or the camera is unknown */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description `code: audio_unsupported` — sound recorded in a format the hive does not convert yet (only G.711/LPCM) */
+                415: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description `code: engine` — playback unavailable */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v0/cameras/{id}/exports": {
         parameters: {
             query?: never;
@@ -1327,6 +1411,8 @@ export interface components {
                 [key: string]: components["schemas"]["Stream"];
             };
             enabled: boolean;
+            /** @description Sound is pulled and recorded only when true (ADR-0015); false by default */
+            record_audio: boolean;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -1452,6 +1538,8 @@ export interface components {
             name?: string;
             group?: string;
             enabled?: boolean;
+            /** @description Pull and record the camera's sound (ADR-0015); off unless the owner switches it on */
+            record_audio?: boolean;
             credentials?: components["schemas"]["Credentials"];
         };
     };

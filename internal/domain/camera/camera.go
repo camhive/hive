@@ -101,6 +101,7 @@ type Camera struct {
 	Credentials Credentials
 	Streams     map[Stream]StreamSpec
 	Enabled     bool
+	RecordAudio bool // ADR-0015: sound is pulled from the camera only when on; off by default
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
@@ -115,6 +116,7 @@ type Patch struct {
 	Name        *string
 	Group       *string
 	Enabled     *bool
+	RecordAudio *bool
 	Credentials *Credentials
 }
 
@@ -153,6 +155,9 @@ func (c Camera) Update(p Patch, now time.Time) (Camera, error) {
 	}
 	if p.Enabled != nil {
 		u.Enabled = *p.Enabled
+	}
+	if p.RecordAudio != nil {
+		u.RecordAudio = *p.RecordAudio
 	}
 	if p.Credentials != nil {
 		u.Credentials = *p.Credentials

@@ -235,6 +235,58 @@ func (a *api) play(w http.ResponseWriter, r *http.Request) {
 	_ = archive.CopyPlayable(w, body) // video only: browsers refuse the whole file over a track they cannot decode
 }
 
+// maxAudioSpan bounds one audio answer: it is built in memory (ADR-0015).
+const maxAudioSpan = time.Minute
+
+// audio answers a span's recorded sound as WAV (ADR-0015); the player asks
+// for it a minute at a time when the viewer turns sound on.
+func (a *api) audio(w http.ResponseWriter, r *http.Request) {
+	if !a.requireArchive(w) {
+		return
+	}
+	id, ok := cameraScope(w, r, auth.ActionArchive)
+	if !ok {
+		return
+	}
+	stream, ok := a.archiveStream(w, r, id)
+	if !ok {
+		return
+	}
+	start, span, ok := playSpan(w, r)
+	if !ok {
+		return
+	}
+	if span > maxAudioSpan {
+		writeError(w, http.StatusBadRequest, "invalid", "audio spans are at most 60 seconds")
+		return
+	}
+	body, err := PlaybackFetch(a.d.Engine)(r.Context(), export.Request{Camera: id, Stream: stream, Start: start, Duration: span, Owner: claimsFrom(r).Account})
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "engine", "playback unavailable")
+		return
+	}
+	defer func() { _ = body.Close() }()
+	wav, err := archive.AudioWAV(body)
+	writeAudio(w, wav, err, stream)
+}
+
+// writeAudio answers with the WAV or with what kept it from being made.
+func writeAudio(w http.ResponseWriter, wav []byte, err error, stream string) {
+	switch {
+	case errors.Is(err, archive.ErrNoAudio):
+		writeError(w, http.StatusNotFound, "no_audio", "no sound was recorded")
+	case errors.Is(err, archive.ErrAudioUnsupported):
+		writeError(w, http.StatusUnsupportedMediaType, "audio_unsupported", "the recorded sound format cannot be played yet")
+	case err != nil:
+		writeError(w, http.StatusBadGateway, "engine", "playback unreadable")
+	default:
+		w.Header().Set("Content-Type", "audio/wav")
+		w.Header().Set(servedStreamHeader, stream)
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = w.Write(wav)
+	}
+}
+
 type exportInput struct {
 	Stream          string    `json:"stream"`
 	Start           time.Time `json:"start"`

@@ -63,7 +63,7 @@ components:
         Height: { type: integer }
     Camera:
       type: object
-      required: [id, name, group, source, streams, enabled, created_at, updated_at]
+      required: [id, name, group, source, streams, enabled, record_audio, created_at, updated_at]
       properties:
         id: { type: string, example: cam_3f9a1c2b7d4e }
         name: { type: string, maxLength: 100 }
@@ -78,6 +78,7 @@ components:
           type: object
           additionalProperties: { $ref: "#/components/schemas/Stream" }
         enabled: { type: boolean }
+        record_audio: { type: boolean, description: "Sound is pulled and recorded only when true (ADR-0015); false by default" }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     StreamInput:
@@ -201,6 +202,7 @@ components:
         name: { type: string }
         group: { type: string }
         enabled: { type: boolean }
+        record_audio: { type: boolean, description: "Pull and record the camera's sound (ADR-0015); off unless the owner switches it on" }
         credentials: { $ref: "#/components/schemas/Credentials" }
   responses:
     Unauthorized:
@@ -314,6 +316,24 @@ paths:
             X-Camhive-Stream: { description: "The stream actually served (main or sub); differs from the request through the relay or for a camera without the requested stream", schema: { type: string, enum: [main, sub] } }
           content: { video/mp4: {} }
         "404": { $ref: "#/components/responses/NotFound" }
+        "502": { description: "`code: engine` — playback unavailable" }
+  /v0/cameras/{id}/archive/audio:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+      - { name: stream, in: query, schema: { type: string, enum: [main, sub], default: main } }
+      - { name: start, in: query, required: true, schema: { type: string, format: date-time } }
+      - { name: duration, in: query, required: true, schema: { type: integer, minimum: 1, maximum: 60 }, description: seconds }
+    get:
+      summary: "Recorded sound of a span as WAV, for the player's sound button (viewer; ADR-0015). Same stream rules as playback."
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Camhive-Stream: { description: "The stream actually served (main or sub)", schema: { type: string, enum: [main, sub] } }
+          content: { audio/wav: {} }
+        "400": { description: "`code: invalid` — bad span, or longer than 60 s" }
+        "404": { description: "`code: no_audio` — no sound recorded (camera without microphone or recording sound switched off); or the camera is unknown", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "415": { description: "`code: audio_unsupported` — sound recorded in a format the hive does not convert yet (only G.711/LPCM)", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
         "502": { description: "`code: engine` — playback unavailable" }
   /v0/cameras/{id}/exports:
     parameters:

@@ -75,6 +75,7 @@ func NewAPI(d Deps) http.Handler {
 	mux.Handle("GET /v0/cameras/{id}/archive/calendar", api.auth(api.calendar))
 	mux.Handle("GET /v0/cameras/{id}/archive/timeline", api.auth(api.timeline))
 	mux.Handle("GET /v0/cameras/{id}/archive/play", api.auth(api.play))
+	mux.Handle("GET /v0/cameras/{id}/archive/audio", api.auth(api.audio))
 	mux.Handle("POST /v0/cameras/{id}/exports", api.auth(api.createExport))
 	mux.Handle("GET /v0/exports", api.auth(api.listExports))
 	mux.Handle("GET /v0/exports/{id}", api.auth(api.getExport))
@@ -182,6 +183,7 @@ type cameraView struct {
 	Credentials *credentialsView             `json:"credentials,omitempty"`
 	Streams     map[string]camera.StreamSpec `json:"streams"`
 	Enabled     bool                         `json:"enabled"`
+	RecordAudio bool                         `json:"record_audio"`
 	CreatedAt   time.Time                    `json:"created_at"`
 	UpdatedAt   time.Time                    `json:"updated_at"`
 }
@@ -199,7 +201,7 @@ func toView(c camera.Camera, claims auth.Claims) cameraView {
 	v := cameraView{
 		ID: string(c.ID), Name: c.Name, Group: c.Group,
 		Source:  sourceView{Kind: string(c.Source.Kind), Address: c.Source.Address},
-		Streams: map[string]camera.StreamSpec{}, Enabled: c.Enabled, CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
+		Streams: map[string]camera.StreamSpec{}, Enabled: c.Enabled, RecordAudio: c.RecordAudio, CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
 	}
 	for k, s := range c.Streams {
 		v.Streams[string(k)] = s
@@ -235,6 +237,7 @@ type cameraPatch struct {
 	Name        *string `json:"name"`
 	Group       *string `json:"group"`
 	Enabled     *bool   `json:"enabled"`
+	RecordAudio *bool   `json:"record_audio"`
 	Credentials *struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
@@ -341,7 +344,7 @@ func (a *api) patchCamera(w http.ResponseWriter, r *http.Request) {
 	if a.storeErr(w, err) {
 		return
 	}
-	patch := camera.Patch{Name: in.Name, Group: in.Group, Enabled: in.Enabled}
+	patch := camera.Patch{Name: in.Name, Group: in.Group, Enabled: in.Enabled, RecordAudio: in.RecordAudio}
 	if in.Credentials != nil {
 		patch.Credentials = &camera.Credentials{Username: in.Credentials.Username, Password: in.Credentials.Password}
 	}
@@ -354,7 +357,7 @@ func (a *api) patchCamera(w http.ResponseWriter, r *http.Request) {
 		a.internal(w, err)
 		return
 	}
-	a.record(r, "camera.update", string(u.ID), map[string]any{"name": in.Name, "group": in.Group, "enabled": in.Enabled, "credentials_changed": in.Credentials != nil})
+	a.record(r, "camera.update", string(u.ID), map[string]any{"name": in.Name, "group": in.Group, "enabled": in.Enabled, "record_audio": in.RecordAudio, "credentials_changed": in.Credentials != nil})
 	a.d.Notify()
 	writeJSON(w, http.StatusOK, toView(u, claims))
 }

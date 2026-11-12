@@ -69,6 +69,7 @@ func TestCameraRoundTripKeepsEverythingIncludingCredentials(t *testing.T) {
 	s := open(t)
 	ctx := context.Background()
 	in := sample(t, "Front")
+	in.RecordAudio = true
 	if err := s.Cameras().Put(ctx, in); err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +77,7 @@ func TestCameraRoundTripKeepsEverythingIncludingCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out.ID != in.ID || out.Name != in.Name || out.Group != in.Group || out.Source != in.Source || out.Enabled != in.Enabled {
+	if out.ID != in.ID || out.Name != in.Name || out.Group != in.Group || out.Source != in.Source || out.Enabled != in.Enabled || !out.RecordAudio {
 		t.Fatalf("got %+v\nwant %+v", out, in)
 	}
 	if out.Credentials != in.Credentials {

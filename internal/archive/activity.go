@@ -32,7 +32,7 @@ func ActivityOf(data []byte) (Activity, error) {
 		return Activity{}, err
 	}
 	moov, _ := find(head, "moov")
-	video, audio := pickTracks(moov)
+	video, audio, _ := pickTracks(moov)
 	if video == nil {
 		return Activity{}, errors.New("archive: no video track")
 	}
@@ -81,12 +81,14 @@ type mediaTrack struct {
 	id        int
 	timescale uint32
 	little    bool // LPCM byte order
+	channels  int  // LPCM channels
 }
 
 // pickTracks returns the first video track and the first 16-bit LPCM
-// ("ipcm") audio track of a moov. It reads the boxes itself: the engine's
-// segments carry user data general MP4 readers refuse.
-func pickTracks(moov []byte) (video, audio *mediaTrack) {
+// ("ipcm") audio track of a moov, and whether it has any sound track. It
+// reads the boxes itself: the engine's segments carry user data general MP4
+// readers refuse.
+func pickTracks(moov []byte) (video, audio *mediaTrack, sound bool) {
 	for _, b := range boxes(moov) {
 		if b.typ != "trak" {
 			continue
@@ -96,35 +98,47 @@ func pickTracks(moov []byte) (video, audio *mediaTrack) {
 		switch {
 		case handler == "vide" && video == nil && mt.timescale > 0:
 			video = mt
-		case handler == "soun" && audio == nil && mt.timescale > 0:
-			if little, ok := pcm16(b.payload); ok {
-				mt.little = little
+		case handler == "soun":
+			sound = true
+			if little, channels, ok := pcm16(b.payload); ok && audio == nil && mt.timescale > 0 {
+				mt.little, mt.channels = little, channels
 				audio = mt
 			}
 		}
 	}
-	return video, audio
+	return video, audio, sound
 }
 
 // pcm16 reads a sound trak's sample entry: ok for 16-bit LPCM ("ipcm" with
-// its pcmC box), and whether the samples are little-endian.
-func pcm16(trak []byte) (little, ok bool) {
+// its pcmC box), whether the samples are little-endian, and the channels.
+func pcm16(trak []byte) (little bool, channels int, ok bool) {
+	children, channels, ok := ipcmEntry(trak)
+	if !ok {
+		return false, 0, false
+	}
+	pcmC, found := find(children, "pcmC")
+	// pcmC: version/flags(4) format_flags(1) PCM_sample_size(1)
+	if !found || len(pcmC) < 6 || pcmC[5] != 16 || channels == 0 {
+		return false, 0, false
+	}
+	return pcmC[4]&1 != 0, channels, true
+}
+
+// ipcmEntry finds a trak's first sample entry if it is "ipcm" and returns
+// its child boxes and channel count.
+func ipcmEntry(trak []byte) (children []byte, channels int, ok bool) {
 	stsd, found := descend(trak, "mdia", "minf", "stbl", "stsd")
 	// stsd: version/flags(4) entry_count(4), then the first entry: size(4)
 	// type(4) and a 28-byte AudioSampleEntry before its child boxes.
 	if !found || len(stsd) < 8+8+28 || string(stsd[12:16]) != "ipcm" {
-		return false, false
+		return nil, 0, false
 	}
 	size := int(binary.BigEndian.Uint32(stsd[8:12]))
 	if size < 8+28 || 8+size > len(stsd) {
-		return false, false
+		return nil, 0, false
 	}
-	pcmC, found := find(stsd[8+8+28:8+size], "pcmC")
-	// pcmC: version/flags(4) format_flags(1) PCM_sample_size(1)
-	if !found || len(pcmC) < 6 || pcmC[5] != 16 {
-		return false, false
-	}
-	return pcmC[4]&1 != 0, true
+	channels = int(binary.BigEndian.Uint16(stsd[32:34])) // AudioSampleEntry: 16 reserved bytes, then channelcount
+	return stsd[8+8+28 : 8+size], channels, true
 }
 
 // descend follows a path of child boxes.

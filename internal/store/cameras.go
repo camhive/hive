@@ -19,7 +19,7 @@ type Cameras struct {
 	s *Store
 }
 
-const cameraColumns = `id, name, grp, source_kind, source_addr, username, password_enc, streams_json, enabled, created_at, updated_at`
+const cameraColumns = `id, name, grp, source_kind, source_addr, username, password_enc, streams_json, enabled, created_at, updated_at, record_audio`
 
 // Put inserts or replaces a camera (idempotent on ID).
 func (r *Cameras) Put(ctx context.Context, c camera.Camera) error {
@@ -32,13 +32,13 @@ func (r *Cameras) Put(ctx context.Context, c camera.Camera) error {
 		pw = r.s.seal(c.Credentials.Password)
 	}
 	_, err = r.s.db.ExecContext(ctx, `
-		INSERT INTO camera (`+cameraColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+		INSERT INTO camera (`+cameraColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(id) DO UPDATE SET
 		  name=excluded.name, grp=excluded.grp, source_kind=excluded.source_kind, source_addr=excluded.source_addr,
 		  username=excluded.username, password_enc=excluded.password_enc, streams_json=excluded.streams_json,
-		  enabled=excluded.enabled, updated_at=excluded.updated_at`,
+		  enabled=excluded.enabled, updated_at=excluded.updated_at, record_audio=excluded.record_audio`,
 		string(c.ID), c.Name, c.Group, string(c.Source.Kind), c.Source.Address, c.Credentials.Username, pw, string(streams),
-		boolInt(c.Enabled), c.CreatedAt.UTC().Format(time.RFC3339Nano), c.UpdatedAt.UTC().Format(time.RFC3339Nano))
+		boolInt(c.Enabled), c.CreatedAt.UTC().Format(time.RFC3339Nano), c.UpdatedAt.UTC().Format(time.RFC3339Nano), boolInt(c.RecordAudio))
 	if err != nil {
 		return fmt.Errorf("store: put camera: %w", err)
 	}
@@ -88,13 +88,13 @@ func (r *Cameras) scan(row scanner) (camera.Camera, error) {
 		c                    camera.Camera
 		id, kind, streamsRaw string
 		pw                   []byte
-		enabled              int
+		enabled, audio       int
 		created, updated     string
 	)
-	if err := row.Scan(&id, &c.Name, &c.Group, &kind, &c.Source.Address, &c.Credentials.Username, &pw, &streamsRaw, &enabled, &created, &updated); err != nil {
+	if err := row.Scan(&id, &c.Name, &c.Group, &kind, &c.Source.Address, &c.Credentials.Username, &pw, &streamsRaw, &enabled, &created, &updated, &audio); err != nil {
 		return camera.Camera{}, err
 	}
-	c.ID, c.Source.Kind, c.Enabled = camera.ID(id), camera.SourceKind(kind), enabled != 0
+	c.ID, c.Source.Kind, c.Enabled, c.RecordAudio = camera.ID(id), camera.SourceKind(kind), enabled != 0, audio != 0
 	if len(pw) > 0 {
 		plain, err := r.s.unseal(pw)
 		if err != nil {

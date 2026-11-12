@@ -45,8 +45,9 @@ archive page. It starts live, and the timeline below shows today.
    time zone; picking an earlier day opens its recordings. *Stream* switches
    between main and sub. Away from home on a plan with reduced remote quality
    the timeline and playback always use the sub stream's recordings.
-   Playback in the browser is silent: cameras send audio in formats browsers
-   cannot play, so the hive sends the video only. Exports keep the sound.
+   Playback starts silent. *Sound off/on* plays the recorded sound next to
+   the picture for cameras that record it; it is fetched only while sound is
+   on (about 1 MB a minute). Exports always keep the sound.
 3. The **timeline** shows the day: recorded spans as blocks, camera events
    (online/offline) as marks, an *activity* wave (how much the picture
    changed; a hint, not motion detection) and, for cameras that record sound,

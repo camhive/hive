@@ -83,9 +83,10 @@ export function CameraEditForm({ camera, onSubmit }: { camera: HiveCamera; onSub
   const [name, setName] = useState(camera.name);
   const [group, setGroup] = useState(camera.group ?? "");
   const [creds, setCreds] = useState<Creds>({ username: camera.credentials?.username ?? "", password: "" });
+  const [recordAudio, setRecordAudio] = useState(camera.record_audio ?? false);
   function submit(e: FormEvent) {
     e.preventDefault();
-    const p: hiveComponents["schemas"]["CameraPatch"] = { name, group };
+    const p: hiveComponents["schemas"]["CameraPatch"] = { name, group, record_audio: recordAudio };
     if (creds.password) p.credentials = creds;
     void onSubmit(p);
   }
@@ -95,6 +96,10 @@ export function CameraEditForm({ camera, onSubmit }: { camera: HiveCamera; onSub
       <Field label={t("cameras.group")} name={`group-${camera.id}`} maxLength={100} value={group} onChange={(e) => setGroup(e.target.value)} />
       <Field label={t("cameras.username")} name={`user-${camera.id}`} autoComplete="off" value={creds.username} onChange={(e) => setCreds({ ...creds, username: e.target.value })} />
       <Field label={t("cameras.password")} name={`pass-${camera.id}`} type="password" autoComplete="new-password" hint={t("cameras.passwordKeep")} value={creds.password} onChange={(e) => setCreds({ ...creds, password: e.target.value })} />
+      <label className="sm:col-span-2 flex items-start gap-2 text-sm mb-3">
+        <input type="checkbox" className="mt-1" checked={recordAudio} onChange={(e) => setRecordAudio(e.target.checked)} aria-describedby={`audio-hint-${camera.id}`} />
+        <span>{t("cameras.recordAudio")}<span id={`audio-hint-${camera.id}`} className="block muted text-xs">{t("cameras.recordAudioHint")}</span></span>
+      </label>
       <div><button className="btn">{t("cameras.save")}</button></div>
     </form>
   );

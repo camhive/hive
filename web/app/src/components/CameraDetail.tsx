@@ -9,6 +9,7 @@ import { streamFor } from "@/lib/reconnect";
 import type { PeerFactory, Signalling } from "@/lib/live";
 import { activityRuns, coverage, dayKey, dayStart, exportCapMinutes, nextRecorded, recordedAt, useCalendar, useEvents, useExports, useTimeline, type ExportJob, type StreamName } from "@/lib/archive";
 import { ArchivePlayer, DEFAULT_WINDOW_S, type PlayerDeps } from "@/lib/archivePlayer";
+import { ArchiveSound } from "@/lib/archiveSound";
 import { LiveTile } from "@/components/LiveTile";
 import { PtzPad } from "@/components/PtzPad";
 import { Timeline } from "@/components/Timeline";
@@ -54,14 +55,20 @@ export function CameraDetail({ hive, grant, quality, client, camera, health, sig
   const [exporting, setExporting] = useState(false);
   const video = useRef<HTMLVideoElement>(null);
   const player = useRef<ArchivePlayer | null>(null);
+  const audioEl = useRef<HTMLAudioElement>(null);
+  const sound = useRef<ArchiveSound | null>(null);
+  const playing = useRef<{ at: Date; seconds: number } | null>(null); // the window the player shows
+  const [soundOn, setSoundOn] = useState(false);
   const owner = grant.role === "owner";
   const operator = owner || grant.role === "operator";
   const actions = useCameraActions(camera, client, onClose);
 
-  useEffect(() => () => player.current?.stop(), []);
+  useEffect(() => () => { player.current?.stop(); sound.current?.stop(); }, []);
   // Another camera or day: start from a clean player.
   useEffect(() => {
     player.current?.stop();
+    sound.current?.stop();
+    playing.current = null;
     setPosition(null);
     setPlayError(null);
     setExporting(false);
@@ -84,13 +91,37 @@ export function CameraDetail({ hive, grant, quality, client, camera, health, sig
     const duration = Math.min(DEFAULT_WINDOW_S, Math.max(1, Math.floor(((range?.[1] ?? at.getTime() + DEFAULT_WINDOW_S * 1000) - at.getTime()) / 1000)));
     try {
       await player.current.play(camera.id, stream, at, duration, { main: camera.streams?.main?.Codec, sub: camera.streams?.sub?.Codec });
+      playing.current = { at, seconds: duration };
+      if (soundOn) void startSound();
     } catch (err) {
       setPlayError(err instanceof CamhiveError ? errorMessage(t, err) : t("archive.playbackFailed"));
     }
   }
 
+  // Sound is fetched only while the viewer wants it (ADR-0015).
+  async function startSound() {
+    const w = playing.current;
+    if (!w || !audioEl.current || !video.current) return;
+    sound.current ??= new ArchiveSound(audioEl.current, video.current, (path, sig) => transport.fetch(hive, path, { token: grant.token, signal: sig }));
+    try {
+      await sound.current.start(camera.id, stream, w.at, w.seconds);
+    } catch (err) {
+      setSoundOn(false);
+      setPlayError(errorMessage(t, err));
+    }
+  }
+
+  function toggleSound() {
+    const on = !soundOn;
+    setSoundOn(on);
+    if (on) void startSound();
+    else sound.current?.stop();
+  }
+
   function backToLive() {
     player.current?.stop();
+    sound.current?.stop();
+    playing.current = null;
     setPosition(null);
     setPlayError(null);
     setExporting(false);
@@ -133,6 +164,7 @@ export function CameraDetail({ hive, grant, quality, client, camera, health, sig
       <div className={live ? "hidden" : "bg-black rounded-lg aspect-video overflow-hidden relative"}>
         <video ref={video} className="w-full h-full object-contain" controls playsInline data-testid="player"
           onError={(e) => { if (e.currentTarget.getAttribute("src")) setPlayError(t("archive.playbackFailed")); }} />
+        <audio ref={audioEl} hidden />
         {position && <span className="absolute top-2 left-2 text-xs glass px-2 py-0.5 rounded" data-testid="position">{position.toLocaleString()}</span>}
       </div>
       {playError && <p role="alert" className="error text-sm">{playError}</p>}
@@ -147,6 +179,7 @@ export function CameraDetail({ hive, grant, quality, client, camera, health, sig
             <option value="main">main</option>
             <option value="sub">sub</option>
           </select>
+          {!live && <button type="button" className="btn btn-secondary btn-sm" aria-pressed={soundOn} onClick={toggleSound}>{soundOn ? t("archive.soundOn") : t("archive.soundOff")}</button>}
           {operator && client && <button type="button" className="btn btn-secondary btn-sm" onClick={() => setExporting((v) => !v)} disabled={!position}>{t("archive.exportFromHere")}</button>}
           {!live && <button type="button" className="btn btn-sm" onClick={backToLive}><span className="dot" style={{ color: "var(--accent)" }} aria-hidden="true" />{t("live.backToLive")}</button>}
         </div>

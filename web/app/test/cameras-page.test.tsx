@@ -137,8 +137,13 @@ describe("camera management on the hive page", () => {
     expect(within(edit).getByLabelText("Camera user")).toHaveValue("admin");
     await user.clear(within(edit).getByLabelText("Name"));
     await user.type(within(edit).getByLabelText("Name"), "Front door");
+    // ADR-0015: sound is off until the owner switches it on, with the legal note beside it.
+    const sound = within(edit).getByRole("checkbox", { name: /^Record sound/ });
+    expect(sound).not.toBeChecked();
+    expect(within(edit).getByText(/§ 201 StGB/)).toBeInTheDocument();
+    await user.click(sound);
     await user.click(within(edit).getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(bodies["PATCH /v0/cameras/cam_1"]![0]).toEqual({ name: "Front door", group: "Outside" }));
+    await waitFor(() => expect(bodies["PATCH /v0/cameras/cam_1"]![0]).toEqual({ name: "Front door", group: "Outside", record_audio: true }));
     await user.click(within(door).getByRole("checkbox", { name: /Enabled: / }));
     await waitFor(() => expect(bodies["PATCH /v0/cameras/cam_1"]!.at(-1)).toEqual({ enabled: false }));
     vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);

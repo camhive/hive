@@ -31,6 +31,7 @@ function stub(opts: { exportMax: number }) {
         case "GET /v0/cameras/cam_1/archive/calendar": return json(200, [{ day: "2026-11-08" }, { day: "2026-11-09" }]);
         case "GET /v0/cameras/cam_1/archive/timeline": return json(200, [{ start: at(8), duration_ms: 3_600_000, bytes: 1, complete: true, activity: { step_s: 10, video_kbps: [100, 900, 300], sound_db: [-90, -20, -40] } }, { start: at(20), duration_ms: 600_000, bytes: 1, complete: false }]);
         case "GET /v0/cameras/cam_1/events": return json(200, [{ id: 1, kind: "motion", at: at(8, 15), camera: "cam_1", data: {} }]);
+        case "GET /v0/cameras/cam_1/archive/audio": return json(404, { code: "no_audio", message: "" });
         case "GET /v0/cameras/cam_1/archive/play": return new Response(new Uint8Array([0, 0, 0, 1]), { status: 200, headers: { "Content-Type": "video/mp4" } });
         case "POST /v0/cameras/cam_1/exports": {
           const b = (await req.json()) as { duration_seconds: number; start: string };
@@ -109,6 +110,12 @@ describe("archive on the hive page", () => {
     // 12:00 has no footage and nothing later until 20:00 → jumps there.
     fireEvent.click(timeline, { clientX: 120 });
     await waitFor(() => expect(screen.getByTestId("position")).toHaveTextContent(new Date(at(20)).toLocaleString()));
+    // ADR-0015: sound is fetched only on request; a camera without it says so and the button goes back off.
+    expect(calls.some((c) => c.includes("/archive/audio"))).toBe(false);
+    await user.click(screen.getByRole("button", { name: "Sound off" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("No sound was recorded here");
+    expect(calls.find((c) => c.startsWith("GET /v0/cameras/cam_1/archive/audio?"))).toContain("duration=60");
+    expect(screen.getByRole("button", { name: "Sound off" })).toHaveAttribute("aria-pressed", "false");
     // 23:00: nothing recorded afterwards.
     fireEvent.click(timeline, { clientX: 230 });
     expect(await screen.findByRole("alert")).toHaveTextContent("Nothing recorded at this time");

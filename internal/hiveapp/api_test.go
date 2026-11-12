@@ -144,8 +144,11 @@ func TestOwnerManagesCamerasAndSecretsNeverComeBack(t *testing.T) {
 	if r.Status != 200 || len(r.List) != 1 || r.List[0]["id"] != id {
 		t.Fatalf("list: %d %v", r.Status, r.List)
 	}
-	r = f.do(t, "PATCH", "/v0/cameras/"+id, owner, map[string]any{"name": "Front door", "enabled": false})
-	if r.Status != 200 || r.Body["name"] != "Front door" || r.Body["enabled"] != false {
+	if r.List[0]["record_audio"] != false {
+		t.Fatalf("sound is off by default (ADR-0015): %v", r.List[0])
+	}
+	r = f.do(t, "PATCH", "/v0/cameras/"+id, owner, map[string]any{"name": "Front door", "enabled": false, "record_audio": true})
+	if r.Status != 200 || r.Body["name"] != "Front door" || r.Body["enabled"] != false || r.Body["record_audio"] != true {
 		t.Fatalf("patch: %d %v", r.Status, r.Body)
 	}
 	if r := f.do(t, "GET", "/v0/cameras/"+id, owner, nil); r.Status != 200 || r.Body["enabled"] != false {
