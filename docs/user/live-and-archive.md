@@ -41,20 +41,29 @@ archive page. It starts live, and the timeline below shows today.
 
 1. Click the **timeline** to play the recording from that moment. *Back to
    live* returns to live video.
-2. The **days** above the timeline list days with footage, in your browser's
-   time zone; picking an earlier day opens its recordings. *Stream* switches
-   between main and sub. Away from home on a plan with reduced remote quality
-   the timeline and playback always use the sub stream's recordings.
+2. The **days** below the timeline run from the oldest footage to today, in
+   your browser's time zone; days with footage are highlighted, the others
+   cannot be picked. Picking an earlier day opens its recordings. *Stream*
+   switches between main and sub. Away from home on a plan with reduced
+   remote quality the timeline and playback always use the sub stream's
+   recordings.
    Playback starts silent. *Sound off/on* plays the recorded sound next to
    the picture for cameras that record it; it is fetched only while sound is
-   on (about 1 MB a minute). Exports always keep the sound.
+   on (about 1 MB a minute). Exports always keep the sound. *Speed* plays at
+   1×, 2×, 4× or 8×; *Snapshot* saves the frame on screen as a PNG file on
+   your device (it is not sent anywhere). Playback continues into the next
+   recording of the day on its own.
 3. The **timeline** shows the day: recorded spans as blocks, camera events
    (online/offline) as marks, an *activity* wave (how much the picture
    changed; a hint, not motion detection) and, for cameras that record sound,
-   a *sound level* line, and the playhead with its time. Hover to read the
-   time under the cursor; click to seek. Zoom buttons switch between the whole
-   day, 6 hours and 1 hour around the playhead; the ruler labels adapt. Arrow
-   keys step a minute, with Shift ten minutes.
+   a *sound level* line, and the playhead; the time it shows, with seconds,
+   stands above the bar and follows playback. Hover to read the time under
+   the cursor; click to seek. Zoom with the mouse wheel, two fingers or the
+   buttons (whole day, 6 hours, 1 hour around the playhead); + and − work
+   too. Zoomed in, the bar follows the playhead and dragging it (or swiping
+   on a phone) pulls the footage under the playhead; over the whole day,
+   dragging moves the playhead. Letting go plays from there. Arrow keys step
+   a minute, with Shift ten minutes.
 4. Clicking a gap jumps to the next recorded moment; if nothing follows, the
    page says so.
 

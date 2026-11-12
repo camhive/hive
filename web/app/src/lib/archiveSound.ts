@@ -28,6 +28,7 @@ export class ArchiveSound {
   private readonly onTime = () => void this.sync();
   private readonly onPause = () => this.audio.pause();
   private readonly onPlay = () => void this.sync(true);
+  private readonly onRate = () => { this.audio.playbackRate = this.video.playbackRate; };
 
   constructor(private readonly audio: HTMLMediaElement, private readonly video: HTMLMediaElement, private readonly source: ByteSource, urls: URLs = {}) {
     this.urls = {
@@ -48,6 +49,8 @@ export class ArchiveSound {
     this.video.addEventListener("seeked", this.onTime);
     this.video.addEventListener("play", this.onPlay);
     this.video.addEventListener("pause", this.onPause);
+    this.video.addEventListener("ratechange", this.onRate);
+    this.onRate();
     await this.load(this.chunkAt(this.video.currentTime));
   }
 
@@ -55,7 +58,7 @@ export class ArchiveSound {
   stop(): void {
     this.abort?.abort();
     this.abort = null;
-    for (const [ev, fn] of [["timeupdate", this.onTime], ["seeked", this.onTime], ["play", this.onPlay], ["pause", this.onPause]] as const) {
+    for (const [ev, fn] of [["timeupdate", this.onTime], ["seeked", this.onTime], ["play", this.onPlay], ["pause", this.onPause], ["ratechange", this.onRate]] as const) {
       this.video.removeEventListener(ev, fn);
     }
     this.audio.pause();

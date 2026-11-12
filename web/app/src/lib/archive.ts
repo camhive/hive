@@ -101,21 +101,43 @@ export function zoomWindow(day: Date, span: number, center: number | null): [num
   return [from, from + span];
 }
 
+/** The shortest window the timeline zooms to. */
+export const MIN_SPAN = 600_000;
+
+/**
+ * Zooms a window by `factor` (< 1 in, > 1 out) around `anchor`, which keeps
+ * its place on screen, as under a mouse wheel or between pinching fingers.
+ * Returns the new span and centre for zoomWindow.
+ */
+export function zoomAround(day: Date, [from, to]: [number, number], anchor: number, factor: number): [number, number] {
+  const span = Math.min(DAY_MS, Math.max(MIN_SPAN, (to - from) * factor));
+  const start = anchor - ((anchor - from) / (to - from)) * span;
+  const [a, b] = zoomWindow(day, span, start + span / 2);
+  return [b - a, (a + b) / 2];
+}
+
 export type Tick = { at: number; major: boolean; label?: string };
 
 /**
  * Ruler ticks for a window: a label on every major tick, minor ticks in
  * between. Steps scale with the span so labels never crowd: 24 h → 2 h/1 h,
- * 6 h → 30 min/10 min, 1 h → 10 min/5 min, shorter → 5 min/1 min.
+ * 6 h → 30 min/10 min, 1 h → 10 min/5 min, shorter → 5 min/1 min. Given
+ * the bar's width, only every n-th major tick keeps its label, n counted
+ * from midnight so labels stay on the same times while the bar pans.
  */
-export function ticks([from, to]: [number, number]): Tick[] {
+/** Pixels a ruler label needs to stay clear of the next one. */
+const LABEL_PX = 44;
+
+export function ticks([from, to]: [number, number], widthPx?: number): Tick[] {
   const span = to - from;
   const [major, minor] = span > 12 * 3_600_000 ? [2 * 3_600_000, 3_600_000] : span > 3 * 3_600_000 ? [1_800_000, 600_000] : span > 1_800_000 ? [600_000, 300_000] : [300_000, 60_000];
   const out: Tick[] = [];
   const offset = new Date(from).getTimezoneOffset() * 60_000; // align ticks to local clock time
+  const every = widthPx ? Math.max(1, Math.ceil(LABEL_PX / ((widthPx * major) / span))) : 1;
   for (let t = Math.ceil((from - offset) / minor) * minor + offset; t <= to; t += minor) {
     const isMajor = (t - offset) % major === 0;
-    out.push({ at: t, major: isMajor, ...(isMajor ? { label: clock(new Date(t)) } : {}) });
+    const labelled = isMajor && Math.round((t - offset) / major) % every === 0;
+    out.push({ at: t, major: isMajor, ...(labelled ? { label: clock(new Date(t)) } : {}) });
   }
   return out;
 }
@@ -123,6 +145,41 @@ export function ticks([from, to]: [number, number]): Tick[] {
 /** `HH:MM` in the browser's zone. */
 export function clock(d: Date): string {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+/** `HH:MM:SS` in the browser's zone. */
+export function clockSeconds(d: Date): string {
+  return `${clock(d)}:${String(d.getSeconds()).padStart(2, "0")}`;
+}
+
+export type StripDay = { key: string; date: Date; footage: boolean; monthStart: boolean };
+
+/** Days the strip shows at most; older footage is reached by URL. */
+const STRIP_MAX_DAYS = 366;
+
+/**
+ * The day strip: every day from the oldest with footage up to today, so gaps
+ * show as days without footage, at most STRIP_MAX_DAYS. A month label goes
+ * on the first day shown and on each 1st.
+ */
+export function dayStrip(footage: string[], today: string): StripDay[] {
+  const has = new Set(footage);
+  const end = dayStart(today);
+  const oldest = footage.reduce((a, b) => (b < a ? b : a), today);
+  const out: StripDay[] = [];
+  for (const d = dayStart(oldest); d <= end; d.setDate(d.getDate() + 1)) {
+    const key = dayKey(d);
+    out.push({ key, date: new Date(d), footage: has.has(key), monthStart: d.getDate() === 1 });
+  }
+  const shown = out.slice(-STRIP_MAX_DAYS);
+  if (shown[0]) shown[0].monthStart = true;
+  return shown;
+}
+
+/** File name for a still of `camera` at `at`: `Camera-name_YYYY-MM-DD_HH-MM-SS.png`. */
+export function snapshotName(camera: string, at: Date): string {
+  const name = camera.trim().replace(/[^\p{L}\p{N}_-]+/gu, "-") || "camera";
+  return `${name}_${dayKey(at)}_${clockSeconds(at).replaceAll(":", "-")}.png`;
 }
 
 /** Whether `t` falls inside recorded footage; returns the range or null. */

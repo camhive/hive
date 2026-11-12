@@ -16,6 +16,8 @@ const hive = { id: "hv_1", name: "Home", status: "active", online: true, claimed
   lan: { host: "hv_1.h.camhive.app", port: 16017, addrs: ["192.168.1.20"] }, relay_host: "hv_1.relay.camhive.app" };
 const day = dayStart("2026-11-09");
 const at = (h: number, m = 0) => new Date(day.getTime() + (h * 60 + m) * 60_000).toISOString();
+/** A day button's accessible name: the full date. */
+const dayName = (key: string) => dayStart(key).toLocaleDateString("en", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 
 function stub(opts: { exportMax: number }) {
   const calls: string[] = [];
@@ -77,8 +79,10 @@ describe("archive on the hive page", () => {
     const calls = stub({ exportMax: 10 });
     const { user } = mount("/hives/hv_1/archive?day=2026-11-09");
     // The old archive link redirects to the hive page with that camera opened on that day.
-    expect(await screen.findByRole("button", { name: "2026-11-09" }, { timeout: 5000 })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "2026-11-08" })).toHaveAttribute("aria-pressed", "false");
+    expect(await screen.findByRole("button", { name: dayName("2026-11-09") }, { timeout: 5000 })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: dayName("2026-11-08") })).toHaveAttribute("aria-pressed", "false");
+    // The strip runs on to today; a day without footage cannot be picked.
+    expect(screen.getByRole("button", { name: dayName("2026-11-10") })).toBeDisabled();
     const timeline = await screen.findByTestId("timeline");
     await waitFor(() => expect(within(timeline).getAllByTestId("segment")).toHaveLength(2));
     expect(within(timeline).getAllByTestId("event")).toHaveLength(1);
@@ -95,6 +99,7 @@ describe("archive on the hive page", () => {
     expect(play.searchParams.get("start")).toBe(at(8, 30));
     expect(play.searchParams.get("duration")).toBe("600");
     expect(screen.getByTestId("position")).toHaveTextContent(new Date(at(8, 30)).toLocaleString());
+    expect(screen.getByTestId("readout")).toHaveTextContent("08:30:00");
 
     // The ruler labels the day every two hours and the playhead shows its time;
     // zooming to 1 h re-centres the window on the playhead and the ruler to 10-minute steps.
@@ -145,5 +150,59 @@ describe("archive on the hive page", () => {
     await user.click(screen.getByRole("button", { name: "Back to live" }));
     await waitFor(() => expect(screen.queryByRole("button", { name: "Back to live" })).toBeNull());
     expect(within(screen.getByTestId("camera-detail")).getByTestId("tile").dataset.camera).toBe("cam_1");
+  }, 20_000);
+
+  it("drags and wheels the timeline, follows playback, plays on into the next window, changes speed and saves a snapshot", async () => {
+    const calls = stub({ exportMax: 10 });
+    const { user } = mount("/hives/hv_1/archive?day=2026-11-09");
+    const timeline = await screen.findByTestId("timeline", {}, { timeout: 5000 });
+    await waitFor(() => expect(within(timeline).getAllByTestId("segment")).toHaveLength(2));
+    vi.spyOn(timeline, "getBoundingClientRect").mockReturnValue({ left: 0, width: 240, top: 0, height: 32, right: 240, bottom: 32, x: 0, y: 0, toJSON: () => ({}) });
+    const plays = () => calls.filter((c) => c.includes("/archive/play")).map((c) => new URL("https://x" + c.split(" ")[1]!).searchParams.get("start"));
+    fireEvent.click(timeline, { clientX: 85 });
+    await waitFor(() => expect(plays()).toEqual([at(8, 30)]));
+
+    // Zoomed to 1 h, dragging a quarter of the bar to the left moves 15 minutes on; the playhead stays centred.
+    await user.click(screen.getByRole("button", { name: "1h" }));
+    fireEvent.pointerDown(timeline, { pointerId: 1, clientX: 120, button: 0, pointerType: "mouse" });
+    fireEvent.pointerMove(timeline, { pointerId: 1, clientX: 60, pointerType: "mouse" });
+    expect(screen.getByTestId("readout")).toHaveTextContent("08:45:00");
+    fireEvent.pointerUp(timeline, { pointerId: 1, clientX: 60, pointerType: "mouse" });
+    await waitFor(() => expect(plays()).toEqual([at(8, 30), at(8, 45)]));
+    expect(screen.getByTestId("window")).toHaveTextContent("08:15 – 09:15");
+
+    // The wheel zooms: far out is the whole day, in again leaves it.
+    fireEvent.wheel(timeline, { deltaY: 5000, clientX: 120 });
+    expect(screen.getByTestId("window")).toHaveTextContent("00:00 – 24:00");
+    expect(screen.getByRole("button", { name: "24h" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.wheel(timeline, { deltaY: -1000, clientX: 85 });
+    expect(screen.getByTestId("window")).not.toHaveTextContent("00:00 – 24:00");
+
+    // Playback moves the playhead and the readout.
+    const video = screen.getByTestId("player") as HTMLVideoElement;
+    Object.defineProperty(video, "currentTime", { configurable: true, value: 65 });
+    fireEvent(video, new Event("timeupdate"));
+    expect(screen.getByTestId("readout")).toHaveTextContent("08:46:05");
+
+    // Speed applies to this and later windows.
+    await user.selectOptions(screen.getByLabelText("Speed"), "4");
+    expect(video.playbackRate).toBe(4);
+    expect(video.defaultPlaybackRate).toBe(4);
+
+    // A snapshot is the frame shown, named after the camera and that moment.
+    Object.defineProperty(video, "videoWidth", { configurable: true, value: 640 });
+    Object.defineProperty(video, "videoHeight", { configurable: true, value: 360 });
+    const drawImage = vi.fn();
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({ drawImage } as unknown as CanvasRenderingContext2D);
+    vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation((cb) => cb(new Blob(["png"])));
+    const saved: string[] = [];
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) { saved.push(this.download); });
+    await user.click(screen.getByRole("button", { name: "Snapshot" }));
+    expect(drawImage).toHaveBeenCalledWith(video, 0, 0, 640, 360);
+    expect(saved).toEqual(["Door_2026-11-09_08-46-05.png"]);
+
+    // At the end of a window the next one plays on its own (08:45 + 10 min).
+    fireEvent(video, new Event("ended"));
+    await waitFor(() => expect(plays()).toEqual([at(8, 30), at(8, 45), at(8, 55)]));
   }, 20_000);
 });

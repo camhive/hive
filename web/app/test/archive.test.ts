@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DAY_MS, activityRuns, clock, coverage, dayKey, dayStart, exportCapMinutes, nextRecorded, recordedAt, ticks, timeAt, zoomWindow } from "../src/lib/archive";
+import { DAY_MS, MIN_SPAN, activityRuns, clock, clockSeconds, coverage, dayKey, dayStart, dayStrip, exportCapMinutes, nextRecorded, recordedAt, snapshotName, ticks, timeAt, zoomAround, zoomWindow } from "../src/lib/archive";
 import { mimeFor, playPath } from "../src/lib/archivePlayer";
 
 const day = dayStart("2026-11-09");
@@ -74,5 +74,50 @@ describe("timeline math", () => {
     expect(mimeFor("H265")).toContain("hvc1");
     expect(mimeFor(undefined)).toContain("avc1");
     expect(playPath("cam 1", "sub", new Date("2026-11-09T10:00:00Z"), 90.7)).toBe("/v0/cameras/cam%201/archive/play?stream=sub&start=2026-11-09T10%3A00%3A00.000Z&duration=90");
+  });
+});
+
+describe("timeline gestures", () => {
+  const d0 = day.getTime();
+  it("zooms around the point under the pointer, keeping it where it was on screen", () => {
+    // 6 h window 06:00–12:00, zoom in ×2 around 07:30 (a quarter in): 07:30 stays a quarter in.
+    const [span, center] = zoomAround(day, [d0 + 6 * 3_600_000, d0 + 12 * 3_600_000], d0 + 7.5 * 3_600_000, 0.5);
+    expect(span).toBe(3 * 3_600_000);
+    const [from, to] = zoomWindow(day, span, center);
+    expect((d0 + 7.5 * 3_600_000 - from) / (to - from)).toBeCloseTo(0.25);
+  });
+  it("never zooms past a day or under the minimum span", () => {
+    expect(zoomAround(day, [d0, d0 + DAY_MS], d0, 4)[0]).toBe(DAY_MS);
+    expect(zoomAround(day, [d0, d0 + MIN_SPAN], d0, 0.1)[0]).toBe(MIN_SPAN);
+  });
+  it("prints the time with seconds", () => {
+    expect(clockSeconds(new Date(d0 + (8 * 3600 + 5 * 60 + 7) * 1000))).toBe("08:05:07");
+  });
+});
+
+describe("ruler on a narrow bar", () => {
+  it("labels fewer major ticks so labels keep apart, on whole clock hours", () => {
+    const labels = ticks([day.getTime(), day.getTime() + DAY_MS], 340).filter((m) => m.label).map((m) => m.label);
+    expect(labels).toEqual(["00:00", "04:00", "08:00", "12:00", "16:00", "20:00", "00:00"]);
+  });
+});
+
+describe("day strip", () => {
+  it("lists every day from the oldest footage to today, marks those with footage and where a month starts", () => {
+    const strip = dayStrip(["2026-10-30", "2026-11-01"], "2026-11-02");
+    expect(strip.map((d) => d.key)).toEqual(["2026-10-30", "2026-10-31", "2026-11-01", "2026-11-02"]);
+    expect(strip.map((d) => d.footage)).toEqual([true, false, true, false]);
+    expect(strip.map((d) => d.monthStart)).toEqual([true, false, true, false]);
+    expect(strip[2]!.date.getDate()).toBe(1);
+  });
+  it("shows just today without footage and stays bounded for a very deep archive", () => {
+    expect(dayStrip([], "2026-11-02").map((d) => d.key)).toEqual(["2026-11-02"]);
+    expect(dayStrip(["2020-01-01"], "2026-11-02")).toHaveLength(366);
+  });
+});
+
+describe("snapshots", () => {
+  it("names the file after the camera and the moment shown", () => {
+    expect(snapshotName("Front door", new Date(day.getTime() + (8 * 3600 + 30 * 60 + 5) * 1000))).toBe("Front-door_2026-11-09_08-30-05.png");
   });
 });

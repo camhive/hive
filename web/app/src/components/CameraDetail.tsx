@@ -7,7 +7,8 @@ import { transport } from "@/lib/transport";
 import { errorMessage } from "@/lib/errors";
 import { streamFor } from "@/lib/reconnect";
 import type { PeerFactory, Signalling } from "@/lib/live";
-import { activityRuns, coverage, dayKey, dayStart, exportCapMinutes, nextRecorded, recordedAt, useCalendar, useEvents, useExports, useTimeline, type ExportJob, type StreamName } from "@/lib/archive";
+import { activityRuns, coverage, dayKey, dayStart, exportCapMinutes, nextRecorded, recordedAt, snapshotName, useCalendar, useEvents, useExports, useTimeline, type ExportJob, type StreamName } from "@/lib/archive";
+import { DayStrip } from "@/components/DayStrip";
 import { ArchivePlayer, DEFAULT_WINDOW_S, type PlayerDeps } from "@/lib/archivePlayer";
 import { ArchiveSound } from "@/lib/archiveSound";
 import { LiveTile } from "@/components/LiveTile";
@@ -59,6 +60,7 @@ export function CameraDetail({ hive, grant, quality, client, camera, health, sig
   const sound = useRef<ArchiveSound | null>(null);
   const playing = useRef<{ at: Date; seconds: number } | null>(null); // the window the player shows
   const [soundOn, setSoundOn] = useState(false);
+  const [rate, setRate] = useState(1);
   const owner = grant.role === "owner";
   const operator = owner || grant.role === "operator";
   const actions = useCameraActions(camera, client, onClose);
@@ -84,6 +86,7 @@ export function CameraDetail({ hive, grant, quality, client, camera, health, sig
     }
     setPosition(at);
     setPlayError(null);
+    playing.current = null; // until the new window plays, the video's time is not this window's
     if (!video.current) return;
     player.current ??= new ArchivePlayer(video.current, (path, sig) => transport.fetch(hive, path, { token: grant.token, signal: sig }),
       { onError: () => setPlayError(t("archive.playbackFailed")), ...playerDeps });
@@ -116,6 +119,54 @@ export function CameraDetail({ hive, grant, quality, client, camera, health, sig
     setSoundOn(on);
     if (on) void startSound();
     else sound.current?.stop();
+  }
+
+  /** The moment the video shows now. */
+  function shownAt(): Date | null {
+    const w = playing.current;
+    return w && video.current ? new Date(w.at.getTime() + video.current.currentTime * 1000) : null;
+  }
+
+  // The playhead follows playback.
+  function onTimeUpdate() {
+    const at = shownAt();
+    if (at) setPosition(at);
+  }
+
+  // A window ends: play on from where it stopped, over a gap if there is one, within the day.
+  function onEnded() {
+    const w = playing.current;
+    if (!w) return;
+    const next = nextRecorded(ranges, new Date(w.at.getTime() + w.seconds * 1000));
+    if (next && dayKey(next) === day) void seek(next);
+  }
+
+  function changeRate(r: number) {
+    setRate(r);
+    if (video.current) {
+      video.current.defaultPlaybackRate = r; // survives the next window's load
+      video.current.playbackRate = r;
+    }
+  }
+
+  // Saves the frame on screen as PNG; it never leaves the browser.
+  function snapshot() {
+    const v = video.current;
+    const at = shownAt() ?? position;
+    if (!v?.videoWidth || !at) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = v.videoWidth;
+    canvas.height = v.videoHeight;
+    canvas.getContext("2d")?.drawImage(v, 0, 0, v.videoWidth, v.videoHeight);
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = snapshotName(camera.name, at);
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    }, "image/png");
   }
 
   function backToLive() {
@@ -162,7 +213,7 @@ export function CameraDetail({ hive, grant, quality, client, camera, health, sig
         </LiveTile>
       )}
       <div className={live ? "hidden" : "bg-black rounded-lg aspect-video overflow-hidden relative"}>
-        <video ref={video} className="w-full h-full object-contain" controls playsInline data-testid="player"
+        <video ref={video} className="w-full h-full object-contain" controls playsInline data-testid="player" onTimeUpdate={onTimeUpdate} onEnded={onEnded}
           onError={(e) => { if (e.currentTarget.getAttribute("src")) setPlayError(t("archive.playbackFailed")); }} />
         <audio ref={audioEl} hidden />
         {position && <span className="absolute top-2 left-2 text-xs glass px-2 py-0.5 rounded" data-testid="position">{position.toLocaleString()}</span>}
@@ -170,22 +221,28 @@ export function CameraDetail({ hive, grant, quality, client, camera, health, sig
       {playError && <p role="alert" className="error text-sm">{playError}</p>}
 
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="seg flex-wrap" data-testid="calendar" role="group" aria-label={t("archive.calendar")}>
-          {days.map((d) => <button key={d} type="button" aria-pressed={d === day} onClick={() => pickDay(d)}>{d}</button>)}
-        </div>
+        {!live ? (
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <button type="button" className="btn btn-secondary btn-sm" aria-pressed={soundOn} onClick={toggleSound}>{soundOn ? t("archive.soundOn") : t("archive.soundOff")}</button>
+            <label className="muted" htmlFor="speed">{t("archive.speed")}</label>
+            <select id="speed" className="input input-sm !w-auto" value={rate} onChange={(e) => changeRate(Number(e.target.value))}>
+              {[1, 2, 4, 8].map((r) => <option key={r} value={r}>{r}×</option>)}
+            </select>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={snapshot} disabled={!position}>{t("archive.snapshot")}</button>
+          </div>
+        ) : <span />}
         <div className="flex flex-wrap items-center gap-2 text-sm">
           <label className="muted" htmlFor="stream">{t("archive.stream")}</label>
           <select id="stream" className="input input-sm !w-auto" value={stream} onChange={(e) => setStream(e.target.value as StreamName)}>
             <option value="main">main</option>
             <option value="sub">sub</option>
           </select>
-          {!live && <button type="button" className="btn btn-secondary btn-sm" aria-pressed={soundOn} onClick={toggleSound}>{soundOn ? t("archive.soundOn") : t("archive.soundOff")}</button>}
           {operator && client && <button type="button" className="btn btn-secondary btn-sm" onClick={() => setExporting((v) => !v)} disabled={!position}>{t("archive.exportFromHere")}</button>}
           {!live && <button type="button" className="btn btn-sm" onClick={backToLive}><span className="dot" style={{ color: "var(--accent)" }} aria-hidden="true" />{t("live.backToLive")}</button>}
         </div>
       </div>
-      {calendar.data && days.length === 0 && <p className="muted text-sm">{t("archive.noFootage")}</p>}
       <Timeline day={day} ranges={ranges} events={(events.data ?? []).map((e) => Date.parse(e.at ?? ""))} position={live ? (day === today ? new Date() : null) : position} onSeek={(at) => void seek(at)} activity={activity} />
+      {calendar.data && (days.length === 0 ? <p className="muted text-sm">{t("archive.noFootage")}</p> : <DayStrip footage={days} day={day} today={today} onPick={pickDay} />)}
 
       {operator && client && (
         <div aria-label={t("archive.export")} role="region">

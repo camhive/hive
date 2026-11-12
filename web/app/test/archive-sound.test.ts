@@ -50,4 +50,12 @@ describe("ArchiveSound (ADR-0015)", () => {
     expect(err).toBeInstanceOf(CamhiveError);
     expect((err as CamhiveError).code).toBe("no_audio");
   });
+  it("plays at the video's speed", async () => {
+    const video = Object.assign(media(), { playbackRate: 1 }), audio = Object.assign(media(true), { playbackRate: 1 });
+    const s = new ArchiveSound(audio, video, async () => wav(), { createObjectURL: () => "blob:1", revokeObjectURL: () => undefined });
+    await s.start("cam_1", "main", origin, 60);
+    video.playbackRate = 4;
+    video.dispatchEvent(new Event("ratechange"));
+    expect(audio.playbackRate).toBe(4);
+  });
 });

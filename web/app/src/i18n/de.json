@@ -275,7 +275,9 @@
       "done": "fertig",
       "failed": "fehlgeschlagen"
     },
-    "zoom": "Zoom"
+    "zoom": "Zoom",
+    "speed": "Tempo",
+    "snapshot": "Standbild"
   },
   "cameras": {
     "title": "Kameras",
