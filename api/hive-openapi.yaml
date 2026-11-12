@@ -274,7 +274,10 @@ paths:
             application/json:
               schema:
                 type: object
-                properties: { status: { type: string }, version: { type: string } }
+                properties:
+                  status: { type: string }
+                  version: { type: string }
+                  recording: { type: integer, description: "Cameras recording now; only to requests from this machine (the updater, ADR-0018)" }
   /v0/cameras:
     get:
       summary: Cameras the token may view

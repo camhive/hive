@@ -30,6 +30,8 @@ export interface paths {
                         "application/json": {
                             status?: string;
                             version?: string;
+                            /** @description Cameras recording now; only to requests from this machine (the updater, ADR-0018) */
+                            recording?: number;
                         };
                     };
                 };

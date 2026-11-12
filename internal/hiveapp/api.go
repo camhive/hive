@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -441,8 +442,27 @@ func (a *api) internal(w http.ResponseWriter, err error) {
 	writeError(w, http.StatusInternalServerError, "internal", "internal error")
 }
 
-func (a *api) health(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": a.d.Version})
+// health answers liveness and version; on loopback (the updater on the
+// same machine, ADR-0018) also how many cameras record.
+func (a *api) health(w http.ResponseWriter, r *http.Request) {
+	out := map[string]any{"status": "ok", "version": a.d.Version}
+	if a.d.Health != nil && fromLoopback(r) {
+		n := 0
+		for _, c := range a.d.Health.All() {
+			if c.Enabled && c.Online {
+				n++
+			}
+		}
+		out["recording"] = n
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// fromLoopback: a request from this machine that did not come through the relay.
+func fromLoopback(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	ip := net.ParseIP(host)
+	return err == nil && ip != nil && ip.IsLoopback() && !Relayed(r.Context())
 }
 
 // record appends to the local audit trail (ADR-0011). Details must never
