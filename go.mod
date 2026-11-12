@@ -5,6 +5,7 @@ go 1.27.3
 require (
 	aidanwoods.dev/go-paseto v1.6.0
 	github.com/bluenviron/gortsplib/v5 v5.6.7
+	github.com/bluenviron/mediacommon/v2 v2.9.6
 	github.com/coder/websocket v1.8.15
 	github.com/getkin/kin-openapi v0.153.0
 	github.com/kardianos/service v1.3.0
@@ -19,7 +20,7 @@ require (
 
 require (
 	aidanwoods.dev/go-result v0.3.1 // indirect
-	github.com/bluenviron/mediacommon/v2 v2.9.6 // indirect
+	github.com/abema/go-mp4 v1.7.3 // indirect
 	github.com/dustin/go-humanize v1.1.0 // indirect
 	github.com/go-openapi/jsonpointer v0.22.5 // indirect
 	github.com/go-openapi/swag/jsonname v0.25.5 // indirect

@@ -231,7 +231,7 @@ func (a *api) play(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(servedStreamHeader, stream) // the player needs this stream's codec, not the one it asked for
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
-	_, _ = io.Copy(w, body)
+	_ = archive.CopyPlayable(w, body) // video only: browsers refuse the whole file over a track they cannot decode
 }
 
 type exportInput struct {

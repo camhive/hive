@@ -26,6 +26,7 @@ type playbackEngine struct {
 	video.Engine
 	srv  *httptest.Server
 	last string
+	body []byte // what playback answers; nil: a recognisable stub
 }
 
 func (p *playbackEngine) PlaybackURL(cam video.CameraID, s video.Stream, start time.Time, d time.Duration) string {
@@ -44,6 +45,10 @@ func newArchiveAPI(t *testing.T) (*apiFixture, *playbackEngine, camera.Camera) {
 	eng.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		eng.last = r.URL.String()
 		w.Header().Set("Content-Type", "video/mp4")
+		if eng.body != nil {
+			_, _ = w.Write(eng.body)
+			return
+		}
 		_, _ = w.Write([]byte("\x00\x00\x00\x18ftypiso5" + strings.Repeat("v", 100)))
 	}))
 	t.Cleanup(eng.srv.Close)

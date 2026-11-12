@@ -15,6 +15,8 @@ Camhive binaries include the open-source components below, each under its own li
 |---|---|---|
 | aidanwoods.dev/go-paseto | MIT | https://github.com/aidantwoods/go-paseto/blob/v1.6.0/LICENCE.md |
 | aidanwoods.dev/go-result | MIT | https://github.com/aidantwoods/go-result/blob/v0.3.1/LICENSE.md |
+| github.com/abema/go-mp4 | MIT | https://github.com/abema/go-mp4/blob/v1.7.3/LICENSE |
+| github.com/bluenviron/mediacommon/v2 | MIT | https://github.com/bluenviron/mediacommon/blob/v2.9.6/LICENSE |
 | github.com/coder/websocket | ISC | https://github.com/coder/websocket/blob/v1.8.15/LICENSE.txt |
 | github.com/dustin/go-humanize | MIT | https://github.com/dustin/go-humanize/blob/v1.1.0/LICENSE |
 | github.com/go-chi/chi/v5 | MIT | https://github.com/go-chi/chi/blob/v5.5.0/LICENSE |
