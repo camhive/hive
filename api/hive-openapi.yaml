@@ -140,6 +140,15 @@ components:
         duration_ms: { type: integer }
         bytes: { type: integer }
         complete: { type: boolean, description: false for the file still being written }
+        activity: { $ref: "#/components/schemas/Activity" }
+    Activity:
+      type: object
+      description: "Profile of a segment from its first video frame (ADR-0015): hints for the timeline, not detections. Absent until the hive has read the file."
+      required: [step_s, video_kbps]
+      properties:
+        step_s: { type: integer, description: seconds per value }
+        video_kbps: { type: array, items: { type: integer }, description: "video bit rate; movement raises it" }
+        sound_db: { type: array, items: { type: integer }, description: "sound level in dBFS, -90 for silence; absent without recorded audio" }
     ExportCreate:
       type: object
       required: [start, duration_seconds]

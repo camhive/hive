@@ -108,10 +108,11 @@ func (a *api) calendar(w http.ResponseWriter, r *http.Request) {
 }
 
 type segmentView struct {
-	Start      time.Time `json:"start"`
-	DurationMS int64     `json:"duration_ms"`
-	Bytes      int64     `json:"bytes"`
-	Complete   bool      `json:"complete"`
+	Start      time.Time         `json:"start"`
+	DurationMS int64             `json:"duration_ms"`
+	Bytes      int64             `json:"bytes"`
+	Complete   bool              `json:"complete"`
+	Activity   *archive.Activity `json:"activity,omitempty"`
 }
 
 func (a *api) timeline(w http.ResponseWriter, r *http.Request) {
@@ -139,7 +140,7 @@ func (a *api) timeline(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]segmentView, 0, len(segs))
 	for _, s := range segs {
-		out = append(out, segmentView{Start: s.Start, DurationMS: s.Duration.Milliseconds(), Bytes: s.Bytes, Complete: s.Complete})
+		out = append(out, segmentView{Start: s.Start, DurationMS: s.Duration.Milliseconds(), Bytes: s.Bytes, Complete: s.Complete, Activity: s.Activity})
 	}
 	writeJSON(w, http.StatusOK, out)
 }

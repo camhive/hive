@@ -1382,6 +1382,16 @@ export interface components {
             bytes?: number;
             /** @description false for the file still being written */
             complete?: boolean;
+            activity?: components["schemas"]["Activity"];
+        };
+        /** @description Profile of a segment from its first video frame (ADR-0015): hints for the timeline, not detections. Absent until the hive has read the file. */
+        Activity: {
+            /** @description seconds per value */
+            step_s: number;
+            /** @description video bit rate; movement raises it */
+            video_kbps: number[];
+            /** @description sound level in dBFS, -90 for silence; absent without recorded audio */
+            sound_db?: number[];
         };
         ExportCreate: {
             /**

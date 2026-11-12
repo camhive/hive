@@ -6,6 +6,7 @@ package archive
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -27,8 +28,9 @@ type Segment struct {
 	Duration time.Duration // 0 when unknown (file still open or unparsable)
 	Bytes    int64
 	Path     string
-	Complete bool // not the newest file of its stream, i.e. no longer written
-	Analysis int  // AnalysisVersion of the reading that filled it; 0 when unread
+	Complete bool      // not the newest file of its stream, i.e. no longer written
+	Analysis int       // AnalysisVersion of the reading that filled it; 0 when unread
+	Activity *Activity // profile for the timeline; nil when unread or without video
 }
 
 // MediaMTX writes <YYYY-MM-DD_HH-MM-SS-ffffff_±HHMM>.mp4 from our recordPath
@@ -115,7 +117,8 @@ func formatFileTime(t time.Time) string {
 // AnalysisVersion is the version of how fill reads a segment file. Raise it
 // when that reading changes; settled rows from an older version are read
 // again on the next reconcile. 1: duration from the video track only.
-const AnalysisVersion = 1
+// 2: and the activity profile (ADR-0015).
+const AnalysisVersion = 2
 
 // Index is the archive index over the store.
 type Index struct {
@@ -139,11 +142,22 @@ type Option func(*Index)
 func WithLogger(l *slog.Logger) Option { return func(i *Index) { i.log = l } }
 
 func toRow(s Segment) store.SegmentRow {
-	return store.SegmentRow{Camera: s.Camera, Stream: s.Stream, Start: s.Start, Duration: s.Duration, Bytes: s.Bytes, Path: s.Path, Complete: s.Complete, Analysis: s.Analysis}
+	row := store.SegmentRow{Camera: s.Camera, Stream: s.Stream, Start: s.Start, Duration: s.Duration, Bytes: s.Bytes, Path: s.Path, Complete: s.Complete, Analysis: s.Analysis}
+	if s.Activity != nil {
+		row.Activity, _ = json.Marshal(s.Activity) // plain ints and a slice: cannot fail
+	}
+	return row
 }
 
 func fromRow(r store.SegmentRow) Segment {
-	return Segment{Camera: r.Camera, Stream: r.Stream, Start: r.Start, Duration: r.Duration, Bytes: r.Bytes, Path: r.Path, Complete: r.Complete, Analysis: r.Analysis}
+	s := Segment{Camera: r.Camera, Stream: r.Stream, Start: r.Start, Duration: r.Duration, Bytes: r.Bytes, Path: r.Path, Complete: r.Complete, Analysis: r.Analysis}
+	if len(r.Activity) > 0 {
+		var a Activity
+		if json.Unmarshal(r.Activity, &a) == nil {
+			s.Activity = &a
+		}
+	}
+	return s
 }
 
 // Upsert records a segment.
@@ -315,6 +329,9 @@ func (i *Index) fill(seg *Segment) error {
 		return err
 	}
 	seg.Duration, seg.Analysis = d, AnalysisVersion
+	if a, err := ActivityOf(data); err == nil {
+		seg.Activity = &a
+	}
 	return nil
 }
 

@@ -15,7 +15,8 @@ type SegmentRow struct {
 	Bytes    int64
 	Path     string
 	Complete bool
-	Analysis int // version of the reading that filled the row
+	Analysis int    // version of the reading that filled the row
+	Activity []byte // JSON profile for the timeline; nil when none
 }
 
 // Segments returns the archive segment repository.
@@ -26,17 +27,18 @@ type Segments struct {
 	s *Store
 }
 
-const segmentColumns = `camera, stream, start_utc, duration_ms, bytes, path, complete, analysis`
+const segmentColumns = `camera, stream, start_utc, duration_ms, bytes, path, complete, analysis, activity`
 
 func ts(t time.Time) string { return t.UTC().Format("2006-01-02T15:04:05.000000Z") }
 
 // Upsert inserts or updates by (camera, stream, start).
 func (r *Segments) Upsert(ctx context.Context, row SegmentRow) error {
 	_, err := r.s.db.ExecContext(ctx, `
-		INSERT INTO segment (`+segmentColumns+`) VALUES (?,?,?,?,?,?,?,?)
+		INSERT INTO segment (`+segmentColumns+`) VALUES (?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(camera, stream, start_utc) DO UPDATE SET
-		  duration_ms=excluded.duration_ms, bytes=excluded.bytes, path=excluded.path, complete=excluded.complete, analysis=excluded.analysis`,
-		row.Camera, row.Stream, ts(row.Start), row.Duration.Milliseconds(), row.Bytes, row.Path, boolInt(row.Complete), row.Analysis)
+		  duration_ms=excluded.duration_ms, bytes=excluded.bytes, path=excluded.path, complete=excluded.complete,
+		  analysis=excluded.analysis, activity=excluded.activity`,
+		row.Camera, row.Stream, ts(row.Start), row.Duration.Milliseconds(), row.Bytes, row.Path, boolInt(row.Complete), row.Analysis, nullText(row.Activity))
 	if err != nil {
 		return fmt.Errorf("store: upsert segment: %w", err)
 	}
@@ -89,6 +91,14 @@ func (r *Segments) Usage(ctx context.Context) (Usage, error) {
 	return u, err
 }
 
+// nullText stores an empty value as NULL.
+func nullText(b []byte) any {
+	if len(b) == 0 {
+		return nil
+	}
+	return string(b)
+}
+
 type rowsLike interface {
 	Next() bool
 	Scan(dest ...any) error
@@ -104,7 +114,7 @@ func scanSegments(rows rowsLike) ([]SegmentRow, error) {
 			durationMS int64
 			complete   int
 		)
-		if err := rows.Scan(&row.Camera, &row.Stream, &start, &durationMS, &row.Bytes, &row.Path, &complete, &row.Analysis); err != nil {
+		if err := rows.Scan(&row.Camera, &row.Stream, &start, &durationMS, &row.Bytes, &row.Path, &complete, &row.Analysis, &row.Activity); err != nil {
 			return nil, err
 		}
 		t, err := time.Parse("2006-01-02T15:04:05.000000Z", start)

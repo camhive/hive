@@ -58,7 +58,8 @@ func newArchiveAPI(t *testing.T) (*apiFixture, *playbackEngine, camera.Camera) {
 	idx := archive.NewIndex(st)
 	base := time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC)
 	for i := range 3 {
-		_ = idx.Upsert(context.Background(), archive.Segment{Camera: string(cam.ID), Stream: "main", Start: base.Add(time.Duration(i) * 10 * time.Minute), Duration: 10 * time.Minute, Bytes: 1, Path: "/x", Complete: true})
+		_ = idx.Upsert(context.Background(), archive.Segment{Camera: string(cam.ID), Stream: "main", Start: base.Add(time.Duration(i) * 10 * time.Minute), Duration: 10 * time.Minute, Bytes: 1, Path: "/x", Complete: true,
+			Activity: &archive.Activity{StepS: 10, VideoKbps: []int{100 + i, 900}, SoundDB: []int{-90, -20}}})
 	}
 	berlin, _ := time.LoadLocation("Europe/Berlin")
 	h := hiveapp.NewAPI(hiveapp.Deps{
@@ -80,6 +81,10 @@ func TestCalendarAndTimelineFromTheIndex(t *testing.T) {
 	r = f.do(t, "GET", "/v0/cameras/"+string(cam.ID)+"/archive/timeline?stream=main&from=2026-11-09T10:05:00Z&to=2026-11-09T10:25:00Z", viewer, nil)
 	if r.Status != 200 || len(r.List) != 3 || r.List[0]["duration_ms"] != float64(600000) {
 		t.Fatalf("timeline: %d %v", r.Status, r.List)
+	}
+	// ADR-0015: the activity profile travels with each segment.
+	if a, _ := r.List[1]["activity"].(map[string]any); a == nil || a["step_s"] != float64(10) || a["video_kbps"].([]any)[0] != float64(101) || a["sound_db"].([]any)[1] != float64(-20) {
+		t.Fatalf("activity: %v", r.List[1]["activity"])
 	}
 	if r := f.do(t, "GET", "/v0/cameras/"+string(cam.ID)+"/archive/timeline?stream=main&from=bad", viewer, nil); r.Status != 400 || r.Body["code"] != "invalid" {
 		t.Fatalf("bad range: %d %v", r.Status, r.Body)
