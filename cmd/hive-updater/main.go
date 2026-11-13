@@ -142,8 +142,10 @@ func assemble(log *slog.Logger, paths hiveconfig.Paths, dir, bundleDir string, b
 	case root == nil:
 		log.Warn("no update root in this build: updates are off")
 	default:
+		url := cfg.UpdateURL + "/" + cfg.UpdateChannel
+		log.Info("updates on", "url", url, "mode", cfg.Updates, "window", cfg.UpdateWindow)
 		sc.Source = &update.SourceChannel{Platform: update.Platform(), Source: update.Source{
-			MetadataURL: cfg.UpdateURL + "/" + cfg.UpdateChannel, Root: root, CacheDir: filepath.Join(dir, "tuf")}}
+			MetadataURL: url, Root: root, CacheDir: filepath.Join(dir, "tuf")}}
 	}
 	return update.NewSupervisor(sc), nil
 }

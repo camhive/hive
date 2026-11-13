@@ -26,7 +26,8 @@ func bundle(t *testing.T) string {
 }
 
 // The packaged bundle next to the executable becomes the first version in
-// a private store; a release build with no trusted root runs without updates.
+// a private store; a release build checks the default channel with the
+// built-in root.
 func TestAssembleSeedsThePackagedBundleIntoAPrivateStore(t *testing.T) {
 	var logs bytes.Buffer
 	log := slog.New(slog.NewTextHandler(&logs, nil))
@@ -42,7 +43,7 @@ func TestAssembleSeedsThePackagedBundleIntoAPrivateStore(t *testing.T) {
 	if st, _ := os.Stat(dir); runtime.GOOS != "windows" && st.Mode().Perm() != 0o700 {
 		t.Fatalf("store mode = %v", st.Mode().Perm())
 	}
-	if !strings.Contains(logs.String(), "no update root") {
+	if !strings.Contains(logs.String(), "url=https://updates.dev.camhive.app/stable") {
 		t.Fatalf("logs = %s", logs.String())
 	}
 }
