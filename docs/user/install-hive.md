@@ -107,10 +107,11 @@ directory and claim again. Recordings stay on disk.
 |---|---|
 | `hive status` | `running`, `stopped` or `unknown` |
 | `hive start` / `stop` / `restart` | Control the service |
-| `hive install` / `uninstall` | Register or remove the service; footage is kept |
+| `hive install` / `uninstall` | Register or remove the service; footage is kept. The service runs `hive-updater`, which runs the hive (see Upgrading) |
 | `hive run` | Run in the foreground (for trying things out) |
 | `hive diag` | Write a diagnostic bundle, see [Troubleshooting](troubleshooting.md) |
 | `hive version` | Version, commit and build date |
+| `hive update` | Ask `hive-updater` to install an available update now (needs root / Administrator) |
 
 With a custom data directory, prefix every command with
 `CAMHIVE_DATA_DIR=…`, or the command looks in the default location.
@@ -130,12 +131,34 @@ needs to be opened on your router.
 
 ## Upgrading
 
-Replace the binary and restart:
+The service runs `hive-updater`, a small process that starts the hive,
+restarts it if it stops, and installs signed updates. A new version runs
+beside the old one; if it is not healthy within five minutes (the hive
+answers and every camera that recorded before records again), the
+updater goes back to the old version on its own and never tries that one
+again. How it is secured: [Hive updates](../security/updates.md) in the
+developer documentation.
 
-```bash
-sudo install -m 755 hive /usr/local/bin/hive && sudo hive restart
-```
+Settings in `hive.yaml`:
 
-With deb or rpm, install the new package. Identity, configuration and
-recordings are untouched. Automatic signed updates are planned but not
-shipped yet.
+| Setting | Default | Meaning |
+|---|---|---|
+| `updates` | `automatic` | `manual`: the hive only tells you an update is available; `hive update` installs it |
+| `update_window` | `02:00-05:00` | When automatic updates may install, local time; security fixes do not wait |
+| `update_channel` | `stable` | `beta` for earlier releases |
+| `update_url` | `https://updates.dev.camhive.app` | Where signed update information comes from; it is checked against keys built into the hive, so the server itself is not trusted |
+
+The updater keeps its versions in `/var/lib/camhive-updater` (Windows:
+`C:\Program Files\Camhive\updater`), readable only by root /
+Administrators, never in the data directory. Installed updates and
+rollbacks appear in the activity log.
+
+**Status:** the updater ships from this version on but installs nothing
+yet: the update keys are being set up. Until then, upgrade by hand:
+
+- **deb or rpm:** install the new package. The service, its data directory
+  (`CAMHIVE_DATA_DIR`), identity, configuration and recordings are kept;
+  a service that ran the hive directly is moved to the updater.
+- **Archive:** put `hive`, `hive-updater` and `mediamtx` from the new
+  archive in place of the old ones, then `sudo hive install` (moves the
+  service to the updater if it was not) and `sudo hive restart`.
