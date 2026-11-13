@@ -225,6 +225,7 @@ func (s *Supervisor) check(ctx context.Context, asked bool) {
 	}
 	s.cfg.Logger.Info("update check", "running", cur, "offered", target.Version, "verdict", verdict)
 	switch verdict {
+	case UpToDate, Wait:
 	case Install:
 		s.install(ctx, cur, target)
 	case Available, UpdaterTooOld:

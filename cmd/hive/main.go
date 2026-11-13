@@ -55,26 +55,11 @@ func run(args []string, stdout, stderr *os.File) int {
 	if dir := os.Getenv("CAMHIVE_DATA_DIR"); dir != "" {
 		paths = paths.WithDataDir(dir)
 	}
-	if cmd == "diag" {
-		return runDiag(paths, stdout, stderr)
-	}
-	if cmd == "claim" {
-		return runClaim(paths, args[1:], stdout, stderr)
+	if code, ok := standalone(cmd, args, paths, stdout, stderr); ok {
+		return code
 	}
 	prg := &program{log: slog.New(slog.NewTextHandler(stderr, nil)), paths: paths}
-	svcCfg := &service.Config{
-		Name:        serviceName,
-		DisplayName: "Camhive Hive",
-		Description: "Camhive video surveillance agent: records cameras and keeps footage at home.",
-		Arguments:   []string{"run"},
-		Option: service.KeyValue{
-			"Restart": "always", // systemd: restart on failure and on clean exit alike
-		},
-	}
-	if dir := os.Getenv("CAMHIVE_DATA_DIR"); dir != "" {
-		svcCfg.EnvVars = map[string]string{"CAMHIVE_DATA_DIR": dir} // carried into the installed service
-	}
-	svc, err := service.New(prg, svcCfg)
+	svc, err := service.New(prg, serviceConfig(cmd))
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -103,9 +88,44 @@ func run(args []string, stdout, stderr *os.File) int {
 		fmt.Fprintf(stdout, "%s: %s ok\n", serviceName, cmd)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "unknown command %q\nusage: hive [run|claim|install|uninstall|start|stop|restart|status|diag|--version]\n", cmd)
+		fmt.Fprintf(stderr, "unknown command %q\nusage: hive [run|claim|install|uninstall|start|stop|restart|status|update|diag|--version]\n", cmd)
 		return 2
 	}
+}
+
+// serviceConfig describes the camhive-hive service. On install it runs
+// hive-updater, which runs this hive as its child (ADR-0018); without the
+// updater next to us (a bare binary), the hive itself.
+func serviceConfig(cmd string) *service.Config {
+	c := &service.Config{
+		Name:        serviceName,
+		DisplayName: "Camhive Hive",
+		Description: "Camhive video surveillance agent: records cameras and keeps footage at home.",
+		Arguments:   []string{"run"},
+		Option: service.KeyValue{
+			"Restart": "always", // systemd: restart on failure and on clean exit alike
+		},
+	}
+	if dir := os.Getenv("CAMHIVE_DATA_DIR"); dir != "" {
+		c.EnvVars = map[string]string{"CAMHIVE_DATA_DIR": dir} // carried into the installed service
+	}
+	if up := updaterNextTo(); cmd == "install" && up != "" {
+		c.Executable = up
+	}
+	return c
+}
+
+// standalone runs the commands that do not touch the service.
+func standalone(cmd string, args []string, paths hiveconfig.Paths, stdout, stderr *os.File) (int, bool) {
+	switch cmd {
+	case "diag":
+		return runDiag(paths, stdout, stderr), true
+	case "claim":
+		return runClaim(paths, args[1:], stdout, stderr), true
+	case "update":
+		return requestUpdate(journal.DefaultDir(), stdout, stderr), true
+	}
+	return 0, false
 }
 
 func statusString(st service.Status) string {
