@@ -88,6 +88,14 @@ func TestHTTPHealthReadsVersionAndRecording(t *testing.T) {
 	if err != nil || h.Version.String() != "0.1.5" || h.Recording != 3 {
 		t.Fatalf("health = %+v, %v", h, err)
 	}
+	// The hive prints its version with build details, as `hive --version` does.
+	real := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"status":"ok","version":"0.1.90 (abc1234, 2026-11-13)","recording":0}`))
+	}))
+	defer real.Close()
+	if h, err := update.HTTPHealth(real.URL, nil)(context.Background()); err != nil || h.Version.String() != "0.1.90" {
+		t.Fatalf("hive's own format: %+v, %v", h, err)
+	}
 	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(503) }))
 	defer bad.Close()
 	if _, err := update.HTTPHealth(bad.URL, nil)(context.Background()); err == nil {

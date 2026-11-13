@@ -324,6 +324,10 @@ func (m *MediaMTX) Start(ctx context.Context) error {
 	}()
 
 	if err := waitTCP(ctx, net.JoinHostPort(m.Host, strconv.Itoa(m.APIPort))); err != nil {
+		// Do not leave it behind: it would hold the ports of the next start.
+		cancel()
+		_ = cmd.Process.Kill()
+		m.cmd, m.cancel = nil, nil
 		return fmt.Errorf("video: mediamtx API did not come up: %w", err)
 	}
 	return nil

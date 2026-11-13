@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 )
@@ -103,7 +104,12 @@ func HTTPHealth(base string, client *http.Client) HealthFunc {
 		if resp.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(resp.Body, 1<<16)).Decode(&body) != nil || body.Status != "ok" {
 			return Health{}, fmt.Errorf("update: hive not healthy (http %d)", resp.StatusCode)
 		}
-		v, err := ParseVersion(body.Version)
+		// The hive prints "1.2.3 (commit, date)", as `hive --version` does.
+		fields := strings.Fields(body.Version)
+		if len(fields) == 0 {
+			return Health{}, fmt.Errorf("update: hive reports no version")
+		}
+		v, err := ParseVersion(fields[0])
 		if err != nil {
 			return Health{}, err
 		}
