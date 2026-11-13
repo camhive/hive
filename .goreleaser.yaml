@@ -27,6 +27,21 @@ builds:
   - -X github.com/camhive/hive/internal/version.commit={{.ShortCommit}}
   - -X github.com/camhive/hive/internal/version.date={{.CommitDate}}
   mod_timestamp: '{{ .CommitTimestamp }}'
+- id: hive-updater
+  main: ./cmd/hive-updater
+  binary: hive-updater
+  goos:
+  - linux
+  - windows
+  goarch:
+  - amd64
+  - arm64
+  ignore:
+  - goos: windows
+    goarch: arm64
+  flags: *id001
+  ldflags: *id002
+  mod_timestamp: '{{ .CommitTimestamp }}'
 - id: camsim
   main: ./cmd/camsim
   binary: camsim
@@ -43,6 +58,7 @@ archives:
 - id: hive
   ids:
   - hive
+  - hive-updater
   name_template: hive_{{ .Version }}_{{ .Os }}_{{ .Arch }}
   formats:
   - tar.gz
@@ -70,6 +86,7 @@ nfpms:
 - id: hive
   ids:
   - hive
+  - hive-updater
   package_name: camhive-hive
   vendor: Camhive
   homepage: https://camhive.app
