@@ -12,8 +12,10 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 
 	"gopkg.in/yaml.v3"
 
@@ -121,10 +123,21 @@ type Config struct {
 	// the LAN (ADR-0012); the relay pipes into it over loopback. Empty
 	// disables the listener. Access still needs a token.
 	TLSListenAddr string `yaml:"tls_listen_addr"`
+	// Updates (ADR-0018), read by hive-updater. UpdateURL hosts the signed
+	// metadata (an untrusted transport); UpdateChannel is stable or beta;
+	// UpdateWindow is when updates may install (local time, HH:MM-HH:MM);
+	// Updates is automatic or manual (`hive update`). UpdateRoot names a
+	// root.json to trust instead of the one built in (self-built hives).
+	UpdateURL     string `yaml:"update_url"`
+	UpdateChannel string `yaml:"update_channel"`
+	UpdateWindow  string `yaml:"update_window"`
+	Updates       string `yaml:"updates"`
+	UpdateRoot    string `yaml:"update_root"`
 }
 
 func defaults(p Paths) Config {
-	return Config{ListenAddr: "127.0.0.1:16016", TLSListenAddr: "0.0.0.0:16443", ArchiveDir: p.Archive, LogLevel: "info", SegmentMinutes: 10, RetentionDays: 30, MinFreeGB: 10, ExportDays: 7, ExportMaxGB: 10}
+	return Config{ListenAddr: "127.0.0.1:16016", TLSListenAddr: "0.0.0.0:16443", ArchiveDir: p.Archive, LogLevel: "info", SegmentMinutes: 10, RetentionDays: 30, MinFreeGB: 10, ExportDays: 7, ExportMaxGB: 10,
+		UpdateURL: "https://updates.dev.camhive.app", UpdateChannel: "stable", UpdateWindow: "02:00-05:00", Updates: "automatic"}
 }
 
 // Validate rejects configurations we refuse to run with.
@@ -144,7 +157,29 @@ func (c Config) Validate() error {
 	if c.ArchiveDir == "" {
 		return errors.New("hiveconfig: archive_dir is required")
 	}
-	return c.validateStorage()
+	if err := c.validateStorage(); err != nil {
+		return err
+	}
+	return c.validateUpdates()
+}
+
+var windowRE = regexp.MustCompile(`^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$`)
+
+// validateUpdates checks the update settings (ADR-0018).
+func (c Config) validateUpdates() error {
+	if u, err := url.Parse(c.UpdateURL); err != nil || u.Scheme != "https" || u.Host == "" {
+		return fmt.Errorf("hiveconfig: update_url %q must be an https URL", c.UpdateURL)
+	}
+	if c.UpdateChannel != "stable" && c.UpdateChannel != "beta" {
+		return fmt.Errorf("hiveconfig: update_channel %q is not stable or beta", c.UpdateChannel)
+	}
+	if !windowRE.MatchString(c.UpdateWindow) || c.UpdateWindow[:5] == c.UpdateWindow[6:] {
+		return fmt.Errorf("hiveconfig: update_window %q must look like 02:00-05:00", c.UpdateWindow)
+	}
+	if c.Updates != "automatic" && c.Updates != "manual" {
+		return fmt.Errorf("hiveconfig: updates %q is not automatic or manual", c.Updates)
+	}
+	return nil
 }
 
 // validateStorage checks the recording and keeping limits.

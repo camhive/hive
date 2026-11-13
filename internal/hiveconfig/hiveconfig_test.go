@@ -191,6 +191,10 @@ func TestValidateNamesTheBadSetting(t *testing.T) {
 		"retention_days":  func(c *hiveconfig.Config) { c.RetentionDays = -1 },
 		"min_free_gb":     func(c *hiveconfig.Config) { c.MinFreeGB = -1 },
 		"export_max_gb":   func(c *hiveconfig.Config) { c.ExportMaxGB = -1 },
+		"update_url":      func(c *hiveconfig.Config) { c.UpdateURL = "ftp://x" },
+		"update_channel":  func(c *hiveconfig.Config) { c.UpdateChannel = "nightly" },
+		"update_window":   func(c *hiveconfig.Config) { c.UpdateWindow = "2-5" },
+		"updates":         func(c *hiveconfig.Config) { c.Updates = "sometimes" },
 	} {
 		c := good
 		mutate(&c)
@@ -214,5 +218,23 @@ func TestValidateNamesTheBadSetting(t *testing.T) {
 		if err := c.Validate(); err != nil {
 			t.Errorf("edge rejected: %v", err)
 		}
+	}
+}
+
+// ADR-0018: updates are on by default, nightly, from the stable channel of
+// the dev metadata host until the production stack exists.
+func TestUpdateSettingsDefaults(t *testing.T) {
+	paths := hiveconfig.DefaultPathsFor(runtime.GOOS, os.Getenv).WithDataDir(t.TempDir())
+	c, _, err := hiveconfig.Load(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.UpdateURL != "https://updates.dev.camhive.app" || c.UpdateChannel != "stable" || c.UpdateWindow != "02:00-05:00" || c.Updates != "automatic" || c.UpdateRoot != "" {
+		t.Fatalf("defaults = %q %q %q %q %q", c.UpdateURL, c.UpdateChannel, c.UpdateWindow, c.Updates, c.UpdateRoot)
+	}
+	c.UpdateWindow = "23:30-01:00"
+	c.Updates = "manual"
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
 	}
 }

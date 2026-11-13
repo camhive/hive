@@ -112,6 +112,8 @@ func supervisor(t *testing.T, hives *fakeHives, src *fakeSource) (*update.Superv
 	return supervisorWith(t, hives, src, nil)
 }
 
+var _ update.Channel = (*fakeSource)(nil)
+
 func supervisorWith(t *testing.T, hives *fakeHives, src update.Channel, with func(*update.SupervisorConfig)) (*update.Supervisor, *update.Versions, func() []string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -127,10 +129,13 @@ func supervisorWith(t *testing.T, hives *fakeHives, src update.Channel, with fun
 	var mu sync.Mutex
 	w, _ := update.ParseWindow("00:00-23:59")
 	cfg := update.SupervisorConfig{
-		Versions: vs, Runner: hives, Health: hives.Health, Source: src,
+		Versions: vs, Runner: hives, Health: hives.Health,
 		Hive: "hv_1", Updater: v(t, "0.1.4"), Window: w, Mode: update.Automatic,
 		CheckEvery: time.Hour, HealthTimeout: 300 * time.Millisecond, Poll: 10 * time.Millisecond, Restart: 10 * time.Millisecond,
 		Report: func(kind string, data map[string]any) { mu.Lock(); events = append(events, kind); mu.Unlock() },
+	}
+	if src != nil {
+		cfg.Source = src
 	}
 	if with != nil {
 		with(&cfg)
@@ -221,4 +226,34 @@ func count(h *fakeHives, ver string) int {
 		}
 	}
 	return n
+}
+
+// Manual mode installs only when the owner asks (`hive update`).
+func TestManualModeInstallsOnlyWhenAsked(t *testing.T) {
+	hives := &fakeHives{}
+	src := &fakeSource{target: update.Target{Version: v(t, "0.1.5"), Rollout: 100}}
+	s, vs, events := supervisorWith(t, hives, src, func(c *update.SupervisorConfig) { c.Mode = update.Manual })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go s.Run(ctx)
+	eventually(t, func() bool { e := events(); return len(e) > 0 && e[0] == "update.available" })
+	s.CheckNow(ctx)
+	if cur, _ := vs.Current(); cur.String() != "0.1.4" {
+		t.Fatalf("installed without being asked: %v", cur)
+	}
+	s.AskNow(ctx)
+	eventually(t, func() bool { return hives.runningVersion() == "0.1.5" })
+}
+
+// Without a channel (a dev build, or no trusted root) the updater only
+// keeps the hive running.
+func TestWithoutAChannelTheHiveJustRuns(t *testing.T) {
+	hives := &fakeHives{}
+	s, _, _ := supervisorWith(t, hives, nil, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go s.Run(ctx)
+	eventually(t, func() bool { return hives.runningVersion() == "0.1.4" })
+	s.CheckNow(ctx)
+	s.AskNow(ctx)
 }

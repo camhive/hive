@@ -65,7 +65,13 @@ type Supervisor struct {
 	proc   Process
 	gen    int
 	exited chan exit
-	checks chan chan struct{}
+	checks chan checkRequest
+	told   string // the version last reported as available
+}
+
+type checkRequest struct {
+	asked bool
+	done  chan struct{}
 }
 
 type exit struct {
@@ -93,14 +99,14 @@ func NewSupervisor(cfg SupervisorConfig) *Supervisor {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	return &Supervisor{cfg: cfg, exited: make(chan exit, 4), checks: make(chan chan struct{})}
+	return &Supervisor{cfg: cfg, exited: make(chan exit, 4), checks: make(chan checkRequest)}
 }
 
 // Run starts the Hive, checks for updates at once and then every
 // CheckEvery, and stops the Hive when ctx ends.
 func (s *Supervisor) Run(ctx context.Context) {
 	s.start(ctx)
-	s.check(ctx)
+	s.check(ctx, false)
 	t := time.NewTicker(s.cfg.CheckEvery)
 	defer t.Stop()
 	for {
@@ -119,20 +125,26 @@ func (s *Supervisor) Run(ctx context.Context) {
 			}
 			s.start(ctx)
 		case <-t.C:
-			s.check(ctx)
-		case done := <-s.checks:
-			s.check(ctx)
-			close(done)
+			s.check(ctx, false)
+		case req := <-s.checks:
+			s.check(ctx, req.asked)
+			close(req.done)
 		}
 	}
 }
 
 // CheckNow runs one update check in Run's goroutine and waits for it.
-func (s *Supervisor) CheckNow(ctx context.Context) {
-	done := make(chan struct{})
+func (s *Supervisor) CheckNow(ctx context.Context) { s.request(ctx, false) }
+
+// AskNow is the owner asking to update now (`hive update`): in manual mode
+// it installs what is offered, in any mode it ignores the window.
+func (s *Supervisor) AskNow(ctx context.Context) { s.request(ctx, true) }
+
+func (s *Supervisor) request(ctx context.Context, asked bool) {
+	req := checkRequest{asked: asked, done: make(chan struct{})}
 	select {
-	case s.checks <- done:
-		<-done
+	case s.checks <- req:
+		<-req.done
 	case <-ctx.Done():
 	}
 }
@@ -189,7 +201,10 @@ func (s *Supervisor) restart(ctx context.Context) {
 }
 
 // check asks the channel and installs what the policy says to.
-func (s *Supervisor) check(ctx context.Context) {
+func (s *Supervisor) check(ctx context.Context, asked bool) {
+	if s.cfg.Source == nil {
+		return // no channel: a dev build or no trusted root
+	}
 	if now := s.cfg.Now(); now.Before(s.cfg.NotBefore) {
 		s.cfg.Logger.Warn("update check skipped: the clock reads earlier than this updater was built", "now", now, "built", s.cfg.NotBefore)
 		return
@@ -204,10 +219,20 @@ func (s *Supervisor) check(ctx context.Context) {
 		return
 	}
 	verdict := Decide(Situation{Hive: s.cfg.Hive, Running: cur, Updater: s.cfg.Updater, Failed: s.cfg.Versions.Failed(),
-		Window: s.cfg.Window, Mode: s.cfg.Mode, Now: s.cfg.Now()}, target)
+		Window: s.cfg.Window, Mode: s.cfg.Mode, Asked: asked, Now: s.cfg.Now()}, target)
+	if asked && verdict == Wait {
+		verdict = Install // the owner asked: no need to wait for the window
+	}
 	s.cfg.Logger.Info("update check", "running", cur, "offered", target.Version, "verdict", verdict)
-	if verdict == Install {
+	switch verdict {
+	case Install:
 		s.install(ctx, cur, target)
+	case Available, UpdaterTooOld:
+		if s.told != target.Version.String() { // once per version, not hourly
+			s.told = target.Version.String()
+			s.cfg.Report("update."+map[Verdict]string{Available: "available", UpdaterTooOld: "needs_package"}[verdict],
+				map[string]any{"running": cur.String(), "offered": target.Version.String()})
+		}
 	}
 }
 
