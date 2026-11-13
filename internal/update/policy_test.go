@@ -76,6 +76,16 @@ func TestUpdateWindowCanCrossMidnight(t *testing.T) {
 	}
 }
 
+// AllDay has no gap: not even the last minute before midnight.
+func TestAllDayWindowContainsEveryMinute(t *testing.T) {
+	for m := 0; m < 24*60; m++ {
+		at := time.Date(2026, 11, 13, m/60, m%60, 30, 0, time.Local)
+		if !update.AllDay.Contains(at) {
+			t.Fatalf("%s outside the all-day window", at.Format("15:04"))
+		}
+	}
+}
+
 func TestDecide(t *testing.T) {
 	v := func(s string) update.Version { x, _ := update.ParseVersion(s); return x }
 	night := time.Date(2026, 11, 13, 3, 0, 0, 0, time.Local)

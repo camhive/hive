@@ -127,7 +127,7 @@ func supervisorWith(t *testing.T, hives *fakeHives, src update.Channel, with fun
 	}
 	var events []string
 	var mu sync.Mutex
-	w, _ := update.ParseWindow("00:00-23:59")
+	w := update.AllDay
 	cfg := update.SupervisorConfig{
 		Versions: vs, Runner: hives, Health: hives.Health,
 		Hive: "hv_1", Updater: v(t, "0.1.4"), Window: w, Mode: update.Automatic,

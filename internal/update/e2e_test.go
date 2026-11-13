@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"context"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -95,12 +96,14 @@ func TestRealHiveUpdatesAndABrokenBuildRollsBack(t *testing.T) {
 
 	var mu sync.Mutex
 	var events []string
-	all, _ := update.ParseWindow("00:00-23:59")
+	var logs bytes.Buffer // the supervisor's own account, shown when the test fails
+	all := update.AllDay
 	sup := update.NewSupervisor(update.SupervisorConfig{
 		Versions: versions, Runner: update.ExecRunner{Stdout: io.Discard, Stderr: io.Discard, Grace: 10 * time.Second},
 		Health: update.HTTPHealth("http://127.0.0.1:"+strconv.Itoa(port), &http.Client{Timeout: time.Second}),
 		Source: &update.SourceChannel{Source: repo.source(t), Platform: platform},
 		Hive:   "hv_e2e", Updater: v(t, "0.1.90"), Window: all, Mode: update.Automatic,
+		Logger:     slog.New(slog.NewTextHandler(lockedWriter{&mu, &logs}, nil)),
 		CheckEvery: time.Hour, HealthTimeout: 60 * time.Second, Poll: 250 * time.Millisecond, Restart: time.Second,
 		Report: func(kind string, _ map[string]any) { mu.Lock(); events = append(events, kind); mu.Unlock() },
 	})
@@ -116,7 +119,7 @@ func TestRealHiveUpdatesAndABrokenBuildRollsBack(t *testing.T) {
 			if ctx.Err() != nil {
 				mu.Lock()
 				defer mu.Unlock()
-				t.Fatalf("%s: timed out; events %v", what, events)
+				t.Fatalf("%s: timed out; events %v\nsupervisor log:\n%s", what, events, logs.String())
 			}
 			time.Sleep(200 * time.Millisecond)
 		}
@@ -145,4 +148,16 @@ func TestRealHiveUpdatesAndABrokenBuildRollsBack(t *testing.T) {
 	if f := versions.Failed(); len(f) != 1 || f[0].String() != "0.1.92" {
 		t.Fatalf("failed = %v", f)
 	}
+}
+
+// lockedWriter serialises the supervisor's log with the test's reads of it.
+type lockedWriter struct {
+	mu *sync.Mutex
+	w  io.Writer
+}
+
+func (l lockedWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(p)
 }

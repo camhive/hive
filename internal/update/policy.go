@@ -111,6 +111,10 @@ func InRollout(hiveID string, percent int) bool {
 // install; it may cross midnight.
 type Window struct{ from, to int } // minutes of the day, from inclusive, to exclusive
 
+// AllDay is a window without a gap (from == to, which ParseWindow refuses
+// from hive.yaml): for tests and callers that must not wait.
+var AllDay = Window{}
+
 // DefaultWindow is every night from 02:00 to 05:00.
 const DefaultWindow = "02:00-05:00"
 
