@@ -79,6 +79,7 @@ export function HivePage({ peer, playerDeps }: { peer?: PeerFactory; playerDeps?
       {access.isError && !evicted && <p role="alert" className="card error">{errorMessage(t, access.error)}</p>}
       {cameras.isError && <p role="alert" className="card error">{cameras.error instanceof CamhiveError ? errorMessage(t, cameras.error) : t("errors.hive_unreachable")}</p>}
       {cameras.data && all.length === 0 && !owner && <p className="card muted">{t("live.noCameras")}</p>}
+      {cameras.isPending && <p className="card muted" role="status" data-testid="cameras-loading">{t("cameras.loading")}</p>}
 
       {open && grant && signal && (
         <CameraDetail key={open.id} hive={hive} grant={grant} quality={quality} client={client} camera={open} health={healthOf(open)} signal={signal}
@@ -88,7 +89,7 @@ export function HivePage({ peer, playerDeps }: { peer?: PeerFactory; playerDeps?
 
       {adding && client && <AddCamera client={client} onDone={() => setAdding(false)} />}
 
-      {signal && grant && (others.length > 0 || owner) && (
+      {signal && grant && cameras.data && (others.length > 0 || owner) && (
         <section aria-label={t("cameras.title")} className={open ? "pt-2" : ""}>
           {open && others.length > 0 && <h2 className="eyebrow mb-2">{t("live.otherCameras")}</h2>}
           {layout === "list" ? (

@@ -330,7 +330,8 @@
       "local": "Bekommt die Kamera vom Router eine neue Adresse, findet der Hive sie wieder.",
       "routed": "Diese Kamera ist in einem anderen Netz als der Hive: Ändert sich ihre Adresse, findet der Hive sie nicht. Reservieren Sie ihre Adresse im Router."
     },
-    "replaceCamera": "Es ist eine neue Kamera, verwenden"
+    "replaceCamera": "Es ist eine neue Kamera, verwenden",
+    "loading": "Kameras werden geladen …"
   },
   "members": {
     "title": "Mitglieder",

@@ -189,6 +189,26 @@ describe("camera management on the hive page", () => {
     expect(within(door).getByTestId("camera-network")).toHaveTextContent("Reserve its address in the router");
   });
 
+  it("says the cameras are loading instead of looking like an empty hive", async () => {
+    stub("owner");
+    const real = globalThis.fetch;
+    let release: () => void = () => {};
+    const held = new Promise<void>((r) => { release = r; });
+    vi.stubGlobal("fetch", (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const href = input instanceof Request ? input.url : String(input); // not new Request(): it would use up the body
+      if (new URL(href).pathname === "/v0/cameras") await held; // the hive answers slowly (relay, weak network)
+      return real(input, init);
+    }) as typeof fetch);
+    const user = mount();
+    expect(await screen.findByTestId("cameras-loading")).toHaveTextContent("Loading cameras");
+    expect(screen.queryByRole("button", { name: "Add camera" })).toBeNull();
+    release();
+    await user.click(await screen.findByRole("button", { name: "List" }));
+    expect(await screen.findByTestId("camera")).toHaveTextContent("Door");
+    expect(screen.queryByTestId("cameras-loading")).toBeNull();
+    expect(screen.getByRole("button", { name: "Add camera" })).toBeTruthy();
+  });
+
   it("hides management from members", async () => {
     stub("viewer");
     const user = mount();
