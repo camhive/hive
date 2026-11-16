@@ -49,7 +49,7 @@ func TestMediaMTXEngineRecordsPlaysBackAndStreamsWebRTC(t *testing.T) {
 	// Engine.
 	archive := t.TempDir()
 	eng, err := video.NewMediaMTX(video.MediaMTXConfig{
-		Host: "127.0.0.1", APIPort: ports[3], PlaybackPort: ports[4], WebRTCPort: ports[5],
+		Host: "127.0.0.1", APIPort: ports[3], WebRTCPort: ports[5],
 		ArchiveDir: archive, SegmentDuration: 3 * time.Second, WorkDir: t.TempDir() + "/nested/work", // must be created
 	}, video.WithLogger(log))
 	requireTools(t, err)
@@ -86,22 +86,6 @@ func TestMediaMTXEngineRecordsPlaysBackAndStreamsWebRTC(t *testing.T) {
 	entries, _ := os.ReadDir(archive + "/front/main")
 	if len(entries) == 0 {
 		t.Fatalf("no files in %s/front/main", archive)
-	}
-
-	// Playback of the first segment returns fragmented MP4.
-	url := eng.PlaybackURL("front", video.Main, segs[0].Start, 2*time.Second)
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	head := make([]byte, 12)
-	if _, err := io.ReadFull(resp.Body, head); err != nil {
-		t.Fatalf("playback body: %v (status %d)", err, resp.StatusCode)
-	}
-	if resp.StatusCode != http.StatusOK || string(head[4:8]) != "ftyp" {
-		t.Fatalf("playback: status %d, first box %q", resp.StatusCode, head[4:8])
 	}
 
 	// Live over WebRTC: WHEP handshake, at least one RTP packet arrives.
@@ -146,7 +130,7 @@ func TestMediaMTXEnginePullsH265WithoutAudioAndRefusesStrangers(t *testing.T) {
 		t.Fatal(err)
 	}
 	eng, err := video.NewMediaMTX(video.MediaMTXConfig{
-		Host: "127.0.0.1", APIPort: ports[3], PlaybackPort: ports[4], WebRTCPort: ports[5], RTSPPort: ports[6],
+		Host: "127.0.0.1", APIPort: ports[3], WebRTCPort: ports[5], RTSPPort: ports[6],
 		ArchiveDir: t.TempDir(), SegmentDuration: 3 * time.Second, WorkDir: t.TempDir(),
 	}, video.WithLogger(log))
 	requireTools(t, err)

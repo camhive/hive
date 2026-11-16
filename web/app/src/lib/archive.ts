@@ -216,6 +216,27 @@ export function useTimeline(client: HiveClient | null, camera: string | undefine
   });
 }
 
+/** An event on the timeline: an instant, or a span when it lasts (motion, storage.low; ADR-0020). `ongoing` spans reach to when they were read. */
+export type TimelineMark = { id: number; kind: string; at: number; end?: number; ongoing: boolean; source?: string };
+
+const LASTING = new Set(["motion", "storage.low"]);
+
+/** The day's events as marks: lasting ones span to their end or, while they last, to `now`; events with an unreadable time are dropped. */
+export function timelineMarks(events: ArchiveEvent[], now = Date.now()): TimelineMark[] {
+  const out: TimelineMark[] = [];
+  for (const e of events) {
+    const at = Date.parse(e.at ?? "");
+    if (!Number.isFinite(at)) continue;
+    const lasting = LASTING.has(e.kind ?? "");
+    const ended = e.end ? Date.parse(e.end) : NaN;
+    const ongoing = lasting && !Number.isFinite(ended);
+    const end = lasting ? (ongoing ? now : ended) : undefined;
+    const source = (e.data as { source?: string } | undefined)?.source;
+    out.push({ id: e.id ?? 0, kind: e.kind ?? "", at, end, ongoing, source });
+  }
+  return out;
+}
+
 export function useEvents(client: HiveClient | null, camera: string | undefined, day: string | undefined) {
   const from = day ? dayStart(day) : undefined;
   return useQuery({

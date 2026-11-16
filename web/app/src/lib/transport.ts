@@ -127,21 +127,24 @@ export class Transport {
   /**
    * Fetches `path` on the hive with the access token. A LAN request that
    * fails at the network level demotes the hive to the relay and is retried
-   * there once; HTTP error statuses are returned as they are.
+   * there once; HTTP error statuses are returned as they are. A local
+   * session's token (#57) stays on the LAN: the hive refuses it through the
+   * relay, so it is never sent there.
    */
   async fetch(hive: Hive, path: string, init: RequestInit & { token: string }): Promise<Response> {
     const { token, ...rest } = init;
+    const lanOnly = isLocalToken(token);
     const headers = new Headers(rest.headers);
     headers.set("Authorization", `Bearer ${token}`);
     const f = this.deps.fetch ?? ((i, ini) => globalThis.fetch(i, ini));
     let d = await this.select(hive);
     for (let attempt = 0; ; attempt++) {
       const base = this.baseFor(hive, d);
-      if (!base) throw new TransportError("unreachable", d);
+      if (!base || (lanOnly && d.path !== "lan")) throw new TransportError("unreachable", d);
       try {
         return await f(`${base}${path}`, { ...rest, headers, mode: "cors" });
       } catch (err) {
-        if (d.path !== "lan" || attempt > 0 || !relayBase(hive)) throw err;
+        if (lanOnly || d.path !== "lan" || attempt > 0 || !relayBase(hive)) throw err;
         d = this.remember(hive.id, { path: "relay", reason: "lan_failed", at: this.now() });
       }
     }
@@ -180,6 +183,11 @@ export class Transport {
 function browserConnection(): EventTarget | null {
   const nav = (globalThis as { navigator?: { connection?: EventTarget } }).navigator;
   return nav?.connection ?? null;
+}
+
+/** A token the hive issued itself after a local sign-in (PASETO v4.local), not a cloud token. */
+export function isLocalToken(token: string): boolean {
+  return token.startsWith("v4.local.");
 }
 
 export class TransportError extends Error {

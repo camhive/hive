@@ -102,7 +102,10 @@
     "camera_auth": "Die Kamera hat die Anmeldung abgelehnt.",
     "unexpected_code": "Unerwarteter Fehler ({{code}}).",
     "export_running": "Ein Export dieser Aufnahmen läuft noch; bitte nach dessen Ende erneut löschen.",
-    "camera_mismatch": "An dieser Adresse antwortet ein anderes Gerät. Wenn Sie die Kamera ersetzt haben, bestätigen Sie es unten."
+    "camera_mismatch": "An dieser Adresse antwortet ein anderes Gerät. Wenn Sie die Kamera ersetzt haben, bestätigen Sie es unten.",
+    "lan_only": "Das geht nur über die Adresse des Hive in Ihrem Heimnetz, nicht über das Camhive-Relay.",
+    "local_login_disabled": "Die lokale Anmeldung ist für diesen Hive nicht eingeschaltet. Schalten Sie sie in den Einstellungen des Hive ein, solange Camhive erreichbar ist, oder führen Sie „hive local-login set“ auf dem Hive aus.",
+    "local_login_rate_limited": "Zu viele fehlgeschlagene Anmeldungen. Versuchen Sie es später erneut."
   },
   "account": {
     "title": "Konto",
@@ -279,7 +282,24 @@
     },
     "zoom": "Zoom",
     "speed": "Tempo",
-    "snapshot": "Standbild"
+    "snapshot": "Standbild",
+    "events": {
+      "title_one": "Ereignisse ({{count}})",
+      "title_other": "Ereignisse ({{count}})",
+      "ongoing": "läuft noch",
+      "kinds": {
+        "motion": "Bewegung",
+        "storage_low": "Speicher knapp",
+        "camera_offline": "Kamera offline",
+        "camera_online": "Kamera online",
+        "camera_address_changed": "Kameraadresse geändert",
+        "camera_identity_changed": "Anderes Gerät unter der Kameraadresse"
+      },
+      "source": {
+        "camera": "von der Kamera erkannt",
+        "frames": "im Bild erkannt"
+      }
+    }
   },
   "cameras": {
     "title": "Kameras",
@@ -511,5 +531,26 @@
     "exportsDeleted_one": "{{count}} Export gelöscht.",
     "exportsDeleted_other": "{{count}} Exporte gelöscht.",
     "thisDay": "Diesen Tag löschen…"
+  },
+  "localLogin": {
+    "title": "Im eigenen Netz anmelden",
+    "intro": "Camhive erreicht diesen Hive gerade nicht, aber der Hive antwortet in Ihrem Netz. Melden Sie sich mit dem lokalen Benutzernamen und Passwort an, die Sie für Notfälle eingerichtet haben.",
+    "username": "Lokaler Benutzername",
+    "password": "Lokales Passwort",
+    "submit": "Lokal anmelden",
+    "wrong": "Benutzername oder Passwort falsch.",
+    "banner": "Lokal in Ihrem Netz angemeldet. Livebild, Aufnahmen und Kameraeinstellungen funktionieren; Teilen, Mitglieder und Ihr Tarif brauchen Camhive. Die lokale Anmeldung endet nach einer Stunde oder wenn Sie diesen Tab schließen.",
+    "signOut": "Lokal abmelden",
+    "settingsTitle": "Lokale Anmeldung für Notfälle",
+    "settingsHelp": "Wenn Camhive nicht erreichbar ist und Ihr Offline-Zugang abgelaufen ist, können Sie sich in Ihrem Heimnetz trotzdem am Hive anmelden, mit einem Benutzernamen und Passwort, die nur der Hive kennt. Ausgeschaltet, bis Sie sie einrichten.",
+    "open": "Lokale Anmeldung einrichten",
+    "off": "Aus",
+    "on": "An für {{username}} seit {{date}}",
+    "passwordHint": "10–256 Zeichen, nicht der Benutzername. Nur auf dem Hive gespeichert, als Hash; geht nie an Camhive. Speichern beendet angemeldete lokale Sitzungen.",
+    "save": "Lokale Anmeldung speichern",
+    "turnOff": "Lokale Anmeldung ausschalten",
+    "locked_one": "Zu viele fehlgeschlagene Anmeldungen. Versuchen Sie es in {{count}} Minute erneut.",
+    "locked_other": "Zu viele fehlgeschlagene Anmeldungen. Versuchen Sie es in {{count}} Minuten erneut.",
+    "unreachable": "Der Hive antwortet gerade nicht in Ihrem Netz. Prüfen Sie, ob dieses Gerät im selben Netz wie der Hive ist."
   }
 }

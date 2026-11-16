@@ -49,6 +49,7 @@ const (
 	nsDevice = "http://www.onvif.org/ver10/device/wsdl"
 	nsMedia  = "http://www.onvif.org/ver10/media/wsdl"
 	nsPTZ    = "http://www.onvif.org/ver20/ptz/wsdl"
+	nsEvents = "http://www.onvif.org/ver10/events/wsdl"
 	nsSchema = "http://www.onvif.org/ver10/schema"
 )
 
@@ -59,9 +60,10 @@ type Client struct {
 	http   *http.Client
 	now    func() time.Time
 
-	mu    sync.Mutex
-	media string // resolved media service XAddr
-	ptz   string // resolved PTZ service XAddr, "" when unsupported
+	mu     sync.Mutex
+	media  string // resolved media service XAddr
+	ptz    string // resolved PTZ service XAddr, "" when unsupported
+	events string // resolved event service XAddr, "" when unsupported
 }
 
 // Option customises a Client.
@@ -216,30 +218,44 @@ func (c *Client) resolveServices(ctx context.Context) error {
 	if resolved {
 		return nil
 	}
-	media, ptz, err := c.fromServices(ctx)
-	if err != nil || media == "" {
-		m2, p2, err2 := c.fromCapabilities(ctx)
+	svc, err := c.fromServices(ctx)
+	if err != nil || svc.media == "" {
+		caps, err2 := c.fromCapabilities(ctx)
 		if err2 != nil && err != nil {
 			return err
 		}
-		if media == "" {
-			media = m2
-		}
-		if ptz == "" {
-			ptz = p2
-		}
+		svc = svc.or(caps)
 	}
-	if media == "" {
+	if svc.media == "" {
 		// Last resort used by many clients: assume the conventional path.
-		media = strings.Replace(c.device, "device_service", "media_service", 1)
+		svc.media = strings.Replace(c.device, "device_service", "media_service", 1)
 	}
 	c.mu.Lock()
-	c.media, c.ptz = c.rebase(media), c.rebase(ptz)
+	c.media, c.ptz, c.events = c.rebase(svc.media), c.rebase(svc.ptz), c.rebase(svc.events)
 	c.mu.Unlock()
 	return nil
 }
 
-func (c *Client) fromServices(ctx context.Context) (media, ptz string, err error) {
+// xaddrs are service addresses as the camera announced them.
+type xaddrs struct {
+	media, ptz, events string
+}
+
+// or fills the addresses s lacks from o.
+func (s xaddrs) or(o xaddrs) xaddrs {
+	if s.media == "" {
+		s.media = o.media
+	}
+	if s.ptz == "" {
+		s.ptz = o.ptz
+	}
+	if s.events == "" {
+		s.events = o.events
+	}
+	return s
+}
+
+func (c *Client) fromServices(ctx context.Context) (xaddrs, error) {
 	var out struct {
 		Services []struct {
 			Namespace string `xml:"Namespace"`
@@ -247,30 +263,34 @@ func (c *Client) fromServices(ctx context.Context) (media, ptz string, err error
 		} `xml:"Service"`
 	}
 	body := `<tds:GetServices xmlns:tds="` + nsDevice + `"><tds:IncludeCapability>false</tds:IncludeCapability></tds:GetServices>`
+	var svc xaddrs
 	if err := c.call(ctx, c.device, body, "GetServicesResponse", &out); err != nil {
-		return "", "", err
+		return svc, err
 	}
 	for _, s := range out.Services {
 		switch strings.TrimSpace(s.Namespace) {
 		case nsMedia:
-			media = strings.TrimSpace(s.XAddr)
+			svc.media = strings.TrimSpace(s.XAddr)
 		case nsPTZ:
-			ptz = strings.TrimSpace(s.XAddr)
+			svc.ptz = strings.TrimSpace(s.XAddr)
+		case nsEvents:
+			svc.events = strings.TrimSpace(s.XAddr)
 		}
 	}
-	return media, ptz, nil
+	return svc, nil
 }
 
-func (c *Client) fromCapabilities(ctx context.Context) (media, ptz string, err error) {
+func (c *Client) fromCapabilities(ctx context.Context) (xaddrs, error) {
 	var out struct {
-		Media string `xml:"Capabilities>Media>XAddr"`
-		PTZ   string `xml:"Capabilities>PTZ>XAddr"`
+		Media  string `xml:"Capabilities>Media>XAddr"`
+		PTZ    string `xml:"Capabilities>PTZ>XAddr"`
+		Events string `xml:"Capabilities>Events>XAddr"`
 	}
 	body := `<tds:GetCapabilities xmlns:tds="` + nsDevice + `"><tds:Category>All</tds:Category></tds:GetCapabilities>`
 	if err := c.call(ctx, c.device, body, "GetCapabilitiesResponse", &out); err != nil {
-		return "", "", err
+		return xaddrs{}, err
 	}
-	return strings.TrimSpace(out.Media), strings.TrimSpace(out.PTZ), nil
+	return xaddrs{media: strings.TrimSpace(out.Media), ptz: strings.TrimSpace(out.PTZ), events: strings.TrimSpace(out.Events)}, nil
 }
 
 // rebase keeps the path of xaddr but uses the scheme and host we reached the
@@ -291,9 +311,12 @@ func (c *Client) rebase(xaddr string) string {
 // call posts one SOAP action and decodes the element named responseLocal
 // from the body into out (out may be nil to only check for faults).
 func (c *Client) call(ctx context.Context, xaddr, body, responseLocal string, out any) error {
-	env := `<?xml version="1.0" encoding="UTF-8"?><s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">` +
-		c.securityHeader() + `<s:Body>` + body + `</s:Body></s:Envelope>`
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, xaddr, strings.NewReader(env))
+	return c.callWith(ctx, xaddr, "", body, responseLocal, out)
+}
+
+// callWith is call with extra SOAP header blocks (WS-Addressing).
+func (c *Client) callWith(ctx context.Context, xaddr, header, body, responseLocal string, out any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, xaddr, strings.NewReader(envelope(header+c.securityHeader(), body)))
 	if err != nil {
 		return err
 	}
@@ -322,8 +345,17 @@ func (c *Client) call(ctx context.Context, xaddr, body, responseLocal string, ou
 	return decodeBodyElement(raw, responseLocal, out)
 }
 
-// securityHeader builds the WS-Security UsernameToken header, or nothing when
-// no credentials are configured.
+// envelope wraps header blocks (none is fine) and a body in a SOAP 1.2 envelope.
+func envelope(header, body string) string {
+	if header != "" {
+		header = `<s:Header>` + header + `</s:Header>`
+	}
+	return `<?xml version="1.0" encoding="UTF-8"?><s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">` +
+		header + `<s:Body>` + body + `</s:Body></s:Envelope>`
+}
+
+// securityHeader builds the WS-Security UsernameToken header block, or
+// nothing when no credentials are configured.
 func (c *Client) securityHeader() string {
 	if c.creds.Username == "" {
 		return ""
@@ -335,12 +367,12 @@ func (c *Client) securityHeader() string {
 	h.Write(nonce)
 	h.Write([]byte(created))
 	h.Write([]byte(c.creds.Password))
-	return `<s:Header><wsse:Security s:mustUnderstand="1" xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd"` +
+	return `<wsse:Security s:mustUnderstand="1" xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd"` +
 		` xmlns:wsu="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd"><wsse:UsernameToken>` +
 		`<wsse:Username>` + xmlEscape(c.creds.Username) + `</wsse:Username>` +
 		`<wsse:Password Type="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordDigest">` + base64.StdEncoding.EncodeToString(h.Sum(nil)) + `</wsse:Password>` +
 		`<wsse:Nonce EncodingType="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-soap-message-security-1.0#Base64Binary">` + base64.StdEncoding.EncodeToString(nonce) + `</wsse:Nonce>` +
-		`<wsu:Created>` + created + `</wsu:Created></wsse:UsernameToken></wsse:Security></s:Header>`
+		`<wsu:Created>` + created + `</wsu:Created></wsse:UsernameToken></wsse:Security>`
 }
 
 // parseFault returns a Fault when the envelope body is a SOAP fault.

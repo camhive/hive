@@ -136,6 +136,25 @@ describe("Transport.fetch", () => {
     expect((await t2.fetch(hive, "/v0/cameras", { token: "bad" })).status).toBe(401);
   });
 
+  it("never sends a local session's token through the relay (#57)", async () => {
+    const urls: string[] = [];
+    let lanAlive = true;
+    const fetch = vi.fn(async (url: RequestInfo | URL) => {
+      const u = String(url);
+      urls.push(u);
+      if (u.startsWith("https://hv_1.h.") && lanAlive) return new Response("{}");
+      if (u.startsWith("https://hv_1.h.")) throw new TypeError("Failed to fetch");
+      return new Response("relayed");
+    });
+    const t = new Transport({ fetch });
+    await t.select(hive);
+    lanAlive = false;
+    await expect(t.fetch(hive, "/v0/cameras", { token: "v4.local.abc" })).rejects.toBeInstanceOf(TypeError); // no retry on the relay
+    const relay = new Transport({ fetch: vi.fn(async (u: RequestInfo | URL) => String(u).endsWith("/healthz") ? Promise.reject(new TypeError("x")) : new Response("relayed")) });
+    await expect(relay.fetch(hive, "/v0/cameras", { token: "v4.local.abc" })).rejects.toBeInstanceOf(TransportError);
+    expect(urls.some((u) => u.includes("relay"))).toBe(false);
+  });
+
   it("throws TransportError when no path exists, and rethrows relay failures", async () => {
     const t = new Transport({ fetch: refuse });
     const nothing: Hive = { ...hive, id: "hv_none", lan: undefined, relay_host: undefined };

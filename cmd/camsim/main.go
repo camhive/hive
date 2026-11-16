@@ -1,6 +1,6 @@
 // Command camsim runs simulated IP cameras for development and tests.
 //
-//	camsim --camera front:h264 --camera yard:h265:audio --rtsp-port 8554 --onvif-port 8080
+//	camsim --camera front:h264 --camera yard:h265:audio --camera gate:h264:motion --rtsp-port 8554 --onvif-port 8080
 //	camsim --profile quirky --user admin --pass secret
 //
 // Each camera publishes main and sub RTSP streams through MediaMTX and is
@@ -28,18 +28,29 @@ type cameraFlags []camsim.Camera
 
 func (c *cameraFlags) String() string { return fmt.Sprint(*c) }
 
-// Set parses "name[:codec][:audio]", e.g. "front", "yard:h265" or
-// "door:h264:audio" (a camera with a microphone).
+// Set parses "name[:codec][:audio][:motion]", e.g. "front", "yard:h265",
+// "door:h264:audio" (a camera with a microphone) or "gate:h264:motion" (a
+// still scene crossed by an object for 10 s every 30 s; ADR-0020).
 func (c *cameraFlags) Set(v string) error {
-	name, rest, _ := strings.Cut(v, ":")
-	if name == "" {
+	parts := strings.Split(v, ":")
+	cam := camsim.Camera{Name: parts[0]}
+	if cam.Name == "" {
 		return errors.New("camera name is empty")
 	}
-	codec, opt, _ := strings.Cut(rest, ":")
-	if opt != "" && opt != "audio" {
-		return fmt.Errorf("camera %q: unknown option %q (want audio)", name, opt)
+	if len(parts) > 1 {
+		cam.Codec = camsim.Codec(parts[1])
 	}
-	*c = append(*c, camsim.Camera{Name: name, Codec: camsim.Codec(codec), Audio: opt == "audio"})
+	for _, opt := range parts[min(2, len(parts)):] {
+		switch opt {
+		case "audio":
+			cam.Audio = true
+		case "motion":
+			cam.Motion = 30 * time.Second
+		default:
+			return fmt.Errorf("camera %q: unknown option %q (want audio or motion)", cam.Name, opt)
+		}
+	}
+	*c = append(*c, cam)
 	return nil
 }
 

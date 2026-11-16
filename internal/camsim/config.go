@@ -46,6 +46,19 @@ type Camera struct {
 	Sub   Resolution
 	FPS   int
 	Audio bool // a microphone: both streams carry a G.711 µ-law tone
+	// Motion, when set, replaces the moving test pattern with a still scene
+	// that an object crosses in the last third of every Motion period, and
+	// the ONVIF mock reports motion on the same schedule (ADR-0020).
+	Motion time.Duration
+}
+
+// Moving reports whether the object crosses the scene `since` after the
+// simulator started.
+func (cam Camera) Moving(since time.Duration) bool {
+	if cam.Motion <= 0 {
+		return false
+	}
+	return since%cam.Motion >= cam.Motion*2/3
 }
 
 // Profile selects how faithfully the ONVIF mock behaves.
@@ -69,6 +82,7 @@ type Config struct {
 	APIPort      int // MediaMTX control API (bound to Host)
 	ONVIFPort    int
 	Cameras      []Camera
+	NoEvents     bool   // no ONVIF event service, as on cameras without one
 	WorkDir      string // generated config and logs; temp dir when empty
 	MediaMTXPath string // binary; looked up in PATH when empty
 	FFmpegPath   string // binary; looked up in PATH when empty
@@ -165,6 +179,14 @@ func (c *Config) mediaServiceURL() string {
 	return fmt.Sprintf("http://%s:%d/onvif/media_service", c.Host, c.ONVIFPort)
 }
 
+func (c *Config) eventsServiceURL() string {
+	return fmt.Sprintf("http://%s:%d/onvif/events_service", c.Host, c.ONVIFPort)
+}
+
+func (c *Config) subscriptionURL(id string) string {
+	return fmt.Sprintf("http://%s:%d/onvif/subscription/%s", c.Host, c.ONVIFPort, id)
+}
+
 func (c *Config) ptzServiceURL() string {
 	return fmt.Sprintf("http://%s:%d/onvif/ptz_service", c.Host, c.ONVIFPort)
 }
@@ -194,12 +216,9 @@ func (c *Config) ffmpegArgs(cam Camera, s Stream) []string {
 	if cam.Codec == H265 {
 		enc = "libx265"
 	}
-	// testsrc2 is a moving pattern with a frame counter; no fonts needed, so it
-	// behaves the same on Linux and Windows builds of ffmpeg.
-	src := fmt.Sprintf("testsrc2=size=%dx%d:rate=%d", res.Width, res.Height, cam.FPS)
 	args := []string{
 		"-hide_banner", "-loglevel", "error", "-nostdin",
-		"-re", "-f", "lavfi", "-i", src,
+		"-re", "-f", "lavfi", "-i", cam.scene(res),
 	}
 	audio := []string{"-an"}
 	if cam.Audio {
@@ -211,6 +230,24 @@ func (c *Config) ffmpegArgs(cam Camera, s Stream) []string {
 		"-g", itoa(cam.FPS*2), "-pix_fmt", "yuv420p")
 	args = append(args, audio...)
 	return append(args, "-f", "rtsp", "-rtsp_transport", "tcp", c.RTSPURL(cam, s))
+}
+
+// scene is the lavfi source of a stream. testsrc2 is a moving pattern with a
+// frame counter; no fonts needed, so it behaves the same on Linux and Windows
+// builds of ffmpeg. A motion camera instead shows a still, textured scene
+// with a little sensor noise, crossed by a light box on its Moving schedule.
+func (cam Camera) scene(res Resolution) string {
+	if cam.Motion <= 0 {
+		return fmt.Sprintf("testsrc2=size=%dx%d:rate=%d", res.Width, res.Height, cam.FPS)
+	}
+	period := int(cam.Motion.Seconds())
+	boxW, boxH := res.Width/10, res.Height/4
+	speed := float64(res.Width+boxW) / (cam.Motion.Seconds() / 3) // one crossing per moving third
+	return fmt.Sprintf("color=c=0x606060:size=%dx%d:rate=%d,format=yuv420p,noise=alls=20:allf=0,noise=alls=2:allf=t[bg];"+
+		"color=c=0xe0e0e0:size=%dx%d:rate=%d[box];"+
+		"[bg][box]overlay=x='if(gte(mod(t\\,%d)\\,%d)\\,(mod(t\\,%d)-%d)*%.1f-%d\\,-%d)':y=%d",
+		res.Width, res.Height, cam.FPS, boxW, boxH, cam.FPS,
+		period, period*2/3, period, period*2/3, speed, boxW, boxW, res.Height/3)
 }
 
 func itoa(i int) string { return strconv.Itoa(i) }

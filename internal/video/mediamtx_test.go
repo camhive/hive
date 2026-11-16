@@ -11,7 +11,7 @@ import (
 
 func testCfg() MediaMTXConfig {
 	return MediaMTXConfig{
-		Host: "127.0.0.1", APIPort: 19997, PlaybackPort: 19996, WebRTCPort: 18889,
+		Host: "127.0.0.1", APIPort: 19997, WebRTCPort: 18889,
 		ArchiveDir: "/var/lib/camhive/archive", SegmentDuration: 10 * time.Second,
 	}
 }
@@ -28,30 +28,36 @@ func TestBaseYAMLEnablesOnlyWhatTheHiveUses(t *testing.T) {
 	y := testCfg().baseYAML(testPub)
 	for _, want := range []string{
 		"api: yes", "apiAddress: 127.0.0.1:19997",
-		"playback: yes", "playbackAddress: 127.0.0.1:19996",
 		"webrtc: yes", "webrtcAddress: 127.0.0.1:18889",
 		// Media (ICE over UDP) must reach browsers on the LAN; signalling
 		// stays with the Hive, which checks access tokens first.
 		"webrtcLocalUDPAddress: :18890",
 		"rtmp: no", "hls: no", "srt: no", "moq: no",
+		// The Hive reads the archive itself (ADR-0019 §6).
+		"playback: no",
 		"paths: {}",
 	} {
 		if !strings.Contains(y, want) {
 			t.Errorf("yaml missing %q\n%s", want, y)
 		}
 	}
+	for _, gone := range []string{"playback: yes", "playbackAddress", "action: playback"} {
+		if strings.Contains(y, gone) {
+			t.Errorf("yaml still has %q\n%s", gone, y)
+		}
+	}
 }
 
 // The Hive publishes camera streams to the engine over RTSP on loopback
 // (ADR-0015). Only the Hive, holding this start's random password, may
-// publish; reading (WHEP) and playback stay open as before and the API stays
+// publish; reading (WHEP) stays open as before and the API stays
 // loopback-only.
 func TestBaseYAMLOpensLoopbackRTSPForTheHiveOnly(t *testing.T) {
 	y := testCfg().baseYAML(testPub)
 	for _, want := range []string{
 		"rtsp: yes\nrtspAddress: 127.0.0.1:18554\nrtspTransports: [tcp]\nrtspEncryption: \"no\"\n",
 		"authMethod: internal\n",
-		"  - user: any\n    pass: \"\"\n    ips: []\n    permissions:\n      - action: read\n      - action: playback\n",
+		"  - user: any\n    pass: \"\"\n    ips: []\n    permissions:\n      - action: read\n",
 		"  - user: any\n    pass: \"\"\n    ips: [127.0.0.1, \"::1\"]\n    permissions:\n      - action: api\n",
 		"  - user: \"hive\"\n    pass: \"0e12\"\n    ips: [127.0.0.1, \"::1\"]\n    permissions:\n      - action: publish\n",
 	} {
@@ -111,14 +117,8 @@ func TestPathConfigRecordsFMP4UnderArchiveDirWithoutAutoDelete(t *testing.T) {
 	}
 }
 
-func TestPlaybackAndWHEPURLs(t *testing.T) {
+func TestWHEPURL(t *testing.T) {
 	cfg := testCfg()
-	start := time.Date(2026, 11, 9, 10, 30, 0, 0, time.UTC)
-	got := cfg.PlaybackURL("front", Sub, start, 90*time.Second)
-	want := "http://127.0.0.1:19996/get?duration=90&format=fmp4&path=front%2Fsub&start=2026-11-09T10%3A30%3A00Z"
-	if got != want {
-		t.Fatalf("PlaybackURL\n got %s\nwant %s", got, want)
-	}
 	if got := cfg.WHEPURL("front", Main); got != "http://127.0.0.1:18889/front/main/whep" {
 		t.Fatalf("WHEPURL = %s", got)
 	}
@@ -176,7 +176,7 @@ func TestConfigValidationAndDefaults(t *testing.T) {
 	}
 	c = MediaMTXConfig{ArchiveDir: "/x"}
 	c.applyDefaults()
-	if c.Host == "" || c.APIPort == 0 || c.PlaybackPort == 0 || c.WebRTCPort == 0 || c.SegmentDuration == 0 {
+	if c.Host == "" || c.APIPort == 0 || c.WebRTCPort == 0 || c.SegmentDuration == 0 {
 		t.Fatalf("defaults missing: %+v", c)
 	}
 	if err := c.validate(); err != nil {

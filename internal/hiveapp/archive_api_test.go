@@ -1,6 +1,7 @@
 package hiveapp_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -8,6 +9,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,23 +19,38 @@ import (
 	"github.com/camhive/hive/internal/export"
 	"github.com/camhive/hive/internal/hiveapp"
 	"github.com/camhive/hive/internal/store"
-	"github.com/camhive/hive/internal/video"
 )
 
-// playbackEngine is a fake engine whose PlaybackURL points at an httptest
-// server that returns a recognisable fMP4-looking body and records requests.
-type playbackEngine struct {
-	video.Engine
-	srv  *httptest.Server
-	last string
-	body []byte // what playback answers; nil: a recognisable stub
+// fakePlayback stands in for the archive reader: it records what it was
+// asked for and answers a recognisable fMP4-looking body.
+type fakePlayback struct {
+	mu   sync.Mutex
+	last export.Request
+	body []byte       // what playback answers; nil: a recognisable stub
+	real export.Fetch // when set, answers instead (a real archive reader)
 }
 
-func (p *playbackEngine) PlaybackURL(cam video.CameraID, s video.Stream, start time.Time, d time.Duration) string {
-	return p.srv.URL + "/get?path=" + string(cam) + "/" + string(s) + "&start=" + start.UTC().Format(time.RFC3339) + "&duration=" + d.String()
+func (p *fakePlayback) fetch(ctx context.Context, req export.Request) (io.ReadCloser, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.last = req
+	switch {
+	case p.real != nil:
+		return p.real(ctx, req)
+	case p.body != nil:
+		return io.NopCloser(bytes.NewReader(p.body)), nil
+	default:
+		return io.NopCloser(strings.NewReader("\x00\x00\x00\x18ftypiso5" + strings.Repeat("v", 100))), nil
+	}
 }
 
-func newArchiveAPI(t *testing.T) (*apiFixture, *playbackEngine, camera.Camera) {
+func (p *fakePlayback) asked() export.Request {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.last
+}
+
+func newArchiveAPI(t *testing.T) (*apiFixture, *fakePlayback, camera.Camera) {
 	t.Helper()
 	iss, _ := auth.NewIssuer("k1")
 	st, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "hive.db"), make([]byte, 32))
@@ -41,17 +58,7 @@ func newArchiveAPI(t *testing.T) (*apiFixture, *playbackEngine, camera.Camera) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	eng := &playbackEngine{}
-	eng.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		eng.last = r.URL.String()
-		w.Header().Set("Content-Type", "video/mp4")
-		if eng.body != nil {
-			_, _ = w.Write(eng.body)
-			return
-		}
-		_, _ = w.Write([]byte("\x00\x00\x00\x18ftypiso5" + strings.Repeat("v", 100)))
-	}))
-	t.Cleanup(eng.srv.Close)
+	play := &fakePlayback{}
 
 	cam, _ := camera.New(camera.Spec{Name: "Door", Source: camera.Source{Kind: camera.SourceRTSP, Address: "rtsp://h/door"}}, time.Now())
 	_ = st.Cameras().Put(context.Background(), cam)
@@ -64,11 +71,11 @@ func newArchiveAPI(t *testing.T) (*apiFixture, *playbackEngine, camera.Camera) {
 	berlin, _ := time.LoadLocation("Europe/Berlin")
 	h := hiveapp.NewAPI(hiveapp.Deps{
 		Store: st, Verifier: auth.NewVerifier("hv_1", auth.Keys{"k1": iss.PublicKey()}), Version: "test",
-		Index: idx, Engine: eng, Exports: export.NewManager(t.TempDir(), hiveapp.PlaybackFetch(eng), st.Exports()), Location: berlin,
+		Index: idx, Playback: play.fetch, Exports: export.NewManager(t.TempDir(), play.fetch, st.Exports()), Location: berlin,
 	})
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
-	return &apiFixture{srv: srv, iss: iss, st: st}, eng, cam
+	return &apiFixture{srv: srv, iss: iss, st: st}, play, cam
 }
 
 func TestCalendarAndTimelineFromTheIndex(t *testing.T) {
@@ -95,7 +102,7 @@ func TestCalendarAndTimelineFromTheIndex(t *testing.T) {
 }
 
 func TestPlaybackIsProxiedWithScopeCheck(t *testing.T) {
-	f, eng, cam := newArchiveAPI(t)
+	f, play, cam := newArchiveAPI(t)
 	viewer := f.token(t, auth.RoleViewer, string(cam.ID))
 	req, _ := http.NewRequestWithContext(context.Background(), "GET", f.srv.URL+"/v0/cameras/"+string(cam.ID)+"/archive/play?stream=main&start=2026-11-09T10:00:00Z&duration=90", nil)
 	req.Header.Set("Authorization", "Bearer "+viewer)
@@ -108,8 +115,8 @@ func TestPlaybackIsProxiedWithScopeCheck(t *testing.T) {
 	if resp.StatusCode != 200 || resp.Header.Get("Content-Type") != "video/mp4" || string(body[4:8]) != "ftyp" {
 		t.Fatalf("play: %d %s %q", resp.StatusCode, resp.Header.Get("Content-Type"), body[:12])
 	}
-	if !strings.Contains(eng.last, "duration=1m30s") || !strings.Contains(eng.last, string(cam.ID)+"/main") {
-		t.Fatalf("engine asked for %s", eng.last)
+	if got := play.asked(); got.Duration != 90*time.Second || got.Camera != string(cam.ID) || got.Stream != "main" {
+		t.Fatalf("playback asked for %+v", got)
 	}
 	other := f.token(t, auth.RoleViewer, "cam_other")
 	if r := f.do(t, "GET", "/v0/cameras/"+string(cam.ID)+"/archive/play?stream=main&start=2026-11-09T10:00:00Z&duration=90", other, nil); r.Status != 404 {

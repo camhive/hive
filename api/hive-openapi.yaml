@@ -8,6 +8,19 @@ info:
     /healthz carries an access token issued by the cloud (ADR-0004) as
     `Authorization: Bearer <paseto>`. Error bodies always have a stable `code`.
 
+    Local emergency login (#57, ADR-0004): when the owner has enabled it
+    (`PUT /v0/local-login` with a cloud token), `POST /v0/local-login/sessions`
+    signs the owner in with a local username and password and returns a
+    token the hive issued itself (PASETO v4.local, owner role, all cameras,
+    one hour). The sign-in and local tokens work only on the LAN listener,
+    from private or link-local addresses; through the relay, on the loopback
+    listener or from a loopback peer they answer `403 lan_only`. Five failed sign-ins in 15
+    minutes lock a source address (an IPv6 /64) for 15 minutes, fifty from
+    anywhere lock all sources (`429 local_login_rate_limited` with
+    `Retry-After`); an attempt counts before its password is checked.
+    Changing or disabling the login, here or with `hive local-login` on the
+    hive's console, ends every local session.
+
     Plan limits apply to remote requests only (#58). Requests that come
     through the cloud relay are remote: a token with `quality: sub` gets the
     sub stream for archive playback, exports and live offers whatever
@@ -30,7 +43,7 @@ components:
     accessToken:
       type: http
       scheme: bearer
-      bearerFormat: PASETO v4.public
+      bearerFormat: PASETO v4.public (cloud) or v4.local (local session, LAN only)
   schemas:
     Error:
       type: object
@@ -39,7 +52,7 @@ components:
         code:
           type: string
           description: Stable machine-readable code.
-          enum: [token_missing, token_invalid, token_expired, clock_skew, wrong_hive, license_required, forbidden, not_found, invalid, bad_json, not_ready, engine, unsupported, camera, camera_auth, plan_limit, internal]
+          enum: [token_missing, token_invalid, token_expired, clock_skew, wrong_hive, license_required, forbidden, not_found, invalid, bad_json, not_ready, engine, unsupported, camera, camera_auth, plan_limit, internal, lan_only, local_login_disabled, local_login_rate_limited, invalid_credentials, weak_password]
         message: { type: string }
     Source:
       type: object
@@ -236,12 +249,14 @@ components:
         streams: { type: object, additionalProperties: { $ref: "#/components/schemas/StreamHealth" } }
     Event:
       type: object
+      description: "A timeline Event (ADR-0009, ADR-0020). `id` is stable; a lasting Event (motion, storage.low) is listed from its start, also on later days while it goes on, and gains `end` when it is over."
       properties:
-        id: { type: integer }
-        camera: { type: string }
+        id: { type: integer, description: "Stable for the Event's life on this hive" }
+        camera: { type: string, description: "Empty for the hive's own Events (storage.low)" }
         kind: { type: string, enum: [camera.online, camera.offline, camera.address_changed, camera.identity_changed, storage.low, motion] }
-        at: { type: string, format: date-time }
-        data: { type: object }
+        at: { type: string, format: date-time, description: "When it happened or began" }
+        end: { type: string, format: date-time, description: "When it ended: equal to `at` for an instantaneous Event, absent while a lasting Event is still going on" }
+        data: { type: object, additionalProperties: true, description: "motion: `source` = camera | frames; storage.low: `free_bytes`, `min_free_gb`" }
     CameraPatch:
       type: object
       properties:
@@ -252,6 +267,29 @@ components:
         host: { type: string, description: "Move the camera to this host or IP, keeping ports and paths (ADR-0017)", example: "192.168.1.23" }
         replace_identity: { type: boolean, description: "Accept a device at the new host that is not the known camera (it was replaced)" }
         credentials: { $ref: "#/components/schemas/Credentials" }
+    LocalLogin:
+      type: object
+      required: [enabled]
+      properties:
+        enabled: { type: boolean, description: "false: the hive holds no local credential at all" }
+        username: { type: string }
+        updated_at: { type: string, format: date-time }
+    LocalCredentials:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string, minLength: 1, maxLength: 64 }
+        password: { type: string, minLength: 10, maxLength: 256, writeOnly: true, description: "10-256 characters, not the username; stored as an argon2id hash" }
+    LocalSession:
+      type: object
+      required: [token, session_id, expires_at, role, cameras, local]
+      properties:
+        token: { type: string, description: "PASETO v4.local; send as Bearer on the LAN listener only" }
+        session_id: { type: string }
+        expires_at: { type: string, format: date-time }
+        role: { type: string, enum: [owner] }
+        cameras: { type: array, items: { type: string }, description: "always [*]" }
+        local: { type: boolean, enum: [true] }
   responses:
     Unauthorized:
       description: Missing, invalid, expired or foreign token.
@@ -456,6 +494,7 @@ paths:
       - { name: to, in: query, required: true, schema: { type: string, format: date-time } }
     get:
       summary: Timeline events in [from, to) (viewer)
+      description: "The camera's Events and the hive's own (camera empty) that begin before `to` and end at or after `from` or are still going on, oldest first."
       responses:
         "200": { description: "OK", content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Event" } } } } }
         "400": { description: "`code: invalid`" }
@@ -630,3 +669,59 @@ paths:
                     target: { type: string }
                     details: { type: object }
         "403": { $ref: "#/components/responses/Forbidden" }
+  /v0/local-login:
+    get:
+      summary: Whether the local emergency login is enabled (owner)
+      responses:
+        "200":
+          description: "OK"
+          content: { application/json: { schema: { $ref: "#/components/schemas/LocalLogin" } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    put:
+      summary: Enable the local login or change its credentials (owner with a cloud token)
+      description: Ends every local session. A local session gets `403 forbidden`. Recorded as `local_login.enable`.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/LocalCredentials" } } }
+      responses:
+        "200":
+          description: "Enabled"
+          content: { application/json: { schema: { $ref: "#/components/schemas/LocalLogin" } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422":
+          description: "`weak_password` or `invalid` (username)"
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    delete:
+      summary: Disable the local login and delete its credentials (owner with a cloud token)
+      description: Ends every local session. Recorded as `local_login.disable`.
+      responses:
+        "204": { description: "Disabled" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v0/local-login/sessions:
+    post:
+      security: []
+      summary: Sign in locally (LAN listener only, no token)
+      description: |
+        Every verified attempt is recorded (`local_login.success`,
+        `local_login.failure`), and so is a lockout (`local_login.locked`).
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/LocalCredentials" } } }
+      responses:
+        "201":
+          description: "Signed in"
+          content: { application/json: { schema: { $ref: "#/components/schemas/LocalSession" } } }
+        "401":
+          description: "`invalid_credentials`"
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "403":
+          description: "`lan_only` (relay, loopback listener or peer, public source address) or `local_login_disabled`"
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "429":
+          description: "`local_login_rate_limited`; `Retry-After` says when to try again"
+          headers:
+            Retry-After: { schema: { type: integer }, description: seconds }
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }

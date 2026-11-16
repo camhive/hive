@@ -24,7 +24,7 @@ func TestStartThatFailsLeavesNoProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 	ports := testports.Get(t, 3)
-	m, err := NewMediaMTX(MediaMTXConfig{Binary: bin, Host: "127.0.0.1", APIPort: ports[0], PlaybackPort: ports[1], WebRTCPort: ports[2],
+	m, err := NewMediaMTX(MediaMTXConfig{Binary: bin, Host: "127.0.0.1", APIPort: ports[0], WebRTCPort: ports[2],
 		WorkDir: filepath.Join(dir, "work"), ArchiveDir: filepath.Join(dir, "archive"), SegmentDuration: 10 * time.Second})
 	if err != nil {
 		t.Fatal(err)

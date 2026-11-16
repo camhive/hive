@@ -5,8 +5,8 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"strings"
 	"testing"
+	"time"
 
 	"github.com/bluenviron/mediacommon/v2/pkg/formats/fmp4"
 	"github.com/bluenviron/mediacommon/v2/pkg/formats/fmp4/seekablebuffer"
@@ -19,8 +19,8 @@ import (
 // track, Chrome refused the whole answer ("Unsupported audio format") and the
 // archive never played. Playback sends the video tracks only.
 func TestPlaybackSendsOnlyTheVideoTracks(t *testing.T) {
-	f, eng, cam := newArchiveAPI(t)
-	eng.body = videoWithLPCM(t)
+	f, play, cam := newArchiveAPI(t)
+	play.body = videoWithLPCM(t)
 	req, _ := http.NewRequestWithContext(context.Background(), "GET", f.srv.URL+"/v0/cameras/"+string(cam.ID)+"/archive/play?stream=main&start=2026-11-09T10:00:00Z&duration=60", nil)
 	req.Header.Set("Authorization", "Bearer "+f.token(t, auth.RoleViewer, string(cam.ID)))
 	resp, err := http.DefaultClient.Do(req)
@@ -61,11 +61,11 @@ func videoWithLPCM(t *testing.T) []byte {
 
 // ADR-0015: recorded sound for a span of up to a minute, as WAV.
 func TestArchiveAudioAsWAV(t *testing.T) {
-	f, eng, cam := newArchiveAPI(t)
+	f, play, cam := newArchiveAPI(t)
 	viewer := f.token(t, auth.RoleViewer, string(cam.ID))
 	audio := "/v0/cameras/" + string(cam.ID) + "/archive/audio?stream=main&start=2026-11-09T10:00:00Z&duration="
 
-	eng.body = videoWithLPCM(t)
+	play.body = videoWithLPCM(t)
 	req, _ := http.NewRequestWithContext(context.Background(), "GET", f.srv.URL+audio+"60", nil)
 	req.Header.Set("Authorization", "Bearer "+viewer)
 	resp, err := http.DefaultClient.Do(req)
@@ -77,17 +77,17 @@ func TestArchiveAudioAsWAV(t *testing.T) {
 	if resp.StatusCode != 200 || resp.Header.Get("Content-Type") != "audio/wav" || string(body[:4]) != "RIFF" || len(body) != 44+16 {
 		t.Fatalf("audio: %d %s %d bytes", resp.StatusCode, resp.Header.Get("Content-Type"), len(body))
 	}
-	if !strings.Contains(eng.last, "duration=1m0s") {
-		t.Fatalf("engine asked for %s", eng.last)
+	if got := play.asked(); got.Duration != time.Minute {
+		t.Fatalf("playback asked for %+v", got)
 	}
 	if r := f.do(t, "GET", audio+"61", viewer, nil); r.Status != 400 || r.Body["code"] != "invalid" {
 		t.Fatalf("over a minute: %d %v", r.Status, r.Body)
 	}
-	eng.body = nil // the stub: not MP4
+	play.body = nil // the stub: not MP4
 	if r := f.do(t, "GET", audio+"30", viewer, nil); r.Status != 502 {
 		t.Fatalf("unreadable answer: %d %v", r.Status, r.Body)
 	}
-	eng.body = videoOnly(t)
+	play.body = videoOnly(t)
 	if r := f.do(t, "GET", audio+"30", viewer, nil); r.Status != 404 || r.Body["code"] != "no_audio" {
 		t.Fatalf("no sound recorded: %d %v", r.Status, r.Body)
 	}

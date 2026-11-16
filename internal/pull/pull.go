@@ -27,6 +27,10 @@ type Config struct {
 	Target string // engine path to publish to, rtsp://user:pass@127.0.0.1:port/path
 	Audio  bool   // also pull the camera's audio
 
+	// OnFrame, when set, is told the size of every video access unit the
+	// pull forwards (ADR-0020). It runs on the packet path: it must not block.
+	OnFrame FrameFunc
+
 	MinBackoff  time.Duration // first wait after a failure; default 1s
 	MaxBackoff  time.Duration // cap of the doubling wait; default 30s
 	StableAfter time.Duration // a session this long resets the backoff; default 10s
@@ -167,8 +171,12 @@ func session(ctx context.Context, cfg Config, playing func()) error {
 	}
 	defer pub.Close()
 
+	analysed, frames := videoFrames(medias, cfg.OnFrame)
 	reader.OnPacketRTPAny(func(m *description.Media, _ format.Format, pkt *rtp.Packet) {
 		_ = pub.WritePacketRTP(m, pkt) // a dead publisher ends the session through Wait
+		if m == analysed {
+			frames.packet(pkt)
+		}
 	})
 	if _, err := reader.Play(nil); err != nil {
 		return err

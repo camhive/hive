@@ -19,6 +19,7 @@ import { LiveTile } from "@/components/LiveTile";
 import { HiveNav } from "@/components/HiveNav";
 import { CameraDetail } from "@/components/CameraDetail";
 import { AddCamera, CameraRow, groupSorted } from "@/components/CameraManage";
+import { LocalSessionBanner, LocalSignIn } from "@/components/LocalLogin";
 
 export type HiveSearch = { camera?: string; day?: string };
 
@@ -35,7 +36,7 @@ export function HivePage({ peer, playerDeps }: { peer?: PeerFactory; playerDeps?
   const me = useMe();
   const hives = useHives();
   const hive = hives.data ? [...hives.data.hives, ...hives.data.shared].find((h) => h.id === id) : undefined;
-  const { grant, local, access } = useGrant(hive);
+  const { grant, local, localSession, canSignInLocally, access } = useGrant(hive);
   const client = useHiveClient(hive, grant);
   const cameras = useCameras(hive, client);
   const health = useCameraHealth(hive, client);
@@ -51,6 +52,8 @@ export function HivePage({ peer, playerDeps }: { peer?: PeerFactory; playerDeps?
   if (!hive) return <p className="card">{t("errors.not_found")}</p>;
 
   const owner = grant?.role === "owner";
+  // #57: no way in through the cloud, the LAN name answers, and the hive is the account's own.
+  const offerLocal = canSignInLocally && !grant && decision?.path === "lan" && !!hives.data?.hives.some((h) => h.id === hive.id);
   const quality = home ? "full" : grant?.quality; // the plan limits remote viewing only
   const evicted = alive === false;
   // Owners also see switched-off cameras, so they can switch them back on.
@@ -73,11 +76,13 @@ export function HivePage({ peer, playerDeps }: { peer?: PeerFactory; playerDeps?
         </div>
       } />
 
-      {local && <p role="status" className="card muted" data-testid="local-mode">{t("live.localMode")}</p>}
+      {local && !localSession && <p role="status" className="card muted" data-testid="local-mode">{t("live.localMode")}</p>}
+      {localSession && <LocalSessionBanner hive={hive} />}
+      {offerLocal && <LocalSignIn hive={hive} />}
       {!hive.online && !local && <p role="alert" className="card muted">{t("live.hiveOffline")}</p>}
       {evicted && <p role="alert" className="card error" data-testid="evicted">{t("live.evicted")}</p>}
       {access.isError && !evicted && <p role="alert" className="card error">{errorMessage(t, access.error)}</p>}
-      {cameras.isError && <p role="alert" className="card error">{cameras.error instanceof CamhiveError ? errorMessage(t, cameras.error) : t("errors.hive_unreachable")}</p>}
+      {cameras.isError && <p role="alert" className="card error">{cameras.error instanceof CamhiveError ? errorMessage(t, cameras.error) : t(localSession ? "localLogin.unreachable" : "errors.hive_unreachable")}</p>}
       {cameras.data && all.length === 0 && !owner && <p className="card muted">{t("live.noCameras")}</p>}
       {cameras.isPending && <p className="card muted" role="status" data-testid="cameras-loading">{t("cameras.loading")}</p>}
 

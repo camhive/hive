@@ -102,7 +102,10 @@
     "camera_auth": "The camera refused the login.",
     "unexpected_code": "Unexpected error ({{code}}).",
     "export_running": "An export of this footage is still being made; delete again when it has finished.",
-    "camera_mismatch": "Another device answers at that address. If you replaced the camera, confirm it below."
+    "camera_mismatch": "Another device answers at that address. If you replaced the camera, confirm it below.",
+    "lan_only": "This works only on the hive's address in your home network, not through the Camhive relay.",
+    "local_login_disabled": "Local sign-in is not switched on for this hive. Switch it on in the hive's settings while Camhive is reachable, or run “hive local-login set” on the hive.",
+    "local_login_rate_limited": "Too many failed sign-ins. Try again later."
   },
   "account": {
     "title": "Account",
@@ -279,7 +282,24 @@
     },
     "zoom": "Zoom",
     "speed": "Speed",
-    "snapshot": "Snapshot"
+    "snapshot": "Snapshot",
+    "events": {
+      "title_one": "Events ({{count}})",
+      "title_other": "Events ({{count}})",
+      "ongoing": "ongoing",
+      "kinds": {
+        "motion": "Motion",
+        "storage_low": "Storage low",
+        "camera_offline": "Camera offline",
+        "camera_online": "Camera online",
+        "camera_address_changed": "Camera address changed",
+        "camera_identity_changed": "Different device at the camera's address"
+      },
+      "source": {
+        "camera": "seen by the camera",
+        "frames": "seen in the picture"
+      }
+    }
   },
   "cameras": {
     "title": "Cameras",
@@ -511,5 +531,26 @@
     "exportsDeleted_one": "{{count}} export deleted.",
     "exportsDeleted_other": "{{count}} exports deleted.",
     "thisDay": "Delete this day…"
+  },
+  "localLogin": {
+    "title": "Sign in on your network",
+    "intro": "Camhive cannot reach this hive right now, but the hive answers on your network. Sign in with the local username and password you set up for emergencies.",
+    "username": "Local username",
+    "password": "Local password",
+    "submit": "Sign in locally",
+    "wrong": "Wrong username or password.",
+    "banner": "Signed in locally on your network. Live video, recordings and camera settings work; sharing, members and your plan need Camhive. The local sign-in ends after an hour or when you close this tab.",
+    "signOut": "Sign out locally",
+    "settingsTitle": "Local sign-in for emergencies",
+    "settingsHelp": "If Camhive cannot be reached and your offline access has run out, you can still sign in to this hive on your home network with a username and password that only the hive knows. It is off until you set it up.",
+    "open": "Set up local sign-in",
+    "off": "Off",
+    "on": "On for {{username}} since {{date}}",
+    "passwordHint": "10–256 characters, not the username. Stored on the hive only, as a hash; never sent to Camhive. Saving ends local sessions that are signed in.",
+    "save": "Save local sign-in",
+    "turnOff": "Turn off local sign-in",
+    "locked_one": "Too many failed sign-ins. Try again in {{count}} minute.",
+    "locked_other": "Too many failed sign-ins. Try again in {{count}} minutes.",
+    "unreachable": "The hive does not answer on your network right now. Make sure this device is on the same network as the hive."
   }
 }

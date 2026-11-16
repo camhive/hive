@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/camhive/hive/internal/auth"
@@ -31,6 +33,7 @@ type Deps struct {
 	// Archive (nil until the engine is up; endpoints answer 503 not_ready).
 	Index    archiveIndexer
 	Engine   video.Engine
+	Playback export.Fetch // spans of footage (ArchiveFetch)
 	Exports  *export.Manager
 	Location *time.Location // the hive's local zone for calendars; default UTC
 	Health   HealthSource   // nil until the monitor runs
@@ -49,6 +52,9 @@ type Deps struct {
 	// WHEP is the client for the engine's WebRTC endpoint (local live
 	// signalling); nil uses a default with a short timeout.
 	WHEP *http.Client
+	// Local issues and verifies the owner's local sessions (#57); nil
+	// refuses local tokens and local sign-in.
+	Local *auth.LocalSessions
 }
 
 // licensed is the effective local entitlement set.
@@ -71,7 +77,7 @@ func NewAPI(d Deps) http.Handler {
 	if d.Location == nil {
 		d.Location = time.UTC
 	}
-	api := &api{d: d}
+	api := &api{d: d, logins: newLoginLimiter(time.Now)}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", api.health)
 	mux.Handle("GET /v0/cameras", api.auth(api.listCameras))
@@ -101,12 +107,18 @@ func NewAPI(d Deps) http.Handler {
 	mux.Handle("POST /v0/cameras/{id}/ptz/move", api.auth(api.ptzMove))
 	mux.Handle("POST /v0/cameras/{id}/ptz/stop", api.auth(api.ptzStop))
 	mux.Handle("GET /v0/cameras/{id}/ptz/presets", api.auth(api.ptzPresets))
+	mux.Handle("GET /v0/local-login", api.auth(api.localLoginStatus))
+	mux.Handle("PUT /v0/local-login", api.auth(api.setLocalLogin))
+	mux.Handle("DELETE /v0/local-login", api.auth(api.disableLocalLogin))
+	mux.HandleFunc("POST /v0/local-login/sessions", api.localSignIn)
 	mux.Handle("POST /v0/cameras/{id}/ptz/presets/{preset}/goto", api.auth(api.ptzGoto))
 	return cors(mux)
 }
 
 type api struct {
-	d Deps
+	d      Deps
+	logins *loginLimiter
+	hashMu sync.Mutex // one argon2id verification at a time bounds memory under a flood
 }
 
 // --- errors -------------------------------------------------------------
@@ -140,35 +152,68 @@ func claimsFrom(r *http.Request) auth.Claims {
 // auth verifies the bearer token and puts the claims into the context.
 func (a *api) auth(next http.HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h := r.Header.Get("Authorization")
-		tok, ok := strings.CutPrefix(h, "Bearer ")
+		tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 		if !ok || tok == "" {
 			writeError(w, http.StatusUnauthorized, "token_missing", "Authorization: Bearer <token> is required")
 			return
 		}
-		if a.d.Verifier == nil {
-			writeError(w, http.StatusServiceUnavailable, "not_ready", "hive has no cloud keys yet")
-			return
-		}
-		claims, err := a.d.Verifier.Verify(tok)
+		claims, err := a.verify(r, tok)
 		if err != nil {
-			code, msg := "token_invalid", "access token rejected"
-			switch {
-			case errors.Is(err, auth.ErrExpired):
-				code = "token_expired"
-			case errors.Is(err, auth.ErrWrongHive):
-				code = "wrong_hive"
-			case errors.Is(err, auth.ErrLicense):
-				code = "license_required"
-			case errors.Is(err, auth.ErrNotYetValid):
-				code, msg = "clock_skew", "the hive's clock is behind the cloud; check NTP on the hive"
-			}
+			status, code, msg := tokenError(err)
 			a.d.Logger.Warn("access token rejected", "code", code, "path", r.URL.Path, "err", err)
-			writeError(w, http.StatusUnauthorized, code, msg)
+			writeError(w, status, code, msg)
 			return
 		}
 		next(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, claims)))
 	})
+}
+
+var (
+	errLANOnly  = errors.New("local sign-in and local sessions work only on the hive's LAN listener")
+	errNoKeys   = errors.New("hive has no cloud keys yet")
+	errNoLocals = fmt.Errorf("%w: this hive issues no local sessions", auth.ErrInvalidToken)
+)
+
+// verify checks a cloud token with the cloud's keys, or a local token (#57)
+// with the hive's own key and against the stored credential, the latter
+// only on the LAN listener.
+func (a *api) verify(r *http.Request, tok string) (auth.Claims, error) {
+	if auth.IsLocalToken(tok) {
+		switch {
+		case !onLAN(r):
+			return auth.Claims{}, errLANOnly
+		case a.d.Local == nil || a.d.Store == nil:
+			return auth.Claims{}, errNoLocals
+		}
+		c, err := a.d.Local.Verify(tok)
+		if err == nil {
+			err = a.stillCurrent(r.Context(), c)
+		}
+		return c, err
+	}
+	if a.d.Verifier == nil {
+		return auth.Claims{}, errNoKeys
+	}
+	return a.d.Verifier.Verify(tok)
+}
+
+// tokenError maps a verification error to the response.
+func tokenError(err error) (status int, code, msg string) {
+	switch {
+	case errors.Is(err, errLANOnly):
+		return http.StatusForbidden, "lan_only", errLANOnly.Error()
+	case errors.Is(err, errNoKeys):
+		return http.StatusServiceUnavailable, "not_ready", errNoKeys.Error()
+	case errors.Is(err, auth.ErrExpired):
+		return http.StatusUnauthorized, "token_expired", "access token rejected"
+	case errors.Is(err, auth.ErrWrongHive):
+		return http.StatusUnauthorized, "wrong_hive", "access token rejected"
+	case errors.Is(err, auth.ErrLicense):
+		return http.StatusUnauthorized, "license_required", "access token rejected"
+	case errors.Is(err, auth.ErrNotYetValid):
+		return http.StatusUnauthorized, "clock_skew", "the hive's clock is behind the cloud; check NTP on the hive"
+	}
+	return http.StatusUnauthorized, "token_invalid", "access token rejected"
 }
 
 func (a *api) requireStore(w http.ResponseWriter) bool {
@@ -468,8 +513,13 @@ func fromLoopback(r *http.Request) bool {
 // record appends to the local audit trail (ADR-0011). Details must never
 // contain secrets; callers pass only what the owner may see.
 func (a *api) record(r *http.Request, action, target string, details map[string]any) {
+	a.recordAs(r, claimsFrom(r).Account, action, target, details)
+}
+
+// recordAs is record for a request without a token (local sign-in).
+func (a *api) recordAs(r *http.Request, actor, action, target string, details map[string]any) {
 	raw, _ := json.Marshal(details)
-	if err := a.d.Store.Actions().Append(r.Context(), store.Action{Actor: claimsFrom(r).Account, Action: action, Target: target, Details: raw}); err != nil {
+	if err := a.d.Store.Actions().Append(r.Context(), store.Action{Actor: actor, Action: action, Target: target, Details: raw}); err != nil {
 		a.d.Logger.Error("action log", "err", err)
 	}
 }

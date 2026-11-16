@@ -32,7 +32,11 @@ function stub(opts: { exportMax: number }) {
         case "GET /v0/cameras": return json(200, [{ id: "cam_1", name: "Door", group: "", enabled: true, source: { kind: "rtsp", address: "" }, streams: { main: { Codec: "H264" } }, created_at: "", updated_at: "" }]);
         case "GET /v0/cameras/cam_1/archive/calendar": return json(200, [{ day: "2026-11-08" }, { day: "2026-11-09" }]);
         case "GET /v0/cameras/cam_1/archive/timeline": return json(200, [{ start: at(8), duration_ms: 3_600_000, bytes: 1, complete: true, activity: { step_s: 10, video_kbps: [100, 900, 300], sound_db: [-90, -20, -40] } }, { start: at(20), duration_ms: 600_000, bytes: 1, complete: false }]);
-        case "GET /v0/cameras/cam_1/events": return json(200, [{ id: 1, kind: "motion", at: at(8, 15), camera: "cam_1", data: {} }]);
+        case "GET /v0/cameras/cam_1/events": return json(200, [
+          { id: 1, kind: "motion", at: at(8, 15), end: new Date(Date.parse(at(8, 15)) + 12_000).toISOString(), camera: "cam_1", data: { source: "frames" } },
+          { id: 2, kind: "storage.low", at: at(20, 5), end: at(20, 10), camera: "", data: { free_bytes: 1 } },
+          { id: 3, kind: "motion", at: at(21), camera: "cam_1", data: { source: "camera" } }, // still going on
+        ]);
         case "GET /v0/cameras/cam_1/archive/audio": return json(404, { code: "no_audio", message: "" });
         case "GET /v0/cameras/cam_1/archive/play": return new Response(new Uint8Array([0, 0, 0, 1]), { status: 200, headers: { "Content-Type": "video/mp4" } });
         case "POST /v0/cameras/cam_1/exports": {
@@ -85,7 +89,7 @@ describe("archive on the hive page", () => {
     expect(screen.getByRole("button", { name: dayName("2026-11-10") })).toBeDisabled();
     const timeline = await screen.findByTestId("timeline");
     await waitFor(() => expect(within(timeline).getAllByTestId("segment")).toHaveLength(2));
-    expect(within(timeline).getAllByTestId("event")).toHaveLength(1);
+    expect(within(timeline).getAllByTestId("event").map((e) => e.dataset.kind)).toEqual(["motion", "storage.low", "motion"]);
     // ADR-0015: the profiled segment draws an activity wave and a sound line; the other has none.
     expect(within(timeline).getAllByTestId("activity-video")).toHaveLength(1);
     expect(within(timeline).getAllByTestId("activity-sound")).toHaveLength(1);
@@ -150,6 +154,28 @@ describe("archive on the hive page", () => {
     await user.click(screen.getByRole("button", { name: "Back to live" }));
     await waitFor(() => expect(screen.queryByRole("button", { name: "Back to live" })).toBeNull());
     expect(within(screen.getByTestId("camera-detail")).getByTestId("tile").dataset.camera).toBe("cam_1");
+  }, 20_000);
+
+  it("lists the day's motion and storage.low events and plays from one when it is picked (ADR-0020)", async () => {
+    const calls = stub({ exportMax: 10 });
+    const { user } = mount("/hives/hv_1/archive?day=2026-11-09");
+    const list = await screen.findByTestId("events", {}, { timeout: 5000 });
+    await user.click(within(list).getByText("Events (3)"));
+    const rows = await within(list).findAllByRole("button");
+    const ongoing = /^21:00.*Motion.*ongoing.*by the camera/;
+    expect(rows.map((r) => r.textContent)).toEqual([
+      expect.stringMatching(ongoing),
+      expect.stringMatching(/^20:05.*Storage low.*5 min/),
+      expect.stringMatching(/^08:15.*Motion.*12 sec.*picture/),
+    ]);
+    // Later renders (the playhead moves) still say ongoing, not a frozen duration.
+    await new Promise((r) => setTimeout(r, 20));
+    await user.click(screen.getByRole("button", { name: "1h" }));
+    expect(within(list).getAllByRole("button")[0]!.textContent).toMatch(ongoing);
+    await user.click(rows[2]!);
+    await waitFor(() => expect(calls.find((c) => c.includes("/archive/play"))).toBeDefined());
+    const play = new URL("https://x" + calls.find((c) => c.includes("/archive/play"))!.split(" ")[1]!);
+    expect(play.searchParams.get("start")).toBe(at(8, 15));
   }, 20_000);
 
   it("drags and wheels the timeline, follows playback, plays on into the next window, changes speed and saves a snapshot", async () => {

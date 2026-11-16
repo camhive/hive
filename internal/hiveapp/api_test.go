@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -20,6 +21,7 @@ type apiFixture struct {
 	srv *httptest.Server
 	iss *auth.Issuer
 	st  *store.Store
+	h   http.Handler
 }
 
 func newAPI(t *testing.T) *apiFixture { return newAPIWith(t, nil) }
@@ -38,9 +40,35 @@ func newAPIWith(t *testing.T, with func(d *hiveapp.Deps)) *apiFixture {
 	if with != nil {
 		with(&d)
 	}
-	srv := httptest.NewServer(hiveapp.NewAPI(d))
+	h := hiveapp.NewAPI(d)
+	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
-	return &apiFixture{srv: srv, iss: iss, st: st}
+	return &apiFixture{srv: srv, iss: iss, st: st, h: h}
+}
+
+// via serves the same API on another listener whose connections are marked
+// by connCtx (hiveapp.LANConn, hiveapp.RelayedConn), as the hive's TLS and
+// relay listeners do.
+func (f *apiFixture) via(t *testing.T, connCtx func(context.Context, net.Conn) context.Context) *apiFixture {
+	t.Helper()
+	return f.viaFrom(t, connCtx, "")
+}
+
+// viaFrom is via with every peer appearing at host (a LAN address), as
+// connections from another machine on the network do; empty keeps the
+// real loopback peer.
+func (f *apiFixture) viaFrom(t *testing.T, connCtx func(context.Context, net.Conn) context.Context, host string) *apiFixture {
+	t.Helper()
+	srv := httptest.NewUnstartedServer(f.h)
+	srv.Config.ConnContext = connCtx
+	if host != "" {
+		srv.Listener = fromHost{Listener: srv.Listener, ip: net.ParseIP(host)}
+	}
+	srv.Start()
+	t.Cleanup(srv.Close)
+	g := *f
+	g.srv = srv
+	return &g
 }
 
 func (f *apiFixture) token(t *testing.T, role auth.Role, cams ...string) string {
@@ -55,6 +83,7 @@ func (f *apiFixture) token(t *testing.T, role auth.Role, cams ...string) string 
 
 type apiResp struct {
 	Status int
+	Header http.Header
 	Body   map[string]any
 	List   []map[string]any
 }
@@ -77,7 +106,7 @@ func (f *apiFixture) do(t *testing.T, method, path, token string, body any) apiR
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	out := apiResp{Status: resp.StatusCode}
+	out := apiResp{Status: resp.StatusCode, Header: resp.Header}
 	var raw json.RawMessage
 	_ = json.NewDecoder(resp.Body).Decode(&raw)
 	if len(raw) > 0 && raw[0] == '[' {
@@ -213,3 +242,28 @@ func TestValidationErrorsAreStable(t *testing.T) {
 		t.Fatalf("bad json: %d", resp.StatusCode)
 	}
 }
+
+// fromHost makes every accepted connection report a peer at ip.
+type fromHost struct {
+	net.Listener
+	ip net.IP
+}
+
+func (l fromHost) Accept() (net.Conn, error) {
+	c, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	port := 0
+	if a, ok := c.RemoteAddr().(*net.TCPAddr); ok {
+		port = a.Port
+	}
+	return peerConn{Conn: c, remote: &net.TCPAddr{IP: l.ip, Port: port}}, nil
+}
+
+type peerConn struct {
+	net.Conn
+	remote net.Addr
+}
+
+func (c peerConn) RemoteAddr() net.Addr { return c.remote }

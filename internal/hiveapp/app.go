@@ -116,7 +116,7 @@ func (a *App) listen(ctx context.Context) ([]served, error) {
 			_ = ln.Close()
 			return nil, err
 		}
-		out = append(out, served{a.server(a.cfg.TLS, nil), tlsLn})
+		out = append(out, served{a.server(a.cfg.TLS, LANConn), tlsLn})
 		a.cfg.Logger.Info("tls api listening", "addr", tlsLn.Addr().String())
 	}
 	if a.cfg.Relay != nil {

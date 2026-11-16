@@ -14,32 +14,19 @@ import (
 	"github.com/camhive/hive/internal/domain/camera"
 	"github.com/camhive/hive/internal/export"
 	"github.com/camhive/hive/internal/hiveagent"
-	"github.com/camhive/hive/internal/video"
 )
 
-// PlaybackFetch adapts the engine's playback endpoint to export.Fetch.
-func PlaybackFetch(engine video.Engine) export.Fetch {
-	client := &http.Client{} // no timeout: a long export streams for a while
+// ArchiveFetch serves spans from the hive's archive reader (ADR-0019 §6)
+// for playback, sound and export. The start counts from its whole second,
+// as it did when MediaMTX's playback server took it in its URL.
+func ArchiveFetch(r *archive.Reader) export.Fetch {
 	return func(ctx context.Context, req export.Request) (io.ReadCloser, error) {
-		u := engine.PlaybackURL(video.CameraID(req.Camera), video.Stream(req.Stream), req.Start, req.Duration)
-		r, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-		if err != nil {
-			return nil, err
-		}
-		resp, err := client.Do(r)
-		if err != nil {
-			return nil, fmt.Errorf("playback: %w", err)
-		}
-		if resp.StatusCode != http.StatusOK {
-			_ = resp.Body.Close()
-			return nil, fmt.Errorf("playback: engine answered %d", resp.StatusCode)
-		}
-		return resp.Body, nil
+		return r.Span(ctx, req.Camera, req.Stream, req.Start.Truncate(time.Second), req.Duration)
 	}
 }
 
 func (a *api) requireArchive(w http.ResponseWriter) bool {
-	if a.d.Index == nil || a.d.Engine == nil || a.d.Exports == nil {
+	if a.d.Index == nil || a.d.Playback == nil || a.d.Exports == nil {
 		writeError(w, http.StatusServiceUnavailable, "not_ready", "archive is not initialised")
 		return false
 	}
@@ -204,8 +191,7 @@ func playSpan(w http.ResponseWriter, r *http.Request) (time.Time, time.Duration,
 	return start, time.Duration(secs) * time.Second, true
 }
 
-// play proxies the engine's playback stream for a span. The engine listens
-// on loopback only; this is the sole path to it, and it carries the scope.
+// play answers a span of footage from the archive reader, after the scope check.
 func (a *api) play(w http.ResponseWriter, r *http.Request) {
 	if !a.requireArchive(w) {
 		return
@@ -222,7 +208,7 @@ func (a *api) play(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	body, err := PlaybackFetch(a.d.Engine)(r.Context(), export.Request{Camera: id, Stream: stream, Start: start, Duration: span, Owner: claimsFrom(r).Account})
+	body, err := a.d.Playback(r.Context(), export.Request{Camera: id, Stream: stream, Start: start, Duration: span, Owner: claimsFrom(r).Account})
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "engine", "playback unavailable")
 		return
@@ -260,7 +246,7 @@ func (a *api) audio(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid", "audio spans are at most 60 seconds")
 		return
 	}
-	body, err := PlaybackFetch(a.d.Engine)(r.Context(), export.Request{Camera: id, Stream: stream, Start: start, Duration: span, Owner: claimsFrom(r).Account})
+	body, err := a.d.Playback(r.Context(), export.Request{Camera: id, Stream: stream, Start: start, Duration: span, Owner: claimsFrom(r).Account})
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "engine", "playback unavailable")
 		return

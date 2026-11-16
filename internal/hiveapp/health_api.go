@@ -7,6 +7,7 @@ import (
 
 	"github.com/camhive/hive/internal/auth"
 	"github.com/camhive/hive/internal/health"
+	"github.com/camhive/hive/internal/store"
 )
 
 // HealthSource is the part of health.Monitor the API reads.
@@ -58,8 +59,17 @@ type eventView struct {
 	ID     int64           `json:"id"`
 	Kind   string          `json:"kind"`
 	At     time.Time       `json:"at"`
+	End    *time.Time      `json:"end,omitempty"` // lasting events once they ended (ADR-0020)
 	Data   json.RawMessage `json:"data"`
-	Camera string          `json:"camera"`
+	Camera string          `json:"camera"` // "" for the hive's own (storage.low)
+}
+
+func viewOf(e store.Event) eventView {
+	v := eventView{ID: e.ID, Kind: e.Kind, At: e.At, Data: e.Data, Camera: e.Camera}
+	if !e.End.IsZero() {
+		v.End = &e.End
+	}
+	return v
 }
 
 func (a *api) cameraEvents(w http.ResponseWriter, r *http.Request) {
@@ -83,7 +93,7 @@ func (a *api) cameraEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]eventView, 0, len(events))
 	for _, e := range events {
-		out = append(out, eventView{ID: e.ID, Kind: e.Kind, At: e.At, Data: e.Data, Camera: e.Camera})
+		out = append(out, viewOf(e))
 	}
 	writeJSON(w, http.StatusOK, out)
 }

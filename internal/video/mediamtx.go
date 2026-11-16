@@ -27,9 +27,8 @@ import (
 
 // MediaMTXConfig configures the MediaMTX-backed engine.
 type MediaMTXConfig struct {
-	Host            string // bind/advertise address for control, playback and WebRTC; default 127.0.0.1
+	Host            string // bind/advertise address for control and WebRTC; default 127.0.0.1
 	APIPort         int    // MediaMTX control API; default 9997
-	PlaybackPort    int    // archive playback server; default 9996
 	WebRTCPort      int    // WHEP endpoint; default 8889
 	RTSPPort        int    // loopback RTSP port the Hive publishes camera streams to; a free one at every Start when 0
 	ArchiveDir      string // where fMP4 segments are written (required)
@@ -56,9 +55,6 @@ func (c *MediaMTXConfig) applyDefaults() {
 	}
 	if c.APIPort == 0 {
 		c.APIPort = 9997
-	}
-	if c.PlaybackPort == 0 {
-		c.PlaybackPort = 9996
 	}
 	if c.WebRTCPort == 0 {
 		c.WebRTCPort = 8889
@@ -125,7 +121,6 @@ func freeLoopbackPort() (int, error) {
 func (c MediaMTXConfig) baseYAML(pub publisher) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "logLevel: warn\napi: yes\napiAddress: %s:%d\n", c.Host, c.APIPort)
-	fmt.Fprintf(&b, "playback: yes\nplaybackAddress: %s:%d\n", c.Host, c.PlaybackPort)
 	// WHEP signalling answers the Hive only (it checks access tokens and
 	// forwards the offer); ICE media over UDP must reach browsers on the LAN.
 	fmt.Fprintf(&b, "webrtc: yes\nwebrtcAddress: %s:%d\nwebrtcLocalUDPAddress: :%d\nwebrtcIPsFromInterfaces: yes\n", c.Host, c.WebRTCPort, c.WebRTCPort+1)
@@ -139,20 +134,21 @@ func (c MediaMTXConfig) baseYAML(pub publisher) string {
 		}
 	}
 	fmt.Fprintf(&b, "rtsp: yes\nrtspAddress: 127.0.0.1:%d\nrtspTransports: [tcp]\nrtspEncryption: \"no\"\n", pub.port)
-	b.WriteString("rtmp: no\nhls: no\nsrt: no\nmoq: no\nmetrics: no\npprof: no\n")
+	// The Hive reads the archive itself (ADR-0019 §6): no playback server.
+	b.WriteString("rtmp: no\nhls: no\nsrt: no\nmoq: no\nmetrics: no\npprof: no\nplayback: no\n")
 	writeAuth(&b, pub)
 	b.WriteString("paths: {}\n")
 	return b.String()
 }
 
-// writeAuth renders MediaMTX's defaults minus publishing for anyone: anyone
-// who reaches the WHEP and playback listeners (bound to Host, loopback by
-// default) may read and play back, the API answers loopback only,
-// and only the Hive may publish.
+// writeAuth renders MediaMTX's defaults minus publishing and playback for
+// anyone: anyone who reaches the WHEP listener (bound to Host, loopback by
+// default) may read, the API answers loopback only, and only the Hive may
+// publish.
 func writeAuth(b *strings.Builder, pub publisher) {
 	const loopback = "    ips: [127.0.0.1, \"::1\"]\n"
 	b.WriteString("authMethod: internal\nauthInternalUsers:\n")
-	b.WriteString("  - user: any\n    pass: \"\"\n    ips: []\n    permissions:\n      - action: read\n      - action: playback\n")
+	b.WriteString("  - user: any\n    pass: \"\"\n    ips: []\n    permissions:\n      - action: read\n")
 	b.WriteString("  - user: any\n    pass: \"\"\n" + loopback + "    permissions:\n      - action: api\n")
 	fmt.Fprintf(b, "  - user: %q\n    pass: %q\n"+loopback+"    permissions:\n      - action: publish\n", pub.user, pub.pass)
 }
@@ -176,16 +172,6 @@ func (c MediaMTXConfig) pathConfig() []byte {
 		"recordDeleteAfter":     "0s",
 	})
 	return body
-}
-
-// PlaybackURL implements Engine.
-func (c MediaMTXConfig) PlaybackURL(cam CameraID, s Stream, start time.Time, d time.Duration) string {
-	q := url.Values{}
-	q.Set("path", pathName(cam, s))
-	q.Set("start", start.UTC().Format(time.RFC3339))
-	q.Set("duration", strconv.FormatFloat(d.Seconds(), 'f', -1, 64))
-	q.Set("format", "fmp4")
-	return fmt.Sprintf("http://%s:%d/get?%s", c.Host, c.PlaybackPort, q.Encode())
 }
 
 // WHEPURL implements Engine.
@@ -246,7 +232,13 @@ type MediaMTX struct {
 
 	pullsMu sync.Mutex
 	pulls   map[string]*pullHandle // by path name
+
+	frames FrameSink // nil: frames are not reported
 }
+
+// FrameSink receives the frames of analysed Sources (ADR-0020). It is called
+// on the packet path and must not block.
+type FrameSink func(cam CameraID, s Stream, f Frame)
 
 // pullHandle is one running camera pull (internal/pull).
 type pullHandle struct {
@@ -265,6 +257,9 @@ type Option func(*MediaMTX)
 
 // WithLogger sets the logger; the default discards.
 func WithLogger(l *slog.Logger) Option { return func(m *MediaMTX) { m.log = l } }
+
+// WithFrames reports the frames of every Source marked Analyse to sink.
+func WithFrames(sink FrameSink) Option { return func(m *MediaMTX) { m.frames = sink } }
 
 // NewMediaMTX validates cfg, applies defaults and locates the binary.
 func NewMediaMTX(cfg MediaMTXConfig, opts ...Option) (*MediaMTX, error) {
@@ -447,9 +442,18 @@ func (m *MediaMTX) startPull(name string, src Source) {
 	m.pulls[name] = h
 	go func() {
 		defer close(h.done)
-		pull.Run(ctx, pull.Config{Source: src.URL, Target: target, Audio: src.Audio,
+		pull.Run(ctx, pull.Config{Source: src.URL, Target: target, Audio: src.Audio, OnFrame: m.frameFunc(src),
 			Logger: m.log.With("camera", src.Camera, "stream", src.Stream)})
 	}()
+}
+
+// frameFunc forwards an analysed Source's frames to the sink; nil otherwise.
+func (m *MediaMTX) frameFunc(src Source) pull.FrameFunc {
+	if !src.Analyse || m.frames == nil {
+		return nil
+	}
+	sink, cam, stream := m.frames, src.Camera, src.Stream
+	return func(at time.Time, size int, key bool) { sink(cam, stream, Frame{At: at, Size: size, Key: key}) }
 }
 
 // stopPull ends a path's pull; it reports whether there was one.

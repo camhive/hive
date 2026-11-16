@@ -68,7 +68,9 @@ const (
 		`<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"` +
 		` xmlns:tds="http://www.onvif.org/ver10/device/wsdl"` +
 		` xmlns:trt="http://www.onvif.org/ver10/media/wsdl"` +
-		` xmlns:tt="http://www.onvif.org/ver10/schema"><s:Body>`
+		` xmlns:tt="http://www.onvif.org/ver10/schema"` +
+		` xmlns:tev="http://www.onvif.org/ver10/events/wsdl" xmlns:wsnt="http://docs.oasis-open.org/wsn/b-2"` +
+		` xmlns:wsa="http://www.w3.org/2005/08/addressing" xmlns:tns1="http://www.onvif.org/ver10/topics"><s:Body>`
 	envClose = `</s:Body></s:Envelope>`
 )
 
@@ -129,6 +131,7 @@ func newONVIFHandlerWithPTZ(cfg *Config, ptz *ptzLog) http.Handler {
 	mux.HandleFunc("POST /onvif/ptz_service", cfg.soapEndpoint(func(w http.ResponseWriter, req soapRequest) {
 		handlePTZ(cfg, ptz, w, req)
 	}))
+	newPullPoints(cfg).register(mux)
 	return mux
 }
 
@@ -200,21 +203,31 @@ func capabilities(cfg *Config) string {
 	if cfg.Profile == Quirky {
 		media = "" // some cameras only advertise media through GetServices
 	}
+	events := ""
+	if !cfg.NoEvents {
+		events = fmt.Sprintf(`<tt:Events><tt:XAddr>%s</tt:XAddr><tt:WSSubscriptionPolicySupport>false</tt:WSSubscriptionPolicySupport>`+
+			`<tt:WSPullPointSupport>true</tt:WSPullPointSupport></tt:Events>`, cfg.eventsServiceURL())
+	}
 	return fmt.Sprintf(`<tds:GetCapabilitiesResponse><tds:Capabilities>`+
-		`<tt:Device><tt:XAddr>%s</tt:XAddr></tt:Device>%s`+
+		`<tt:Device><tt:XAddr>%s</tt:XAddr></tt:Device>%s%s`+
 		`<tt:PTZ><tt:XAddr>%s</tt:XAddr></tt:PTZ>`+
-		`</tds:Capabilities></tds:GetCapabilitiesResponse>`, cfg.deviceServiceURL(), media, cfg.ptzServiceURL())
+		`</tds:Capabilities></tds:GetCapabilitiesResponse>`, cfg.deviceServiceURL(), events, media, cfg.ptzServiceURL())
 }
 
 func services(cfg *Config) string {
-	svc := func(ns, xaddr string, major, minor int) string {
+	svc := func(ns, xaddr string, minor int) string { // every service is version 2.x
 		return fmt.Sprintf(`<tds:Service><tds:Namespace>%s</tds:Namespace><tds:XAddr>%s</tds:XAddr>`+
-			`<tds:Version><tt:Major>%d</tt:Major><tt:Minor>%d</tt:Minor></tds:Version></tds:Service>`, ns, xaddr, major, minor)
+			`<tds:Version><tt:Major>2</tt:Major><tt:Minor>%d</tt:Minor></tds:Version></tds:Service>`, ns, xaddr, minor)
+	}
+	events := ""
+	if !cfg.NoEvents {
+		events = svc("http://www.onvif.org/ver10/events/wsdl", cfg.eventsServiceURL(), 6)
 	}
 	return `<tds:GetServicesResponse>` +
-		svc("http://www.onvif.org/ver10/device/wsdl", cfg.deviceServiceURL(), 2, 5) +
-		svc("http://www.onvif.org/ver10/media/wsdl", cfg.mediaServiceURL(), 2, 5) +
-		svc("http://www.onvif.org/ver20/ptz/wsdl", cfg.ptzServiceURL(), 2, 5) +
+		svc("http://www.onvif.org/ver10/device/wsdl", cfg.deviceServiceURL(), 5) +
+		svc("http://www.onvif.org/ver10/media/wsdl", cfg.mediaServiceURL(), 5) +
+		svc("http://www.onvif.org/ver20/ptz/wsdl", cfg.ptzServiceURL(), 5) +
+		events +
 		`</tds:GetServicesResponse>`
 }
 

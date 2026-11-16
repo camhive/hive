@@ -137,6 +137,8 @@ func TestIssueRejectsBadClaims(t *testing.T) {
 		{Account: "a", HiveID: "h", SessionID: "s", Role: "god", Expiry: t0.Add(time.Minute), IssuedAt: t0},
 		{Account: "a", HiveID: "h", SessionID: "s", Role: auth.RoleViewer, Expiry: t0.Add(-time.Minute), IssuedAt: t0},
 		{Account: "a", HiveID: "h", SessionID: "s", Role: auth.RoleViewer, Expiry: t0.Add(time.Hour), IssuedAt: t0}, // > max online TTL
+		{Account: "a", HiveID: "h", SessionID: "s", Role: auth.RoleViewer, Offline: true, Expiry: t0.Add(auth.MaxOfflineTTL + time.Second), IssuedAt: t0},
+		{Account: "a", HiveID: "h", SessionID: "s", Role: auth.RoleOwner, Local: true, Expiry: t0.Add(auth.LocalTTL + time.Second), IssuedAt: t0},
 	}
 	for i, c := range bad {
 		if _, err := iss.Issue(c); !errors.Is(err, auth.ErrInvalidClaims) {

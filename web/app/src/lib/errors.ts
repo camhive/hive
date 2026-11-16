@@ -11,6 +11,7 @@ const known = new Set([
   // hive local API
   "token_missing", "token_invalid", "token_expired", "clock_skew", "wrong_hive", "license_required", "forbidden",
   "not_ready", "engine", "unsupported", "camera", "camera_auth", "no_audio", "audio_unsupported", "export_running", "camera_mismatch",
+  "lan_only", "local_login_disabled", "local_login_rate_limited",
 ]);
 
 export function errorKey(err: unknown): string {

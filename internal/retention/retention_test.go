@@ -68,6 +68,7 @@ type fixture struct {
 	fs    *fakeFS
 	now   time.Time
 	low   []int64 // storage.low notifications (free bytes)
+	ok    []int64 // sweeps that met the space target (free bytes)
 	lowMu sync.Mutex
 }
 
@@ -105,6 +106,11 @@ func (f *fixture) sweeper(policy retention.Policy) *retention.Sweeper {
 		OnStorageLow: func(free int64) {
 			f.lowMu.Lock()
 			f.low = append(f.low, free)
+			f.lowMu.Unlock()
+		},
+		OnStorageOK: func(free int64) {
+			f.lowMu.Lock()
+			f.ok = append(f.ok, free)
 			f.lowMu.Unlock()
 		},
 		ArchiveDir: "/archive",
@@ -161,8 +167,8 @@ func TestSpaceRuleDeletesOldestAcrossCamerasUntilThresholdAndReportsLow(t *testi
 	if len(segs) != 3 || segs[0].Camera != "cam_a" || !segs[0].Start.Equal(f.now.Add(-time.Hour)) {
 		t.Fatalf("remaining = %+v", segs)
 	}
-	if len(f.low) != 0 {
-		t.Fatalf("threshold reached; no storage.low expected, got %v", f.low)
+	if len(f.low) != 0 || len(f.ok) != 1 {
+		t.Fatalf("threshold reached; want storage ok and no storage.low, got ok %v low %v", f.ok, f.low)
 	}
 
 	// Impossible target: only incomplete segments remain deletable-ish → low.
@@ -171,14 +177,25 @@ func TestSpaceRuleDeletesOldestAcrossCamerasUntilThresholdAndReportsLow(t *testi
 	if rep.BySpace != 1 { // the last complete one goes; open files never do
 		t.Fatalf("second sweep = %+v", rep)
 	}
-	if len(f.low) != 1 {
-		t.Fatalf("storage.low must fire when the target cannot be met, got %v", f.low)
+	if len(f.low) != 1 || len(f.ok) != 1 {
+		t.Fatalf("storage.low must fire when the target cannot be met, got low %v ok %v", f.low, f.ok)
 	}
 	segs, _ = f.idx.All(context.Background())
 	for _, s := range segs {
 		if s.Complete {
 			t.Fatalf("a complete segment survived an unmet space target: %+v", s)
 		}
+	}
+}
+
+func TestSpaceRuleReportsOKWhenNothingHadToGo(t *testing.T) {
+	f := newFixture(t)
+	f.add(t, "cam_a", time.Hour, true)
+	if _, err := f.sweeper(retention.Policy{MinFreeBytes: 10}).Sweep(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.ok) != 1 || len(f.low) != 0 {
+		t.Fatalf("plenty of space: want one ok, got ok %v low %v", f.ok, f.low)
 	}
 }
 

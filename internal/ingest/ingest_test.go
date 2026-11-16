@@ -57,9 +57,6 @@ func (f *fakeEngine) Status(context.Context, video.CameraID, video.Stream) (vide
 func (f *fakeEngine) Segments(context.Context, video.CameraID, video.Stream) ([]video.Segment, error) {
 	return nil, nil
 }
-func (f *fakeEngine) PlaybackURL(video.CameraID, video.Stream, time.Time, time.Duration) string {
-	return ""
-}
 func (f *fakeEngine) WHEPURL(video.CameraID, video.Stream) string { return "" }
 func (f *fakeEngine) Exited() <-chan struct{} {
 	f.mu.Lock()
@@ -287,4 +284,24 @@ func waitUntil(t *testing.T, cond func() bool, what string) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for %s", what)
+}
+
+// ADR-0020: motion is read from one stream per camera, the sub stream when
+// the camera has one (smaller frames, same signal), else the main stream.
+func TestReconcileAnalysesTheSubStreamOrElseTheMain(t *testing.T) {
+	eng := newFakeEngine()
+	st := &memStore{}
+	both, mainOnly := cam(t, "a", true, true), cam(t, "b", true, false)
+	st.set(both, mainOnly)
+	if err := ingest.New(st, eng, ingest.Options{}).Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for key, want := range map[string]bool{
+		string(both.ID) + "/sub": true, string(both.ID) + "/main": false,
+		string(mainOnly.ID) + "/main": true,
+	} {
+		if got := eng.source(key).Analyse; got != want {
+			t.Fatalf("%s analysed = %v, want %v", key, got, want)
+		}
+	}
 }

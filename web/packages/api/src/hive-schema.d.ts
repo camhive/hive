@@ -824,7 +824,10 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** Timeline events in [from, to) (viewer) */
+        /**
+         * Timeline events in [from, to) (viewer)
+         * @description The camera's Events and the hive's own (camera empty) that begin before `to` and end at or after `from` or are still going on, oldest first.
+         */
         get: {
             parameters: {
                 query: {
@@ -1447,6 +1450,179 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v0/local-login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Whether the local emergency login is enabled (owner) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["LocalLogin"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+            };
+        };
+        /**
+         * Enable the local login or change its credentials (owner with a cloud token)
+         * @description Ends every local session. A local session gets `403 forbidden`. Recorded as `local_login.enable`.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["LocalCredentials"];
+                };
+            };
+            responses: {
+                /** @description Enabled */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["LocalLogin"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+                /** @description `weak_password` or `invalid` (username) */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /**
+         * Disable the local login and delete its credentials (owner with a cloud token)
+         * @description Ends every local session. Recorded as `local_login.disable`.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Disabled */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v0/local-login/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sign in locally (LAN listener only, no token)
+         * @description Every verified attempt is recorded (`local_login.success`,
+         *     `local_login.failure`), and so is a lockout (`local_login.locked`).
+         *
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["LocalCredentials"];
+                };
+            };
+            responses: {
+                /** @description Signed in */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["LocalSession"];
+                    };
+                };
+                /** @description `invalid_credentials` */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description `lan_only` (relay, loopback listener or peer, public source address) or `local_login_disabled` */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description `local_login_rate_limited`; `Retry-After` says when to try again */
+                429: {
+                    headers: {
+                        /** @description seconds */
+                        "Retry-After"?: number;
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1456,7 +1632,7 @@ export interface components {
              * @description Stable machine-readable code.
              * @enum {string}
              */
-            code: "token_missing" | "token_invalid" | "token_expired" | "clock_skew" | "wrong_hive" | "license_required" | "forbidden" | "not_found" | "invalid" | "bad_json" | "not_ready" | "engine" | "unsupported" | "camera" | "camera_auth" | "plan_limit" | "internal";
+            code: "token_missing" | "token_invalid" | "token_expired" | "clock_skew" | "wrong_hive" | "license_required" | "forbidden" | "not_found" | "invalid" | "bad_json" | "not_ready" | "engine" | "unsupported" | "camera" | "camera_auth" | "plan_limit" | "internal" | "lan_only" | "local_login_disabled" | "local_login_rate_limited" | "invalid_credentials" | "weak_password";
             message: string;
         };
         Source: {
@@ -1669,14 +1845,28 @@ export interface components {
                 [key: string]: components["schemas"]["StreamHealth"];
             };
         };
+        /** @description A timeline Event (ADR-0009, ADR-0020). `id` is stable; a lasting Event (motion, storage.low) is listed from its start, also on later days while it goes on, and gains `end` when it is over. */
         Event: {
+            /** @description Stable for the Event's life on this hive */
             id?: number;
+            /** @description Empty for the hive's own Events (storage.low) */
             camera?: string;
             /** @enum {string} */
             kind?: "camera.online" | "camera.offline" | "camera.address_changed" | "camera.identity_changed" | "storage.low" | "motion";
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When it happened or began
+             */
             at?: string;
-            data?: Record<string, never>;
+            /**
+             * Format: date-time
+             * @description When it ended: equal to `at` for an instantaneous Event, absent while a lasting Event is still going on
+             */
+            end?: string;
+            /** @description motion: `source` = camera | frames; storage.low: `free_bytes`, `min_free_gb` */
+            data?: {
+                [key: string]: unknown;
+            };
         };
         CameraPatch: {
             name?: string;
@@ -1692,6 +1882,31 @@ export interface components {
             /** @description Accept a device at the new host that is not the known camera (it was replaced) */
             replace_identity?: boolean;
             credentials?: components["schemas"]["Credentials"];
+        };
+        LocalLogin: {
+            /** @description false: the hive holds no local credential at all */
+            enabled: boolean;
+            username?: string;
+            /** Format: date-time */
+            updated_at?: string;
+        };
+        LocalCredentials: {
+            username: string;
+            /** @description 10-256 characters, not the username; stored as an argon2id hash */
+            password: string;
+        };
+        LocalSession: {
+            /** @description PASETO v4.local; send as Bearer on the LAN listener only */
+            token: string;
+            session_id: string;
+            /** Format: date-time */
+            expires_at: string;
+            /** @enum {string} */
+            role: "owner";
+            /** @description always [*] */
+            cameras: string[];
+            /** @enum {boolean} */
+            local: true;
         };
     };
     responses: {

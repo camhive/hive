@@ -52,8 +52,8 @@ Camhive binaries include the open-source components below, each under its own li
 | github.com/theupdateframework/go-tuf/v2/metadata | Apache-2.0 | https://github.com/theupdateframework/go-tuf/blob/v2.4.2/LICENSE |
 | golang.org/x/crypto | BSD-3-Clause | https://cs.opensource.google/go/x/crypto/+/v0.58.0:LICENSE |
 | golang.org/x/sync | BSD-3-Clause | https://cs.opensource.google/go/x/sync/+/v0.24.0:LICENSE |
-| golang.org/x/sys | BSD-3-Clause | https://cs.opensource.google/go/x/sys/+/v0.49.0:LICENSE |
-| golang.org/x/term | BSD-3-Clause | https://cs.opensource.google/go/x/term/+/v0.47.0:LICENSE |
+| golang.org/x/sys | BSD-3-Clause | https://cs.opensource.google/go/x/sys/+/v0.50.0:LICENSE |
+| golang.org/x/term | BSD-3-Clause | https://cs.opensource.google/go/x/term/+/v0.48.0:LICENSE |
 | golang.org/x/text | BSD-3-Clause | https://cs.opensource.google/go/x/text/+/v0.43.0:LICENSE |
 | google.golang.org/genproto/googleapis/api | Apache-2.0 | https://github.com/googleapis/go-genproto/blob/fad411399dd8/googleapis/api/LICENSE |
 | google.golang.org/protobuf | BSD-3-Clause | https://github.com/protocolbuffers/protobuf-go/blob/v1.36.12/LICENSE |
@@ -64,6 +64,34 @@ Camhive binaries include the open-source components below, each under its own li
 | modernc.org/mathutil | BSD-3-Clause | https://gitlab.com/cznic/mathutil/-/blob/master/LICENSE |
 | modernc.org/memory | BSD-3-Clause | https://gitlab.com/cznic/memory/blob/v1.12.1/LICENSE-GO |
 | modernc.org/sqlite | BSD-3-Clause | https://gitlab.com/cznic/sqlite/blob/v1.62.0/LICENSE |
+
+## Derived code
+
+`internal/archive/muxer.go` and `internal/archive/span.go` (archive playback, ADR-0019 §6) are derived from MediaMTX v1.21.3, `internal/playback` (https://github.com/bluenviron/mediamtx), under this licence:
+
+```text
+MIT License
+
+Copyright (c) 2019 aler9
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
 
 ## Web application (not redistributed as source)
 

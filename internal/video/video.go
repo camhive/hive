@@ -1,5 +1,6 @@
 // Package video is the Hive's video engine boundary: ingest camera streams,
-// record them continuously, serve live (WebRTC) and archive playback. The
+// record them continuously and serve live (WebRTC); the Hive reads the
+// recordings itself (internal/archive, ADR-0019 §6). The
 // only implementation today drives MediaMTX as a sidecar (ADR-0002); nothing
 // outside this package knows MediaMTX exists.
 package video
@@ -28,6 +29,18 @@ type Source struct {
 	Stream Stream
 	URL    string // rtsp://[user:pass@]host[:port]/path
 	Audio  bool   // also take the camera's audio; off means the camera is never asked for it (ADR-0015)
+	// Analyse reports this Stream's frame sizes for motion (ADR-0020); one
+	// Stream per camera.
+	Analyse bool
+}
+
+// Frame is one compressed video access unit of an analysed Source, as the
+// Hive forwarded it (ADR-0020): when it arrived, its size and whether it is a
+// keyframe. No pixels; nothing is decoded.
+type Frame struct {
+	At   time.Time
+	Size int // bytes of the access unit's NAL units
+	Key  bool
 }
 
 // Status is the live state of a source as seen by the engine.
@@ -75,8 +88,6 @@ type Engine interface {
 	// Segments lists recorded segments of a source, oldest first.
 	Segments(ctx context.Context, cam CameraID, s Stream) ([]Segment, error)
 
-	// PlaybackURL serves archive as fMP4 for the given time span.
-	PlaybackURL(cam CameraID, s Stream, start time.Time, d time.Duration) string
 	// WHEPURL is the WebRTC-HTTP egress endpoint for live viewing.
 	WHEPURL(cam CameraID, s Stream) string
 }

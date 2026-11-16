@@ -7,7 +7,7 @@ import { transport } from "@/lib/transport";
 import { errorMessage } from "@/lib/errors";
 import { streamFor } from "@/lib/reconnect";
 import type { PeerFactory, Signalling } from "@/lib/live";
-import { activityRuns, coverage, dayKey, dayStart, exportCapMinutes, nextRecorded, recordedAt, snapshotName, useCalendar, useEvents, useExports, useTimeline, type ExportJob, type StreamName } from "@/lib/archive";
+import { activityRuns, coverage, dayKey, dayStart, exportCapMinutes, nextRecorded, recordedAt, snapshotName, timelineMarks, useCalendar, useEvents, useExports, useTimeline, type ExportJob, type StreamName } from "@/lib/archive";
 import { DayStrip } from "@/components/DayStrip";
 import { DeleteRecordings } from "@/components/DeleteRecordings";
 import { ArchivePlayer, DEFAULT_WINDOW_S, type PlayerDeps } from "@/lib/archivePlayer";
@@ -15,6 +15,7 @@ import { ArchiveSound } from "@/lib/archiveSound";
 import { LiveTile } from "@/components/LiveTile";
 import { PtzPad } from "@/components/PtzPad";
 import { Timeline } from "@/components/Timeline";
+import { EventList } from "@/components/EventList";
 import { Field } from "@/components/Field";
 import { CameraEditForm, ReplaceButton, useCameraActions } from "@/components/CameraManage";
 
@@ -52,6 +53,7 @@ export function CameraDetail({ hive, grant, quality, client, camera, health, sig
   const events = useEvents(client, camera.id, day);
   const ranges = useMemo(() => coverage(timeline.data ?? [], dayStart(day)), [timeline.data, day]);
   const activity = useMemo(() => activityRuns(timeline.data ?? [], dayStart(day)), [timeline.data, day]);
+  const marks = useMemo(() => timelineMarks(events.data ?? []), [events.data]);
   const [position, setPosition] = useState<Date | null>(null);
   const [playError, setPlayError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -246,7 +248,8 @@ export function CameraDetail({ hive, grant, quality, client, camera, health, sig
           {!live && <button type="button" className="btn btn-sm" onClick={backToLive}><span className="dot" style={{ color: "var(--accent)" }} aria-hidden="true" />{t("live.backToLive")}</button>}
         </div>
       </div>
-      <Timeline day={day} ranges={ranges} events={(events.data ?? []).map((e) => Date.parse(e.at ?? ""))} position={live ? (day === today ? new Date() : null) : position} onSeek={(at) => void seek(at)} activity={activity} />
+      <Timeline day={day} ranges={ranges} events={marks} position={live ? (day === today ? new Date() : null) : position} onSeek={(at) => void seek(at)} activity={activity} />
+      <EventList marks={marks} onSeek={(at) => void seek(at)} />
       {calendar.data && (days.length === 0 ? <p className="muted text-sm">{t("archive.noFootage")}</p> : <DayStrip footage={days} day={day} today={today} onPick={pickDay} />)}
 
       {deleting && owner && client && (

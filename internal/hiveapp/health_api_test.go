@@ -89,6 +89,28 @@ func TestEventsRangeForTimeline(t *testing.T) {
 	}
 }
 
+// ADR-0020: motion has a start and an end; storage.low belongs to the whole
+// hive and shows on every camera's timeline.
+func TestEventsCarryTheirEndAndTheHivesOwn(t *testing.T) {
+	f, a, _ := newHealthAPI(t)
+	ctx := context.Background()
+	at := time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)
+	_, _ = f.st.Events().Append(ctx, store.Event{Camera: string(a.ID), Kind: "motion", At: at, End: at.Add(12 * time.Second), Data: json.RawMessage(`{"source":"frames"}`)})
+	_, _ = f.st.Events().Begin(ctx, store.Event{Kind: "storage.low", At: at.Add(time.Minute)}) // still going on
+	viewer := f.token(t, auth.RoleViewer, string(a.ID))
+	r := f.do(t, "GET", "/v0/cameras/"+string(a.ID)+"/events?from=2026-11-09T11:30:00Z&to=2026-11-09T13:00:00Z", viewer, nil)
+	if r.Status != 200 || len(r.List) != 2 {
+		t.Fatalf("events: %d %v", r.Status, r.List)
+	}
+	m, low := r.List[0], r.List[1]
+	if m["kind"] != "motion" || m["end"] != "2026-11-09T12:00:12Z" || m["camera"] != string(a.ID) {
+		t.Fatalf("motion: %v", m)
+	}
+	if low["kind"] != "storage.low" || low["camera"] != "" || low["end"] != nil {
+		t.Fatalf("storage.low: %v", low)
+	}
+}
+
 func TestHealthNotReadyWithoutMonitor(t *testing.T) {
 	f := newAPI(t)
 	owner := f.token(t, auth.RoleOwner, "*")

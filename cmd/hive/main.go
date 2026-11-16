@@ -88,7 +88,7 @@ func run(args []string, stdout, stderr *os.File) int {
 		fmt.Fprintf(stdout, "%s: %s ok\n", serviceName, cmd)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "unknown command %q\nusage: hive [run|claim|install|uninstall|start|stop|restart|status|update|diag|--version]\n", cmd)
+		fmt.Fprintf(stderr, "unknown command %q\nusage: hive [run|claim|install|uninstall|start|stop|restart|status|update|diag|local-login|--version]\n", cmd)
 		return 2
 	}
 }
@@ -124,6 +124,8 @@ func standalone(cmd string, args []string, paths hiveconfig.Paths, stdout, stder
 		return runClaim(paths, args[1:], stdout, stderr), true
 	case "update":
 		return requestUpdate(journal.DefaultDir(), stdout, stderr), true
+	case "local-login":
+		return runLocalLogin(paths, args[1:], os.Stdin, stdout, stderr), true
 	}
 	return 0, false
 }
@@ -225,6 +227,11 @@ func (p *program) serve(ctx context.Context, app *hiveapp.App, parts *runtimePar
 		go parts.sweeper.Run(ctx, 5*time.Minute)
 		go parts.health.Run(ctx)
 		go parts.locator.Run(ctx, time.Minute)
+		motionCtx, stopMotion := context.WithCancel(ctx)
+		motionDone := make(chan struct{})
+		go func() { parts.motion.Run(motionCtx); close(motionDone) }()
+		defer func() { stopMotion(); <-motionDone }() // it ends open episodes before the store closes
+		go parts.cameras.Run(ctx)
 	}
 	go reportUpdates(ctx, journal.DefaultDir(), parts.store, parts.agent, log)
 	if err := app.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {

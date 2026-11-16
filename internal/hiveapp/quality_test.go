@@ -39,8 +39,7 @@ func newStreamEngine(t *testing.T) *streamEngine {
 			_, _ = w.Write([]byte("v=0 answer"))
 			return
 		}
-		w.Header().Set("Content-Type", "video/mp4")
-		_, _ = w.Write([]byte("\x00\x00\x00\x18ftypiso5"))
+		w.WriteHeader(http.StatusNotFound)
 	}))
 	t.Cleanup(e.srv.Close)
 	return e
@@ -66,9 +65,10 @@ func (e *streamEngine) WHEPURL(cam video.CameraID, s video.Stream) string {
 	return e.srv.URL + "/" + string(cam) + "/" + string(s) + "/whep"
 }
 
-func (e *streamEngine) PlaybackURL(cam video.CameraID, s video.Stream, start time.Time, d time.Duration) string {
-	e.note("play " + string(cam) + "/" + string(s))
-	return e.srv.URL + "/get"
+// play stands in for the archive reader (Deps.Playback).
+func (e *streamEngine) play(_ context.Context, req export.Request) (io.ReadCloser, error) {
+	e.note("play " + req.Camera + "/" + req.Stream)
+	return io.NopCloser(strings.NewReader("\x00\x00\x00\x18ftypiso5")), nil
 }
 
 type qualityFixture struct {
@@ -98,7 +98,7 @@ func newQualityAPI(t *testing.T) *qualityFixture {
 	eng := newStreamEngine(t)
 	h := hiveapp.NewAPI(hiveapp.Deps{
 		Store: st, Verifier: auth.NewVerifier("hv_1", auth.Keys{"k1": iss.PublicKey()}), Version: "test", Notify: func() {},
-		Engine: eng, Index: archive.NewIndex(st), Exports: export.NewManager(t.TempDir(), hiveapp.PlaybackFetch(eng), st.Exports()),
+		Engine: eng, Index: archive.NewIndex(st), Playback: eng.play, Exports: export.NewManager(t.TempDir(), eng.play, st.Exports()),
 	})
 	direct := httptest.NewServer(h)
 	t.Cleanup(direct.Close)

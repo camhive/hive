@@ -74,8 +74,14 @@ type Claims struct {
 	Cameras   []string // camera ids, or ["*"] for all
 	Role      Role
 	Offline   bool // long-lived LAN token, valid only while the hive's license is
-	IssuedAt  time.Time
-	Expiry    time.Time
+	// Local marks a token the hive issued itself after a local login (#57):
+	// owner role, LAN listener only, at most LocalTTL.
+	Local bool
+	// Credential names the version of the local credential a local token was
+	// signed in with; the hive refuses the token once the credential changed.
+	Credential string
+	IssuedAt   time.Time
+	Expiry     time.Time
 	// Plan-derived limits the hive enforces locally (ADR-0006). Empty or
 	// zero means "not restricted" so tokens minted before these existed
 	// keep working.
@@ -123,10 +129,31 @@ func (c Claims) validate() error {
 		return fmt.Errorf("%w: unknown role %q", ErrInvalidClaims, c.Role)
 	case !c.Expiry.After(c.IssuedAt):
 		return fmt.Errorf("%w: expiry before issue", ErrInvalidClaims)
-	case !c.Offline && c.Expiry.Sub(c.IssuedAt) > MaxOnlineTTL:
-		return fmt.Errorf("%w: online token lifetime exceeds %s", ErrInvalidClaims, MaxOnlineTTL)
-	case c.Offline && c.Expiry.Sub(c.IssuedAt) > MaxOfflineTTL:
-		return fmt.Errorf("%w: offline token lifetime exceeds %s", ErrInvalidClaims, MaxOfflineTTL)
+	case c.Expiry.Sub(c.IssuedAt) > c.maxTTL():
+		return fmt.Errorf("%w: token lifetime exceeds %s", ErrInvalidClaims, c.maxTTL())
+	}
+	return nil
+}
+
+// maxTTL is the longest lifetime this kind of token may have.
+func (c Claims) maxTTL() time.Duration {
+	switch {
+	case c.Local:
+		return LocalTTL
+	case c.Offline:
+		return MaxOfflineTTL
+	}
+	return MaxOnlineTTL
+}
+
+// checkTime refuses a token from the future (beyond a minute of clock skew)
+// or past its expiry.
+func (c Claims) checkTime(now time.Time) error {
+	switch {
+	case now.Before(c.IssuedAt.Add(-time.Minute)):
+		return ErrNotYetValid
+	case !now.Before(c.Expiry):
+		return ErrExpired
 	}
 	return nil
 }
@@ -167,8 +194,20 @@ func (i *Issuer) PublicKey() ed25519.PublicKey {
 
 // Issue signs claims into a token.
 func (i *Issuer) Issue(c Claims) (string, error) {
-	if err := c.validate(); err != nil {
+	tok, err := toToken(c)
+	if err != nil {
 		return "", err
+	}
+	footer, _ := json.Marshal(map[string]string{"kid": i.kid})
+	tok.SetFooter(footer)
+	return tok.V4Sign(i.key, nil), nil
+}
+
+// toToken validates the claims and writes them into a PASETO token; the
+// cloud signs it, the hive encrypts its local ones (local.go).
+func toToken(c Claims) (*paseto.Token, error) {
+	if err := c.validate(); err != nil {
+		return nil, err
 	}
 	tok := paseto.NewToken()
 	tok.SetSubject(c.Account)
@@ -179,7 +218,7 @@ func (i *Issuer) Issue(c Claims) (string, error) {
 	tok.SetString("sid", c.SessionID)
 	tok.SetString("role", string(c.Role))
 	if err := tok.Set("cams", c.Cameras); err != nil {
-		return "", err
+		return nil, err
 	}
 	if c.Offline {
 		tok.SetString("off", "1")
@@ -187,14 +226,15 @@ func (i *Issuer) Issue(c Claims) (string, error) {
 	if c.Quality != "" {
 		tok.SetString("q", c.Quality)
 	}
+	if c.Credential != "" {
+		tok.SetString("cred", c.Credential)
+	}
 	if c.ExportMaxMinutes != 0 {
 		if err := tok.Set("xmin", c.ExportMaxMinutes); err != nil {
-			return "", err
+			return nil, err
 		}
 	}
-	footer, _ := json.Marshal(map[string]string{"kid": i.kid})
-	tok.SetFooter(footer)
-	return tok.V4Sign(i.key, nil), nil
+	return &tok, nil
 }
 
 // Keys maps key id to public key; serialised for distribution to hives.
@@ -302,24 +342,32 @@ func (v *Verifier) Verify(token string) (Claims, error) {
 	if err != nil {
 		return Claims{}, fmt.Errorf("%w: %w", ErrInvalidToken, err)
 	}
-	c, err := claimsFromToken(tok)
+	c, err := validClaims(tok, false)
 	if err != nil {
 		return Claims{}, err
 	}
-	now := v.now()
-	switch {
-	case now.Before(c.IssuedAt.Add(-time.Minute)): // small skew allowance
-		return Claims{}, ErrNotYetValid
-	case !now.Before(c.Expiry):
-		return Claims{}, ErrExpired
-	case c.HiveID != v.hiveID:
-		return Claims{}, ErrWrongHive
-	case c.Offline && !v.licenseValid():
-		return Claims{}, ErrLicense
-	case v.isRevoked(c.SessionID, now):
-		return Claims{}, ErrRevoked
+	if err := v.admit(c); err != nil {
+		return Claims{}, err
 	}
 	return c, nil
+}
+
+// admit checks a valid token against this hive: time, audience, licence
+// for offline tokens, revoked sessions.
+func (v *Verifier) admit(c Claims) error {
+	now := v.now()
+	if err := c.checkTime(now); err != nil {
+		return err
+	}
+	switch {
+	case c.HiveID != v.hiveID:
+		return ErrWrongHive
+	case c.Offline && !v.licenseValid():
+		return ErrLicense
+	case v.isRevoked(c.SessionID, now):
+		return ErrRevoked
+	}
+	return nil
 }
 
 func (v *Verifier) isRevoked(sid string, now time.Time) bool {
@@ -329,6 +377,21 @@ func (v *Verifier) isRevoked(sid string, now time.Time) bool {
 	return ok && until.After(now)
 }
 
+// validClaims reads and validates the claims of a verified token; local
+// says which verifier read it.
+func validClaims(tok *paseto.Token, local bool) (Claims, error) {
+	c, err := claimsFromToken(tok)
+	if err != nil {
+		return Claims{}, err
+	}
+	c.Local = local
+	if err := c.validate(); err != nil {
+		return Claims{}, fmt.Errorf("%w: %w", ErrInvalidToken, err)
+	}
+	return c, nil
+}
+
+// claimsFromToken reads the claims; validClaims validates them.
 func claimsFromToken(tok *paseto.Token) (Claims, error) {
 	var c Claims
 	var err error
@@ -355,17 +418,21 @@ func claimsFromToken(tok *paseto.Token) (Claims, error) {
 	if err := tok.Get("cams", &c.Cameras); err != nil {
 		return Claims{}, fmt.Errorf("%w: cams", ErrInvalidToken)
 	}
+	return withOptional(tok, c), nil
+}
+
+// withOptional adds the claims not every token carries: offline, plan
+// quality, the local credential version and the export cap.
+func withOptional(tok *paseto.Token, c Claims) Claims {
 	if off, err := tok.GetString("off"); err == nil && off == "1" {
 		c.Offline = true
 	}
 	if q, err := tok.GetString("q"); err == nil {
 		c.Quality = q
 	}
+	c.Credential, _ = tok.GetString("cred")
 	_ = tok.Get("xmin", &c.ExportMaxMinutes) // absent on older tokens
-	if err := c.validate(); err != nil {
-		return Claims{}, fmt.Errorf("%w: %w", ErrInvalidToken, err)
-	}
-	return c, nil
+	return c
 }
 
 // footerKeyID reads the kid from the (signed) footer without verifying yet;

@@ -53,9 +53,12 @@ archive page. It starts live, and the timeline below shows today.
    1×, 2×, 4× or 8×; *Snapshot* saves the frame on screen as a PNG file on
    your device (it is not sent anywhere). Playback continues into the next
    recording of the day on its own.
-3. The **timeline** shows the day: recorded spans as blocks, camera events
-   (online/offline) as marks, an *activity* wave (how much the picture
-   changed; a hint, not motion detection) and, for cameras that record sound,
+3. The **timeline** shows the day: recorded spans as blocks, **motion** as
+   red bands as long as it lasted, **storage low** as a red line across the
+   bar where it began (it concerns the whole hive, so every camera shows
+   it), camera status changes (online/offline) as small grey marks, an
+   *activity* wave (how much the picture changed; a hint, not motion
+   detection) and, for cameras that record sound,
    a *sound level* line, and the playhead; the time it shows, with seconds,
    stands above the bar and follows playback. Hover to read the time under
    the cursor; click to seek. Zoom with the mouse wheel, two fingers or the
@@ -66,6 +69,36 @@ archive page. It starts live, and the timeline below shows today.
    a minute, with Shift ten minutes.
 4. Clicking a gap jumps to the next recorded moment; if nothing follows, the
    page says so.
+5. **Events (n)** under the timeline lists the day's events, newest first:
+   motion with how long it lasted, storage low, and camera status changes.
+   Click one to play the recording from that moment. Motion that is still
+   going on says *ongoing*.
+
+### Motion
+
+The hive marks motion for every camera; nothing is sent to the cloud for it
+and no plan is needed. It takes motion from one of two places, chosen per
+camera:
+
+- **Seen by the camera.** A camera added over ONVIF that offers events
+  reports motion itself; once it does, the hive uses that. Switch motion
+  detection on in the camera's own settings and set its zones and
+  sensitivity there. With detection off the camera says nothing and the
+  hive keeps watching the picture instead. A recorder (NVR) added as one
+  camera reports the motion of all its channels together.
+- **Seen in the picture.** For every other camera (added by RTSP address, or
+  without ONVIF events) the hive watches how large the compressed frames of
+  the sub stream are: a still scene is small, movement makes the frames
+  several times larger. Nothing is decoded, so it costs almost no CPU, even
+  on a Raspberry Pi. It is a good hint, not an alarm system: a camera set to
+  *constant bitrate* (CBR) shows little, heavy noise at night hides small
+  movement, a light switched on can look like motion for a second, and
+  movement that goes on for more than about a minute and a half fades into
+  the background. Set the camera's sub stream to *variable bitrate* (VBR)
+  for the best results.
+
+Short pauses (under 10 seconds) count as one motion, and one motion lasts
+at most 30 minutes; the event list shows which way each was seen.
 
 Playback streams fragmented MP4 directly from the hive and starts within a
 second or two on the local network. Over the relay it depends on your upstream
@@ -92,7 +125,9 @@ The hive deletes footage older than the configured number of days (30 by
 default) and, independently, keeps at least the configured free space on the
 recording disk: old exports go first, then the oldest complete segments. Recording never
 stops because of retention; if the disk cannot be freed, the hive reports
-"storage low" and keeps going. Downgrading a plan never deletes anything.
+"storage low" and keeps going; the timeline of every camera shows when it
+began and, once space is back, when it ended.
+Downgrading a plan never deletes anything.
 
 ## Deleting recordings
 

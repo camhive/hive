@@ -81,7 +81,7 @@ func TestWebRTCFlowsThroughTURNWhenP2PIsBlocked(t *testing.T) {
 	}
 
 	eng, err := video.NewMediaMTX(video.MediaMTXConfig{
-		Host: "127.0.0.1", APIPort: ports[3], PlaybackPort: ports[4], WebRTCPort: ports[5],
+		Host: "127.0.0.1", APIPort: ports[3], WebRTCPort: ports[5],
 		ArchiveDir: t.TempDir(), SegmentDuration: time.Minute, WorkDir: t.TempDir(),
 		ICEServers: []video.ICEServer{{URL: "turn:" + turnAddr, Username: turnUser, Password: turnPass}},
 	}, video.WithLogger(log))

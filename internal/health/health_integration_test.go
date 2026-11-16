@@ -49,7 +49,7 @@ func TestOfflineWithin15sAndOnlineOnReturn(t *testing.T) {
 	sim := startSim()
 
 	eng, err := video.NewMediaMTX(video.MediaMTXConfig{
-		Host: "127.0.0.1", APIPort: ports[3], PlaybackPort: ports[4], WebRTCPort: ports[5],
+		Host: "127.0.0.1", APIPort: ports[3], WebRTCPort: ports[5],
 		ArchiveDir: t.TempDir(), SegmentDuration: time.Minute, WorkDir: t.TempDir(),
 	}, video.WithLogger(log))
 	if errors.Is(err, video.ErrMissingTool) {

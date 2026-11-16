@@ -1,17 +1,20 @@
 package export_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/camhive/hive/internal/archive"
 	"github.com/camhive/hive/internal/camsim"
 	"github.com/camhive/hive/internal/export"
 	"github.com/camhive/hive/internal/hiveapp"
@@ -19,9 +22,10 @@ import (
 	"github.com/camhive/hive/internal/video"
 )
 
-// A real export: recorded by MediaMTX from camsim, fetched through the
-// playback server across a segment boundary, and accepted by ffprobe with
-// the expected duration.
+// A real export: recorded by MediaMTX from camsim with sound, read by the
+// hive's archive reader across a segment boundary, and accepted by ffprobe
+// with the expected duration and both tracks; a span further in (a seek)
+// plays as video only.
 func TestExportFromRealEngineIsAValidMP4(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test")
@@ -33,7 +37,7 @@ func TestExportFromRealEngineIsAValidMP4(t *testing.T) {
 
 	sim, err := camsim.New(camsim.Config{
 		Host: "127.0.0.1", RTSPPort: ports[0], APIPort: ports[1], ONVIFPort: ports[2],
-		Cameras: []camsim.Camera{{Name: "exp", Codec: camsim.H264, FPS: 10, Main: camsim.Resolution{Width: 320, Height: 180}}},
+		Cameras: []camsim.Camera{{Name: "exp", Codec: camsim.H264, FPS: 10, Audio: true, Main: camsim.Resolution{Width: 320, Height: 180}}},
 		WorkDir: t.TempDir(),
 	}, camsim.WithLogger(log))
 	if errors.Is(err, camsim.ErrMissingTool) {
@@ -46,9 +50,10 @@ func TestExportFromRealEngineIsAValidMP4(t *testing.T) {
 	if err := sim.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
+	archiveDir := t.TempDir()
 	eng, err := video.NewMediaMTX(video.MediaMTXConfig{
-		Host: "127.0.0.1", APIPort: ports[3], PlaybackPort: ports[4], WebRTCPort: ports[5],
-		ArchiveDir: t.TempDir(), SegmentDuration: 3 * time.Second, WorkDir: t.TempDir(),
+		Host: "127.0.0.1", APIPort: ports[3], WebRTCPort: ports[5],
+		ArchiveDir: archiveDir, SegmentDuration: 3 * time.Second, WorkDir: t.TempDir(),
 	}, video.WithLogger(log))
 	if errors.Is(err, video.ErrMissingTool) {
 		skipOrFail(t, err)
@@ -60,7 +65,7 @@ func TestExportFromRealEngineIsAValidMP4(t *testing.T) {
 	if err := eng.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := eng.AddSource(ctx, video.Source{Camera: "cam_exp", Stream: video.Main, URL: fmt.Sprintf("rtsp://127.0.0.1:%d/exp/main", ports[0])}); err != nil {
+	if err := eng.AddSource(ctx, video.Source{Camera: "cam_exp", Stream: video.Main, Audio: true, URL: fmt.Sprintf("rtsp://127.0.0.1:%d/exp/main", ports[0])}); err != nil {
 		t.Fatal(err)
 	}
 	var segs []video.Segment
@@ -77,7 +82,8 @@ func TestExportFromRealEngineIsAValidMP4(t *testing.T) {
 	}
 
 	// Span from 1s into the first segment for 5s: crosses into the second.
-	m := export.NewManager(t.TempDir(), hiveapp.PlaybackFetch(eng), jobs(t))
+	fetch := hiveapp.ArchiveFetch(archive.NewReader(archiveDir, archive.OpenPlain))
+	m := export.NewManager(t.TempDir(), fetch, jobs(t))
 	job, err := m.Start(ctx, export.Request{Camera: "cam_exp", Stream: "main", Start: segs[0].Start.Add(time.Second), Duration: 5 * time.Second, Owner: "acc"})
 	if err != nil {
 		t.Fatal(err)
@@ -94,14 +100,44 @@ func TestExportFromRealEngineIsAValidMP4(t *testing.T) {
 		t.Log("ffprobe not installed; skipping container validation")
 		return
 	}
-	out, err := exec.CommandContext(ctx, ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path).Output() //nolint:gosec // test tool with fixed args
+	if d, codecs := probe(ctx, t, ffprobe, path); d < 4 || d > 6.5 || codecs != "h264,pcm_s16be" {
+		t.Fatalf("export: %.2fs %s, want ~5s of h264 and pcm_s16be", d, codecs)
+	}
+
+	// A seek: 2 s from 1 s into the second segment, as the player asks.
+	body, err := fetch(ctx, export.Request{Camera: "cam_exp", Stream: "main", Start: segs[1].Start.Add(time.Second), Duration: 2 * time.Second})
 	if err != nil {
-		t.Fatalf("ffprobe rejected the export: %v", err)
+		t.Fatal(err)
 	}
-	d, _ := strconv.ParseFloat(strings.TrimSpace(string(out)), 64)
-	if d < 4 || d > 6.5 {
-		t.Fatalf("ffprobe duration %.2fs, want ~5s", d)
+	defer func() { _ = body.Close() }()
+	seek := filepath.Join(t.TempDir(), "seek.mp4")
+	var out bytes.Buffer
+	if err := archive.CopyPlayable(&out, body); err != nil {
+		t.Fatal(err)
 	}
+	_ = os.WriteFile(seek, out.Bytes(), 0o600)
+	if d, codecs := probe(ctx, t, ffprobe, seek); d < 1.5 || d > 4 || codecs != "h264" {
+		t.Fatalf("seek: %.2fs %s, want ~2s of h264 only", d, codecs)
+	}
+}
+
+// probe returns a file's duration and codecs as ffprobe sees them.
+func probe(ctx context.Context, t *testing.T, ffprobe, path string) (float64, string) {
+	t.Helper()
+	out, err := exec.CommandContext(ctx, ffprobe, "-v", "error", "-show_entries", "format=duration:stream=codec_name", "-of", "csv=p=0", path).Output() //nolint:gosec // test tool with fixed args
+	if err != nil {
+		t.Fatalf("ffprobe rejected %s: %v", path, err)
+	}
+	var codecs []string
+	var d float64
+	for _, line := range strings.Fields(strings.TrimSpace(string(out))) {
+		if v, err := strconv.ParseFloat(line, 64); err == nil {
+			d = v
+		} else {
+			codecs = append(codecs, line)
+		}
+	}
+	return d, strings.Join(codecs, ",")
 }
 
 func skipOrFail(t *testing.T, err error) {

@@ -18,6 +18,7 @@ import (
 	"github.com/camhive/hive/internal/diag"
 	"github.com/camhive/hive/internal/domain/camera"
 	"github.com/camhive/hive/internal/entitlements"
+	"github.com/camhive/hive/internal/events"
 	"github.com/camhive/hive/internal/export"
 	"github.com/camhive/hive/internal/health"
 	"github.com/camhive/hive/internal/hiveagent"
@@ -25,6 +26,7 @@ import (
 	"github.com/camhive/hive/internal/hiveconfig"
 	"github.com/camhive/hive/internal/ingest"
 	"github.com/camhive/hive/internal/locate"
+	"github.com/camhive/hive/internal/motion"
 	"github.com/camhive/hive/internal/ptz"
 	"github.com/camhive/hive/internal/retention"
 	"github.com/camhive/hive/internal/store"
@@ -40,6 +42,8 @@ type runtimeParts struct {
 	sweeper *retention.Sweeper
 	health  *health.Monitor
 	locator *locate.Locator // nil when the video engine is unavailable
+	motion  *motion.Hub     // turns frame sizes and camera events into motion Events
+	cameras *motion.Watcher // nil when the video engine is unavailable; the cameras' own motion events
 	store   *store.Store
 	archive string
 	close   func()
@@ -69,7 +73,9 @@ func assemble(ctx context.Context, cfg hiveconfig.Config, paths hiveconfig.Paths
 	verifier := auth.NewVerifier(hiveID, keys, auth.WithLicenseValid(licensing.Usable))
 
 	parts := &runtimeParts{close: func() { _ = st.Close() }, store: st}
-	eng, err := newEngine(cfg, paths, log)
+	closeOpenEvents(ctx, st, log)
+	parts.motion = motion.NewHub(st.Events(), motion.Options{Logger: log.With("component", "motion")})
+	eng, err := newEngine(cfg, paths, log, video.WithFrames(parts.motion.Frame))
 	if err != nil {
 		_ = st.Close()
 		return nil, err
@@ -81,12 +87,14 @@ func assemble(ctx context.Context, cfg hiveconfig.Config, paths hiveconfig.Paths
 		}})
 	parts.agent.LoadLicense(ctx)
 	deps := hiveapp.Deps{Store: st, Verifier: verifier, Version: version, Notify: func() {}, Logger: log.With("component", "api"), Location: time.Local, PTZ: ptz.New(),
-		Licensed: licensing.Effective, Discovery: hiveapp.ONVIFDiscoverer{}}
+		Licensed: licensing.Effective, Discovery: hiveapp.ONVIFDiscoverer{},
+		Local: auth.NewLocalSessions(hiveID, time.Now)} // the owner's emergency login (#57), LAN listener only
 	if eng != nil {
 		parts.ingest = ingest.New(st.Cameras(), eng, ingest.Options{Logger: log.With("component", "ingest")})
 		parts.index = archive.NewIndex(st, archive.WithLogger(log.With("component", "archive")))
 		parts.archive = cfg.ArchiveDir
-		deps.Exports = export.NewManager(filepath.Join(paths.Data, "exports"), hiveapp.PlaybackFetch(eng), st.Exports(),
+		deps.Playback = hiveapp.ArchiveFetch(archive.NewReader(cfg.ArchiveDir, archive.OpenPlain))
+		deps.Exports = export.NewManager(filepath.Join(paths.Data, "exports"), deps.Playback, st.Exports(),
 			export.WithKeep(export.Keep{MaxAge: time.Duration(cfg.ExportDays) * 24 * time.Hour, MaxBytes: int64(cfg.ExportMaxGB) << 30}),
 			export.WithOnDone(func(j export.Job) {
 				details, _ := json.Marshal(map[string]any{"camera": j.Request.Camera, "stream": j.Request.Stream, "start": j.Request.Start, "duration_s": int(j.Request.Duration.Seconds()), "status": j.Status, "bytes": j.Bytes, "error": j.Error})
@@ -97,16 +105,22 @@ func assemble(ctx context.Context, cfg hiveconfig.Config, paths hiveconfig.Paths
 		if err := deps.Exports.Recover(ctx); err != nil { // jobs cut off by the last stop
 			log.Error("export recovery", "err", err)
 		}
+		storageLow := events.NewCondition(st.Events(), "", hiveagent.EventStorageLow, events.WithLogger(log))
 		parts.sweeper = retention.New(parts.index, st.Segments(),
 			retention.Policy{DefaultDays: cfg.RetentionDays, MinFreeBytes: int64(cfg.MinFreeGB) << 30,
 				MaxDays: func() int { return licensing.Effective().Int(entitlements.RetentionDaysMax) }},
 			retention.Options{ArchiveDir: cfg.ArchiveDir, Logger: log.With("component", "retention"), Exports: deps.Exports,
 				OnStorageLow: func(free int64) {
 					log.Error("storage low: archive disk below min_free_gb and nothing left to delete", "free_bytes", free)
-					parts.agent.Emit(hiveagent.EventStorageLow, map[string]any{"free_bytes": free, "min_free_gb": cfg.MinFreeGB})
-				}})
+					data := map[string]any{"free_bytes": free, "min_free_gb": cfg.MinFreeGB}
+					parts.agent.Emit(hiveagent.EventStorageLow, data)
+					storageLow.Begin(context.Background(), time.Now(), data)
+				},
+				OnStorageOK: func(int64) { storageLow.End(context.Background(), time.Now()) },
+			})
 		deps.Deletions = parts.sweeper
-		deps.Notify = parts.ingest.Notify
+		parts.cameras = motion.NewWatcher(st.Cameras(), parts.motion, motion.WatchOptions{Logger: log.With("component", "motion")})
+		deps.Notify = func() { parts.ingest.Notify(); parts.cameras.Notify() }
 		deps.Index = parts.index
 		deps.Engine = eng
 		parts.health = health.New(st.Cameras(), eng, health.Options{
@@ -129,6 +143,16 @@ func assemble(ctx context.Context, cfg hiveconfig.Config, paths hiveconfig.Paths
 	return parts, nil
 }
 
+// closeOpenEvents ends the lasting Events a crash left open (ADR-0020): the
+// conditions are measured afresh and begin again if they still hold.
+func closeOpenEvents(ctx context.Context, st *store.Store, log *slog.Logger) {
+	if n, err := st.Events().CloseOpen(ctx); err != nil {
+		log.Error("close open events", "err", err)
+	} else if n > 0 {
+		log.Info("closed events left open by the last run", "count", n)
+	}
+}
+
 // cloudKeys parses the configured verification keys; none is allowed (the
 // hive is not claimed yet) but means every API request is rejected.
 func cloudKeys(cfg hiveconfig.Config, log *slog.Logger) (auth.Keys, error) {
@@ -149,7 +173,7 @@ func cloudKeys(cfg hiveconfig.Config, log *slog.Logger) (auth.Keys, error) {
 
 // newEngine builds the MediaMTX engine, or returns nil (and logs) when the
 // binary is missing so the API still runs.
-func newEngine(cfg hiveconfig.Config, paths hiveconfig.Paths, log *slog.Logger) (*video.MediaMTX, error) {
+func newEngine(cfg hiveconfig.Config, paths hiveconfig.Paths, log *slog.Logger, opts ...video.Option) (*video.MediaMTX, error) {
 	ice := make([]video.ICEServer, 0, len(cfg.ICEServers))
 	for _, u := range cfg.ICEServers {
 		ice = append(ice, video.ICEServer{URL: u})
@@ -157,7 +181,7 @@ func newEngine(cfg hiveconfig.Config, paths hiveconfig.Paths, log *slog.Logger) 
 	eng, err := video.NewMediaMTX(video.MediaMTXConfig{
 		ArchiveDir: cfg.ArchiveDir, SegmentDuration: time.Duration(cfg.SegmentMinutes) * time.Minute,
 		WorkDir: filepath.Join(paths.Data, "engine"), Binary: mediamtxBinary(), ICEServers: ice,
-	}, video.WithLogger(log.With("component", "video")))
+	}, append([]video.Option{video.WithLogger(log.With("component", "video"))}, opts...)...)
 	if errors.Is(err, video.ErrMissingTool) {
 		log.Error("video engine unavailable: mediamtx binary not found; cameras will not record", "err", err)
 		return nil, nil
@@ -217,6 +241,7 @@ func newLocator(st *store.Store, parts *runtimeParts, log *slog.Logger) *locate.
 		OnMoved: func(old, moved camera.Camera) {
 			report("camera.address_changed", moved.ID, map[string]any{"old": old.Host(), "new": moved.Host()})
 			parts.ingest.Notify() // pull from the new address
+			parts.cameras.Notify()
 		},
 		OnConflict: func(c camera.Camera, fields []string) {
 			report("camera.identity_changed", c.ID, map[string]any{"host": c.Host(), "fields": fields})

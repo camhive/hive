@@ -3,6 +3,7 @@ package camsim
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func testConfig() Config {
@@ -124,5 +125,42 @@ func TestDefaultsFillZeroValues(t *testing.T) {
 	c := cfg.Cameras[0]
 	if c.Codec != H264 || c.FPS == 0 || c.Main.Width == 0 || c.Sub.Width == 0 {
 		t.Fatalf("camera not defaulted: %+v", c)
+	}
+}
+
+// A motion camera shows a still, textured scene that an object crosses in
+// the last third of every period (ADR-0020 tests need motion that starts and
+// stops); the others keep the moving test pattern.
+func TestFFmpegArgsDrawAStillSceneWithACrossingObjectForMotionCameras(t *testing.T) {
+	cfg := testConfig()
+	plain := strings.Join(cfg.ffmpegArgs(cfg.Cameras[0], Sub), " ")
+	if !strings.Contains(plain, "testsrc2") || strings.Contains(plain, "overlay") {
+		t.Errorf("a camera without motion keeps the test pattern\n%s", plain)
+	}
+	cam := cfg.Cameras[0]
+	cam.Motion = 30 * time.Second
+	args := strings.Join(cfg.ffmpegArgs(cam, Sub), " ")
+	for _, want := range []string{"noise=alls=20:allf=0", "overlay=", "mod(t\\,30)", "gte(", "size=" + itoa(cam.Sub.Width) + "x" + itoa(cam.Sub.Height)} {
+		if !strings.Contains(args, want) {
+			t.Errorf("args missing %q\n%s", want, args)
+		}
+	}
+	if strings.Contains(args, "testsrc2") {
+		t.Errorf("the motion scene replaces the test pattern\n%s", args)
+	}
+}
+
+func TestMotionScheduleIsStillThenMovingEachPeriod(t *testing.T) {
+	cam := Camera{Motion: 30 * time.Second}
+	for _, tc := range []struct {
+		at   time.Duration
+		want bool
+	}{{0, false}, {19 * time.Second, false}, {21 * time.Second, true}, {29 * time.Second, true}, {31 * time.Second, false}, {55 * time.Second, true}} {
+		if got := cam.Moving(tc.at); got != tc.want {
+			t.Errorf("moving at %v = %v, want %v", tc.at, got, tc.want)
+		}
+	}
+	if (Camera{}).Moving(25 * time.Second) {
+		t.Error("a camera without a motion period never reports motion")
 	}
 }

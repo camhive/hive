@@ -1,19 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import { unwrap } from "@camhive/api";
+import { unwrap, type Hive as ApiHive } from "@camhive/api";
 import { api } from "./api";
 import { cacheGet, cacheSet, isNetworkError } from "./cache";
 
-export type Hive = {
-  id: string;
-  name: string;
-  status: "active" | "sleeping" | "revoked";
-  online: boolean;
-  version?: string;
-  claimed_at: string;
-  last_seen_at?: string;
-  lan?: { host?: string; port?: number; addrs?: string[]; cert_fingerprint?: string; cert_issuer?: string };
-  relay_host?: string;
-};
+/** A hive as the cloud lists it (api/cloud-openapi.yaml). */
+export type Hive = ApiHive;
 
 export type HiveList = { hives: Hive[]; shared: Hive[] };
 

@@ -13,6 +13,7 @@ import { lanBase, rebindHintApplies, relayBase } from "@/lib/transport";
 import { useGrant } from "@/lib/useGrant";
 import { useCameras, useHiveClient } from "@/lib/hiveApi";
 import { DeleteRecordings } from "@/components/DeleteRecordings";
+import { LocalLoginSettings } from "@/components/LocalLogin";
 import type { Hive } from "@/lib/hives";
 
 /** Connection settings for one hive: which path the app uses and why (ADR-0012). */
@@ -68,6 +69,7 @@ export function HiveSettings() {
         {decision?.path === "lan" && <p className="mt-4 text-sm muted">{t("transport.lnaNote")}</p>}
         <button className="btn btn-secondary mt-4" disabled={probing} onClick={() => void reprobe()}>{probing ? t("transport.probing") : t("transport.reprobe")}</button>
       </section>
+      {owned && hive.status !== "revoked" && <LocalLoginSettings hive={hive} />}
       {owned && hive.status !== "revoked" && (
         <section className="card max-w-3xl" aria-labelledby="delete-recordings-title">
           <h2 id="delete-recordings-title" className="text-lg font-semibold mb-1">{t("deletion.title")}</h2>

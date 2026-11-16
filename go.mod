@@ -4,6 +4,7 @@ go 1.27.3
 
 require (
 	aidanwoods.dev/go-paseto v1.6.0
+	github.com/abema/go-mp4 v1.7.3
 	github.com/bluenviron/gortsplib/v5 v5.6.7
 	github.com/bluenviron/mediacommon/v2 v2.9.6
 	github.com/coder/websocket v1.8.15
@@ -14,7 +15,9 @@ require (
 	github.com/pion/webrtc/v4 v4.2.26
 	github.com/sigstore/sigstore v1.10.6
 	github.com/theupdateframework/go-tuf/v2 v2.4.2
+	golang.org/x/crypto v0.58.0
 	golang.org/x/sys v0.50.0
+	golang.org/x/term v0.48.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.62.0
@@ -22,7 +25,6 @@ require (
 
 require (
 	aidanwoods.dev/go-result v0.3.1 // indirect
-	github.com/abema/go-mp4 v1.7.3 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/dustin/go-humanize v1.1.0 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
@@ -59,9 +61,7 @@ require (
 	github.com/sigstore/protobuf-specs v0.5.0 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
 	go.yaml.in/yaml/v4 v4.0.0 // indirect
-	golang.org/x/crypto v0.58.0 // indirect
 	golang.org/x/net v0.61.0 // indirect
-	golang.org/x/term v0.48.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20261005182115-fad411399dd8 // indirect

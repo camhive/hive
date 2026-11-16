@@ -114,8 +114,8 @@ func (i *Ingest) Reconcile(ctx context.Context) error {
 }
 
 // desiredSources maps enabled cameras with known streams to engine sources,
-// with credentials placed in the URL for the RTSP client that pulls them and
-// the camera's audio setting (ADR-0015).
+// with credentials placed in the URL for the RTSP client that pulls them, the
+// camera's audio setting (ADR-0015) and the Stream analysed for motion.
 func desiredSources(cams []camera.Camera) map[sourceKey]video.Source {
 	out := map[sourceKey]video.Source{}
 	for _, c := range cams {
@@ -127,10 +127,20 @@ func desiredSources(cams []camera.Camera) map[sourceKey]video.Source {
 				continue
 			}
 			key := sourceKey{cam: video.CameraID(c.ID), stream: video.Stream(name)}
-			out[key] = video.Source{Camera: key.cam, Stream: key.stream, URL: withCredentials(s.URL, c.Credentials), Audio: c.RecordAudio}
+			out[key] = video.Source{Camera: key.cam, Stream: key.stream, URL: withCredentials(s.URL, c.Credentials), Audio: c.RecordAudio,
+				Analyse: name == analysedStream(c)}
 		}
 	}
 	return out
+}
+
+// analysedStream is the Stream whose frame sizes tell motion (ADR-0020): the
+// sub stream when the camera has one, else the main stream.
+func analysedStream(c camera.Camera) camera.Stream {
+	if c.Streams[camera.Sub].URL != "" {
+		return camera.Sub
+	}
+	return camera.Main
 }
 
 func withCredentials(raw string, creds camera.Credentials) string {

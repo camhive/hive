@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DAY_MS, MIN_SPAN, activityRuns, clock, clockSeconds, coverage, dayKey, dayStart, dayStrip, exportCapMinutes, nextRecorded, recordedAt, snapshotName, ticks, timeAt, zoomAround, zoomWindow } from "../src/lib/archive";
+import { DAY_MS, MIN_SPAN, activityRuns, clock, clockSeconds, coverage, dayKey, dayStart, dayStrip, exportCapMinutes, nextRecorded, recordedAt, snapshotName, ticks, timeAt, timelineMarks, zoomAround, zoomWindow } from "../src/lib/archive";
 import { mimeFor, playPath } from "../src/lib/archivePlayer";
 
 const day = dayStart("2026-11-09");
@@ -119,5 +119,24 @@ describe("day strip", () => {
 describe("snapshots", () => {
   it("names the file after the camera and the moment shown", () => {
     expect(snapshotName("Front door", new Date(day.getTime() + (8 * 3600 + 30 * 60 + 5) * 1000))).toBe("Front-door_2026-11-09_08-30-05.png");
+  });
+});
+
+describe("events on the timeline (ADR-0020)", () => {
+  it("spans lasting events to their end or, while they last, to now; others are instants; bad times are dropped", () => {
+    const now = Date.parse(at(12));
+    const marks = timelineMarks([
+      { id: 1, kind: "motion", at: at(8), end: new Date(Date.parse(at(8)) + 12_000).toISOString(), camera: "cam_1", data: { source: "frames" } },
+      { id: 2, kind: "motion", at: at(11, 59), camera: "cam_1", data: {} },
+      { id: 3, kind: "storage.low", at: at(9), camera: "", data: {} },
+      { id: 4, kind: "camera.offline", at: at(10), end: at(10), camera: "cam_1", data: {} }, // instantaneous: ends where it began
+      { id: 5, kind: "motion", at: "nope", camera: "cam_1", data: {} },
+    ], now);
+    expect(marks).toEqual([
+      { id: 1, kind: "motion", at: Date.parse(at(8)), end: Date.parse(at(8)) + 12_000, ongoing: false, source: "frames" },
+      { id: 2, kind: "motion", at: Date.parse(at(11, 59)), end: now, ongoing: true, source: undefined },
+      { id: 3, kind: "storage.low", at: Date.parse(at(9)), end: now, ongoing: true, source: undefined },
+      { id: 4, kind: "camera.offline", at: Date.parse(at(10)), end: undefined, ongoing: false, source: undefined },
+    ]);
   });
 });

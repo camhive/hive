@@ -1,16 +1,22 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { DAY_MS, MIN_SPAN, ZOOM_LEVELS, clock, clockSeconds, dayStart, ticks, zoomAround, zoomWindow, type ActivityPoint } from "@/lib/archive";
+import { DAY_MS, MIN_SPAN, ZOOM_LEVELS, clock, clockSeconds, dayStart, ticks, zoomAround, zoomWindow, type ActivityPoint, type TimelineMark } from "@/lib/archive";
 
 type Props = {
   day: string;
   ranges: Array<[number, number]>;
-  events: number[];
+  /** Motion spans, storage.low and status instants (ADR-0020). */
+  events: TimelineMark[];
   position: Date | null;
   onSeek: (at: Date) => void;
   /** Activity and sound runs (ADR-0015); recorded spans turn pale behind them. */
   activity?: { video: ActivityPoint[][]; sound: ActivityPoint[][] };
 };
+
+/** The i18n key naming an event kind; dots in kinds are not key separators. */
+export function eventLabel(kind: string): string {
+  return `archive.events.kinds.${kind.replaceAll(".", "_")}`;
+}
 
 /** A pointer gesture on the bar: a drag from `start`, or a pinch once two pointers are down. */
 type Gesture = {
@@ -207,9 +213,18 @@ export function Timeline({ day, ranges, events, position, onSeek, activity }: Pr
           </div>
         )}
         {/* events */}
-        {events.filter((e) => Number.isFinite(e) && visible(e, e)).map((e, i) => (
-          <span key={i} className="absolute bottom-5 w-0.5 h-3 rounded-sm" style={{ left: pct(e), background: "var(--danger)" }} data-testid="event" title={clock(new Date(e))} />
-        ))}
+        {events.filter((e) => visible(e.at, e.end ?? e.at)).map((e) => {
+          const title = `${clock(new Date(e.at))} ${t(eventLabel(e.kind))}`;
+          if (e.kind === "motion") { // a band under the footage, as long as the motion lasted
+            const a = Math.max(e.at, from);
+            const b = Math.min(e.end ?? e.at, to);
+            return <span key={e.id} className="absolute bottom-5 h-2 rounded-sm" style={{ left: pct(a), width: `max(2px, calc(${pct(b)} - ${pct(a)}))`, background: "var(--danger)" }} data-testid="event" data-kind={e.kind} title={title} />;
+          }
+          if (e.kind === "storage.low") { // the whole hive: a line across the bar where it began
+            return <span key={e.id} className="absolute top-0 bottom-5 w-0.5" style={{ left: pct(Math.max(e.at, from)), background: "var(--danger)", opacity: 0.7 }} data-testid="event" data-kind={e.kind} title={title} />;
+          }
+          return <span key={e.id} className="absolute bottom-5 w-0.5 h-3 rounded-sm" style={{ left: pct(e.at), background: "var(--muted)" }} data-testid="event" data-kind={e.kind} title={title} />;
+        })}
         {/* ruler */}
         <div className="absolute inset-x-0 bottom-0 h-5 border-t" style={{ borderColor: "var(--border)", background: "var(--card)" }}>
           {marks.map((m) => (

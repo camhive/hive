@@ -84,6 +84,7 @@ type Options struct {
 	FS           FS               // default: the real filesystem
 	Now          func() time.Time // default: time.Now
 	OnStorageLow func(free int64) // called when the space target cannot be met
+	OnStorageOK  func(free int64) // called when a sweep meets the space target
 	ArchiveDir   string           // the volume to measure
 	Logger       *slog.Logger
 	Exports      Exports // old exports to remove first; nil: none
@@ -125,6 +126,9 @@ func New(idx *archive.Index, repo *store.Segments, policy Policy, opts Options) 
 	}
 	if opts.OnStorageLow == nil {
 		opts.OnStorageLow = func(int64) {}
+	}
+	if opts.OnStorageOK == nil {
+		opts.OnStorageOK = func(int64) {}
 	}
 	if opts.Logger == nil {
 		opts.Logger = slog.New(slog.DiscardHandler)
@@ -217,6 +221,7 @@ func (s *Sweeper) freeSpace(ctx context.Context, segs []archive.Segment, rep *Re
 			return fmt.Errorf("retention: free space: %w", err)
 		}
 		if free >= s.policy.MinFreeBytes {
+			s.opts.OnStorageOK(free)
 			return nil
 		}
 		if err := s.remove(ctx, seg, "space", rep); err != nil {
@@ -231,7 +236,9 @@ func (s *Sweeper) freeSpace(ctx context.Context, segs []archive.Segment, rep *Re
 	if free < s.policy.MinFreeBytes {
 		s.log.Warn("storage low: nothing left to delete", "free", free, "want", s.policy.MinFreeBytes)
 		s.opts.OnStorageLow(free)
+		return nil
 	}
+	s.opts.OnStorageOK(free)
 	return nil
 }
 
