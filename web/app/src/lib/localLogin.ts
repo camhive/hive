@@ -7,6 +7,7 @@ import { useEffect, useSyncExternalStore } from "react";
 import { CamhiveError, type AccessGrant, type hiveComponents } from "@camhive/api";
 import type { Hive } from "./hives";
 import { lanBase } from "./transport";
+import { retryAfterSeconds } from "./retryAfter";
 
 export type LocalSession = hiveComponents["schemas"]["LocalSession"];
 
@@ -56,10 +57,10 @@ export function clearLocal(hiveID: string): void {
   changed();
 }
 
-/** The hive refused a sign-in because of too many failures; `retryAfterS` comes from Retry-After. */
+/** The hive refused a sign-in because of too many failures; `retryAfterS` comes from Retry-After, null when hidden. */
 export class LocalLoginLocked extends CamhiveError {
-  readonly retryAfterS: number;
-  constructor(body: { code?: string; message?: string } | undefined, retryAfterS: number) {
+  readonly retryAfterS: number | null;
+  constructor(body: { code?: string; message?: string } | undefined, retryAfterS: number | null) {
     super(429, body);
     this.retryAfterS = retryAfterS;
   }
@@ -75,7 +76,7 @@ export async function signInLocally(hive: Pick<Hive, "lan">, username: string, p
     body: JSON.stringify({ username, password }),
   });
   const body = await res.json().catch(() => undefined);
-  if (res.status === 429) throw new LocalLoginLocked(body, Number(res.headers.get("Retry-After")) || 900);
+  if (res.status === 429) throw new LocalLoginLocked(body, retryAfterSeconds(res.headers));
   if (!res.ok) throw new CamhiveError(res.status, body);
   return body as LocalSession;
 }

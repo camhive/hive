@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
+
+	"github.com/camhive/hive/internal/hiveconfig"
 )
 
 // #62: release archives put mediamtx next to hive; deb and rpm install both
@@ -40,5 +43,18 @@ func TestEngineIsFoundNextToTheHiveEvenThroughASymlink(t *testing.T) {
 	}
 	if got := mediamtxNextTo(filepath.Join(root, "missing", "hive")); got != "" {
 		t.Fatalf("unresolvable path: %q", got)
+	}
+}
+
+// #61: the engine listens on the ports hive.yaml names.
+func TestEngineTakesItsPortsFromTheConfig(t *testing.T) {
+	cfg := hiveconfig.Config{ArchiveDir: "/a", SegmentMinutes: 2, EngineAPIPort: 19997, EngineWebRTCPort: 18889, EngineWebRTCUDPPort: 18900,
+		ICEServers: []string{"stun:stun.example:3478"}}
+	c := engineConfig(cfg, hiveconfig.Paths{Data: "/d"})
+	if c.APIPort != 19997 || c.WebRTCPort != 18889 || c.WebRTCUDPPort != 18900 {
+		t.Fatalf("ports = %d %d %d", c.APIPort, c.WebRTCPort, c.WebRTCUDPPort)
+	}
+	if c.ArchiveDir != "/a" || c.SegmentDuration != 2*time.Minute || c.WorkDir != filepath.Join("/d", "engine") || len(c.ICEServers) != 1 || c.ICEServers[0].URL != "stun:stun.example:3478" {
+		t.Fatalf("config = %+v", c)
 	}
 }

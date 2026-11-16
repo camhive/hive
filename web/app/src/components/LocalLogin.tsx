@@ -7,11 +7,12 @@ import { LocalLoginLocked, clearLocal, signInLocally, writeLocal } from "@/lib/l
 import { useGrant } from "@/lib/useGrant";
 import { useHiveClient } from "@/lib/hiveApi";
 import { errorMessage } from "@/lib/errors";
+import { waitMessage } from "@/lib/retryAfter";
 import { Field } from "@/components/Field";
 
 /** The local error texts: the local login has a username, not an e-mail, and a lock says how long it lasts. */
 export function localError(t: ReturnType<typeof useTranslation>["t"], err: unknown): string {
-  if (err instanceof LocalLoginLocked) return t("localLogin.locked", { count: Math.max(1, Math.ceil(err.retryAfterS / 60)) });
+  if (err instanceof LocalLoginLocked) return waitMessage(t, "localLogin.locked", err.retryAfterS);
   return err instanceof CamhiveError && err.code === "invalid_credentials" ? t("localLogin.wrong") : errorMessage(t, err);
 }
 

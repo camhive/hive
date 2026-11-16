@@ -267,3 +267,39 @@ type peerConn struct {
 }
 
 func (c peerConn) RemoteAddr() net.Addr { return c.remote }
+
+func TestOwnerSetsAndRemovesAnRTSPSubStream(t *testing.T) {
+	f := newAPI(t)
+	owner := f.token(t, auth.RoleOwner, "*")
+	r := f.do(t, "POST", "/v0/cameras", owner, map[string]any{
+		"name": "Yard", "source": map[string]string{"kind": "rtsp", "address": "rtsp://10.0.0.5/ch0"},
+		"streams": map[string]any{"sub": map[string]string{"url": "rtsp://10.0.0.5/ch1"}},
+	})
+	if r.Status != 201 {
+		t.Fatalf("create: %d %v", r.Status, r.Body)
+	}
+	id := r.Body["id"].(string)
+	stream := func(b map[string]any, name string) any {
+		s, _ := b["streams"].(map[string]any)[name].(map[string]any)
+		return s["URL"]
+	}
+	if stream(r.Body, "main") != "rtsp://10.0.0.5/ch0" || stream(r.Body, "sub") != "rtsp://10.0.0.5/ch1" {
+		t.Fatalf("created streams: %v", r.Body["streams"])
+	}
+	r = f.do(t, "PATCH", "/v0/cameras/"+id, owner, map[string]any{"sub_stream": "rtsp://10.0.0.5/ch2"})
+	if r.Status != 200 || stream(r.Body, "sub") != "rtsp://10.0.0.5/ch2" {
+		t.Fatalf("patch sub: %d %v", r.Status, r.Body)
+	}
+	r = f.do(t, "PATCH", "/v0/cameras/"+id, owner, map[string]any{"sub_stream": ""})
+	if r.Status != 200 || stream(r.Body, "sub") != nil || stream(r.Body, "main") != "rtsp://10.0.0.5/ch0" {
+		t.Fatalf("remove sub: %d %v", r.Status, r.Body)
+	}
+	if r := f.do(t, "PATCH", "/v0/cameras/"+id, owner, map[string]any{"sub_stream": "http://10.0.0.5/ch1"}); r.Status != 422 || r.Body["code"] != "invalid" {
+		t.Fatalf("bad sub: %d %v", r.Status, r.Body)
+	}
+	onvif, _ := camera.New(camera.Spec{Name: "Garden", Source: camera.Source{Kind: camera.SourceONVIF, Address: "http://10.0.0.6/onvif/device_service"}}, time.Now())
+	_ = f.st.Cameras().Put(context.Background(), onvif)
+	if r := f.do(t, "PATCH", "/v0/cameras/"+string(onvif.ID), owner, map[string]any{"sub_stream": "rtsp://10.0.0.6/sub"}); r.Status != 422 || r.Body["code"] != "invalid" {
+		t.Fatalf("sub_stream on an ONVIF camera: %d %v", r.Status, r.Body)
+	}
+}

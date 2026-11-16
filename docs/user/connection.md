@@ -101,7 +101,8 @@ Limits that protect you:
   the internet can try it.
 - Five wrong passwords in 15 minutes from one device lock that device out for
   15 minutes; fifty from anywhere lock everyone out for 15 minutes. The page
-  says how long to wait.
+  says how long to wait with a hive newer than 0.1.7; with 0.1.7 or older it
+  can only say that the lock lasts up to 15 minutes.
 - Anyone on your network who learns the password can watch and change
   everything, as you can. Use a password you use nowhere else.
 - Do not make the hive's port 16443 reachable from the internet: no port
@@ -124,9 +125,21 @@ type the password twice. `hive local-login status` shows whether it is on,
 
 ## Installing the app
 
-The web app is a Progressive Web App. In Chrome, Edge or Safari choose
-"Install Camhive" or "Add to Home Screen". It opens full screen, keeps your
+The web app is a Progressive Web App. It opens in its own window, keeps your
 sign-in and updates itself. Video is never cached on the device.
+
+- **Chrome and Edge** (desktop and Android): when the browser can install
+  the app, **Account** shows *Install the app* with an **Install Camhive**
+  button; it opens the browser's install dialog. If you decline, the button
+  comes back the next time the browser offers it. The browser's own menu
+  ("Install Camhive…", "Add to Home screen") works as well.
+- **iPhone and iPad**: browsers there have no install event. Account shows
+  how: tap *Share* → *Add to Home Screen* (Safari, and since iOS 16.4 also
+  Chrome, Edge and Firefox from their share menu), then open Camhive from the
+  home screen. Notifications on iOS need this.
+- **Safari on a Mac** shows no card; choose *File* → *Add to Dock*.
+- Inside the installed app the card is not shown. Firefox on the desktop
+  cannot install web apps; it shows nothing.
 
 ## Mobile networks
 

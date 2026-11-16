@@ -45,6 +45,12 @@ export function hiveSignalling(client: HiveClient): Signalling {
   };
 }
 
+/** Runs fn once the remote track receives media: now, or at its first unmute. */
+function whenFlowing(track: MediaStreamTrack, fn: () => void): void {
+  if (!track.muted) fn();
+  else track.addEventListener("unmute", fn, { once: true });
+}
+
 /** RFC 8840 trickle fragment for one candidate: the m-section id and the candidate line. */
 export function candidateFragment(c: Pick<RTCIceCandidate, "candidate" | "sdpMid">): string {
   return `a=mid:${c.sdpMid ?? "0"}\r\na=${c.candidate}\r\n`;
@@ -75,6 +81,12 @@ export interface LiveOptions {
   /** Receives the remote stream (video.srcObject). */
   onTrack?: (stream: MediaStream) => void;
   onState?: (s: LiveState) => void;
+  /**
+   * Called when the hive's audio track carries media (#95). MediaMTX answers
+   * an audio section even for a camera without sound, so the answer cannot
+   * tell; the remote track unmutes only when packets arrive.
+   */
+  onAudio?: () => void;
   peer?: PeerFactory;
   /** How long to wait for ICE gathering before sending the offer anyway (late candidates trickle). */
   gatherTimeoutMs?: number;
@@ -111,6 +123,7 @@ export class LiveSession {
       const ev = e as RTCTrackEvent;
       const stream = ev.streams[0];
       if (stream) this.opts.onTrack?.(stream);
+      if (ev.track.kind === "audio") whenFlowing(ev.track, () => this.opts.onAudio?.());
     });
     pc.addEventListener("connectionstatechange", () => {
       switch (pc.connectionState) {

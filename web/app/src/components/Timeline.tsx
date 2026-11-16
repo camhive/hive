@@ -11,6 +11,8 @@ type Props = {
   onSeek: (at: Date) => void;
   /** Activity and sound runs (ADR-0015); recorded spans turn pale behind them. */
   activity?: { video: ActivityPoint[][]; sound: ActivityPoint[][] };
+  /** Takes the focus when shown, for a viewer who came for the recordings (#84). */
+  focus?: boolean;
 };
 
 /** The i18n key naming an event kind; dots in kinds are not key separators. */
@@ -38,7 +40,7 @@ const DRAG_SLOP = 4;
  * fingers zoom around the pointer, the arrow keys step a minute (ten with
  * Shift) and + / − zoom.
  */
-export function Timeline({ day, ranges, events, position, onSeek, activity }: Props) {
+export function Timeline({ day, ranges, events, position, onSeek, activity, focus }: Props) {
   const { t } = useTranslation();
   const d0 = dayStart(day).getTime();
   const [span, setSpan] = useState<number>(DAY_MS);
@@ -48,6 +50,8 @@ export function Timeline({ day, ranges, events, position, onSeek, activity }: Pr
   const [target, setTarget] = useState<number | null>(null); // the time a drag would seek to
   const bar = useRef<HTMLDivElement>(null);
   const gesture = useRef<Gesture | null>(null);
+  // Once, when shown; without scrolling, so a phone keeps the player on screen.
+  useEffect(() => { if (focus) bar.current?.focus({ preventScroll: true }); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const dragged = useRef(false); // swallow the click that ends a drag
   const pos = position?.getTime() ?? null;
   const head = target ?? pos;

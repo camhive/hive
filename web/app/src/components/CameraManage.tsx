@@ -4,6 +4,8 @@ import { useTranslation } from "react-i18next";
 import { CamhiveError, unwrapHive, type HiveCamera, type HiveClient, type hiveComponents } from "@camhive/api";
 import { errorMessage } from "@/lib/errors";
 import { Field } from "@/components/Field";
+import { useHiveCapability, type HiveInfo } from "@/lib/capabilities";
+import { refusedOptional, subStreamOf } from "@/lib/streams";
 
 type Discovered = hiveComponents["schemas"]["Discovered"];
 type Probe = hiveComponents["schemas"]["ProbeResult"];
@@ -56,7 +58,7 @@ export function useCameraActions(camera: HiveCamera, client: HiveClient | null, 
 }
 
 /** One camera in the list layout: name (opens it), source, health; management for the owner. */
-export function CameraRow({ camera, online, client, editable, onOpen }: { camera: HiveCamera; online: boolean | undefined; client: HiveClient | null; editable: boolean; onOpen: () => void }) {
+export function CameraRow({ hive, camera, online, client, editable, onOpen, onRecordings }: { hive: HiveInfo; camera: HiveCamera; online: boolean | undefined; client: HiveClient | null; editable: boolean; onOpen: () => void; onRecordings: () => void }) {
   const { t } = useTranslation();
   const { editing, setEditing, error, mismatch, replace, patch, remove } = useCameraActions(camera, client);
   const main = camera.streams?.main;
@@ -68,6 +70,10 @@ export function CameraRow({ camera, online, client, editable, onOpen }: { camera
           <p className="text-xs muted">{camera.source.kind} · {camera.source.address}{main?.Codec ? ` · ${main.Codec}` : ""}{main?.Width ? ` ${main.Width}×${main.Height}` : ""}</p>
         </div>
         <div className="flex items-center gap-3 text-sm">
+          <button type="button" className="btn btn-secondary btn-sm !min-h-11 min-w-11 gap-1.5" aria-label={t("live.recordingsOf", { name: camera.name })} onClick={onRecordings}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5M12 7v5l3 2" /></svg>
+            {t("live.recordings")}
+          </button>
           <span className={!camera.enabled || !online ? "badge" : "badge badge-success"} data-testid="camera-status"><span className="dot" aria-hidden="true" />{!camera.enabled ? t("live.disabled") : online === undefined ? "…" : online ? t("hives.statusOnline") : t("hives.statusOffline")}</span>
           {editable && (
             <>
@@ -80,13 +86,17 @@ export function CameraRow({ camera, online, client, editable, onOpen }: { camera
       </div>
       {error && <p role="alert" className="error text-sm mt-2">{error}</p>}
       {mismatch && <ReplaceButton onReplace={replace} />}
-      {editing && <CameraEditForm camera={camera} onSubmit={patch} />}
+      {editing && <CameraEditForm hive={hive} camera={camera} onSubmit={patch} />}
     </li>
   );
 }
 
-export function CameraEditForm({ camera, onSubmit }: { camera: HiveCamera; onSubmit: (p: hiveComponents["schemas"]["CameraPatch"]) => Promise<void> }) {
+export function CameraEditForm({ hive, camera, onSubmit }: { hive: HiveInfo; camera: HiveCamera; onSubmit: (p: hiveComponents["schemas"]["CameraPatch"]) => Promise<void> }) {
   const { t } = useTranslation();
+  // #63: an RTSP camera's sub stream, on hives whose PATCH takes it.
+  const subEditable = useHiveCapability(hive, "camera.sub_stream").has && camera.source.kind === "rtsp";
+  const [sub, setSub] = useState(subStreamOf(camera));
+  const [invalid, setInvalid] = useState(false);
   const [name, setName] = useState(camera.name);
   const [group, setGroup] = useState(camera.group ?? "");
   const [creds, setCreds] = useState<Creds>({ username: camera.credentials?.username ?? "", password: "" });
@@ -94,9 +104,13 @@ export function CameraEditForm({ camera, onSubmit }: { camera: HiveCamera; onSub
   const [host, setHost] = useState(hostOf(camera.source.address));
   function submit(e: FormEvent) {
     e.preventDefault();
+    const subChanged = subEditable && sub.trim() !== subStreamOf(camera);
+    setInvalid(subChanged && refusedOptional(sub));
+    if (subChanged && refusedOptional(sub)) return;
     const p: hiveComponents["schemas"]["CameraPatch"] = { name, group, record_audio: recordAudio };
     if (creds.password) p.credentials = creds;
     if (host.trim() && host.trim() !== hostOf(camera.source.address)) p.host = host.trim();
+    if (subChanged) p.sub_stream = sub.trim();
     void onSubmit(p);
   }
   return (
@@ -107,6 +121,7 @@ export function CameraEditForm({ camera, onSubmit }: { camera: HiveCamera; onSub
       <Field label={t("cameras.password")} name={`pass-${camera.id}`} type="password" autoComplete="new-password" hint={t("cameras.passwordKeep")} value={creds.password} onChange={(e) => setCreds({ ...creds, password: e.target.value })} />
       <Field label={t("cameras.host")} name={`host-${camera.id}`} autoComplete="off" spellCheck={false} value={host} onChange={(e) => setHost(e.target.value)} />
       <CameraIdentity camera={camera} />
+      {subEditable && <div className="sm:col-span-2"><SubStreamField name={`sub-${camera.id}`} value={sub} onChange={setSub} invalid={invalid} /></div>}
       <label className="sm:col-span-2 flex items-start gap-2 text-sm mb-3">
         <input type="checkbox" className="mt-1" checked={recordAudio} onChange={(e) => setRecordAudio(e.target.checked)} aria-describedby={`audio-hint-${camera.id}`} />
         <span>{t("cameras.recordAudio")}<span id={`audio-hint-${camera.id}`} className="block muted text-xs">{t("cameras.recordAudioHint")}</span></span>
@@ -157,16 +172,22 @@ function RtspForm({ client, onDone }: { client: HiveClient; onDone: () => void }
   const [name, setName] = useState("");
   const [group, setGroup] = useState("");
   const [url, setUrl] = useState("");
+  const [sub, setSub] = useState("");
+  const [invalid, setInvalid] = useState(false);
   const [creds, setCreds] = useState<Creds>({ username: "", password: "" });
   function submit(e: FormEvent) {
     e.preventDefault();
-    void create({ name, group, source: { kind: "rtsp", address: url }, ...(creds.username ? { credentials: creds } : {}) });
+    const s = sub.trim();
+    setInvalid(refusedOptional(s));
+    if (refusedOptional(s)) return;
+    void create({ name, group, source: { kind: "rtsp", address: url }, ...(creds.username ? { credentials: creds } : {}), ...(s ? { streams: { sub: { url: s } } } : {}) });
   }
   return (
     <form className="grid gap-x-4 sm:grid-cols-2" onSubmit={submit} aria-label={t("cameras.mode.rtsp")}>
       <Field label={t("cameras.name")} name="rtsp-name" required maxLength={100} value={name} onChange={(e) => setName(e.target.value)} />
       <Field label={t("cameras.group")} name="rtsp-group" maxLength={100} value={group} onChange={(e) => setGroup(e.target.value)} />
       <div className="sm:col-span-2"><Field label={t("cameras.rtspUrl")} name="rtsp-url" required placeholder="rtsp://192.168.1.50:554/stream1" hint={t("cameras.rtspHint")} value={url} onChange={(e) => setUrl(e.target.value)} /></div>
+      <div className="sm:col-span-2"><SubStreamField name="rtsp-sub" value={sub} onChange={setSub} invalid={invalid} /></div>
       <Field label={t("cameras.username")} name="rtsp-user" autoComplete="off" value={creds.username} onChange={(e) => setCreds({ ...creds, username: e.target.value })} />
       <Field label={t("cameras.password")} name="rtsp-pass" type="password" autoComplete="new-password" value={creds.password} onChange={(e) => setCreds({ ...creds, password: e.target.value })} />
       {error && <p role="alert" className="error text-sm sm:col-span-2">{error}</p>}
@@ -270,6 +291,18 @@ function DiscoverFlow({ client, onDone }: { client: HiveClient; onDone: () => vo
         </form>
       )}
     </div>
+  );
+}
+
+/** The optional sub stream URL (#63), with the hive's rule checked before sending. */
+function SubStreamField({ name, value, onChange, invalid }: { name: string; value: string; onChange: (v: string) => void; invalid: boolean }) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <Field label={t("cameras.subStreamUrl")} name={name} autoComplete="off" spellCheck={false} placeholder="rtsp://192.168.1.50:554/stream2" hint={t("cameras.subStreamHint")} aria-invalid={invalid}
+        aria-describedby={invalid ? `${name}-hint ${name}-error` : `${name}-hint`} value={value} onChange={(e) => onChange(e.target.value)} />
+      {invalid && <p id={`${name}-error`} role="alert" className="error text-sm -mt-3 mb-3">{t("cameras.streamUrlInvalid")}</p>}
+    </>
   );
 }
 

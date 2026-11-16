@@ -16,6 +16,7 @@ import { DeleteRecordings } from "@/components/DeleteRecordings";
 import { LocalLoginSettings } from "@/components/LocalLogin";
 import { NeedsUpdate } from "@/components/NeedsUpdate";
 import { UpdatesSettings } from "@/components/Updates";
+import { EncryptionSettings } from "@/components/ArchiveEncryption";
 import { useHiveCapability } from "@/lib/capabilities";
 import type { Hive } from "@/lib/hives";
 
@@ -75,6 +76,7 @@ export function HiveSettings() {
       </section>
       {owned && hive.status !== "revoked" && <UpdatesSettings hive={hive} />}
       {owned && hive.status !== "revoked" && <LocalLoginSettings hive={hive} />}
+      {owned && hive.status !== "revoked" && <EncryptionSettings hive={hive} />}
       {owned && hive.status !== "revoked" && (
         <section className="card max-w-3xl" aria-labelledby="delete-recordings-title">
           <h2 id="delete-recordings-title" className="text-lg font-semibold mb-1">{t("deletion.title")}</h2>

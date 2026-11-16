@@ -96,6 +96,7 @@ components:
     UpdateStatus:
       allOf:
         - $ref: "#/components/schemas/UpdateSettings"
+        - $ref: "#/components/schemas/UpdateReports"
         - type: object
           required: [running, supported]
           properties:
@@ -103,17 +104,21 @@ components:
             supported: { type: boolean, description: "false: this build never updates itself" }
             unsupported_reason: { type: string, enum: [dev_build, no_root, no_updater], description: "From what started this hive: dev_build: hive-updater is a local build; no_root: hive-updater has no trusted update root; no_updater: hive-updater did not start this hive (it runs in the foreground, or no updater is installed)" }
             settings_need_restart: { type: boolean, description: "The running hive-updater reads hive.yaml only at start (older than v0.1.7): a changed setting applies after the service restarts" }
-            available: { type: string, example: "0.1.8", description: "The version waiting (update.available): in manual mode for Update now, in automatic mode for the update window; newer than what runs and not rolled back" }
-            needs_package: { type: string, example: "0.2.0", description: "A version that needs a newer hive-updater (update.needs_package): install the current package; Update now cannot install it" }
-            last:
-              type: object
-              required: [action, from, to, at]
-              description: The updater's last update or rollback, from the activity log
-              properties:
-                action: { type: string, enum: [update.applied, update.rolled_back] }
-                from: { type: string }
-                to: { type: string }
-                at: { type: string, format: date-time }
+    UpdateReports:
+      type: object
+      description: What hive-updater reported into the activity log
+      properties:
+        available: { type: string, example: "0.1.8", description: "The version waiting (update.available): in manual mode for Update now, in automatic mode for the update window; newer than what runs and not rolled back" }
+        needs_package: { type: string, example: "0.2.0", description: "A version that needs a newer hive-updater (update.needs_package): install the current package; Update now cannot install it" }
+        last:
+          type: object
+          required: [action, from, to, at]
+          description: The updater's last update or rollback, from the activity log
+          properties:
+            action: { type: string, enum: [update.applied, update.rolled_back] }
+            from: { type: string }
+            to: { type: string }
+            at: { type: string, format: date-time }
     Source:
       type: object
       required: [kind, address]
@@ -152,6 +157,11 @@ components:
           additionalProperties: { $ref: "#/components/schemas/Stream" }
         enabled: { type: boolean }
         record_audio: { type: boolean, description: "Sound is pulled and recorded only when true (ADR-0015); false by default" }
+        retention_days:
+          type: integer
+          minimum: 0
+          maximum: 3650
+          description: "The camera's own retention in days (#61); 0 keeps footage until space runs out. Absent: the hive-wide retention_days from hive.yaml applies. The plan's archive.retention_days_max caps both."
         identity:
           description: "What the camera is, learned by the hive (ADR-0017); owners only, read-only"
           allOf: [{ $ref: "#/components/schemas/CameraIdentity" }]
@@ -216,7 +226,7 @@ components:
       properties:
         streams:
           type: object
-          description: Stream URLs per name (main, sub) for ONVIF cameras, picked from a probe.
+          description: "Stream URLs per name (main, sub): for ONVIF cameras picked from a probe; RTSP cameras derive main from the address and may name a sub stream."
           additionalProperties: { $ref: "#/components/schemas/StreamInput" }
         name: { type: string }
         group: { type: string }
@@ -326,6 +336,12 @@ components:
         record_audio: { type: boolean, description: "Pull and record the camera's sound (ADR-0015); off unless the owner switches it on" }
         host: { type: string, description: "Move the camera to this host or IP, keeping ports and paths (ADR-0017)", example: "192.168.1.23" }
         replace_identity: { type: boolean, description: "Accept a device at the new host that is not the known camera (it was replaced)" }
+        sub_stream: { type: string, description: "RTSP cameras: the sub stream's rtsp(s) URL without credentials; an empty string removes the sub stream; 422 for ONVIF cameras, whose sub stream comes from a probe (capability camera.sub_stream)", example: "rtsp://192.168.1.50:554/ch1" }
+        retention_days:
+          type: [integer, "null"]
+          minimum: 0
+          maximum: 3650
+          description: "Owner only. Keep this camera's footage this many days (0 = until space runs out); null puts it back on the hive-wide retention_days. The sweep applies it within five minutes; the plan's archive.retention_days_max caps it."
         credentials: { $ref: "#/components/schemas/Credentials" }
     LocalLogin:
       type: object
@@ -395,7 +411,10 @@ paths:
                 properties:
                   status: { type: string }
                   version: { type: string }
-                  recording: { type: integer, description: "Cameras recording now; only to requests from this machine (the updater, ADR-0018)" }
+                  recording: { type: integer, description: "Cameras recording now; only to programs on this machine (the updater, ADR-0018): loopback, not relayed, no Origin header" }
+                  updates:
+                    description: "What hive-updater did and offers; only to programs on this machine (`hive status`, #109): loopback, not relayed, no Origin header, so never to a web page. Absent when the activity log cannot be read within a second."
+                    allOf: [{ $ref: "#/components/schemas/UpdateReports" }]
   /v0/hive:
     get:
       summary: The hive's version and capabilities (any Member)

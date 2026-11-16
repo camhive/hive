@@ -30,6 +30,7 @@ type MediaMTXConfig struct {
 	Host            string // bind/advertise address for control and WebRTC; default 127.0.0.1
 	APIPort         int    // MediaMTX control API; default 9997
 	WebRTCPort      int    // WHEP endpoint; default 8889
+	WebRTCUDPPort   int    // WebRTC media (ICE over UDP) on every interface; default WebRTCPort+1
 	RTSPPort        int    // loopback RTSP port the Hive publishes camera streams to; a free one at every Start when 0
 	ArchiveDir      string // where fMP4 segments are written (required)
 	SegmentDuration time.Duration
@@ -58,6 +59,9 @@ func (c *MediaMTXConfig) applyDefaults() {
 	}
 	if c.WebRTCPort == 0 {
 		c.WebRTCPort = 8889
+	}
+	if c.WebRTCUDPPort == 0 {
+		c.WebRTCUDPPort = c.WebRTCPort + 1
 	}
 	if c.SegmentDuration == 0 {
 		c.SegmentDuration = 10 * time.Minute
@@ -123,7 +127,7 @@ func (c MediaMTXConfig) baseYAML(pub publisher) string {
 	fmt.Fprintf(&b, "logLevel: warn\napi: yes\napiAddress: %s:%d\n", c.Host, c.APIPort)
 	// WHEP signalling answers the Hive only (it checks access tokens and
 	// forwards the offer); ICE media over UDP must reach browsers on the LAN.
-	fmt.Fprintf(&b, "webrtc: yes\nwebrtcAddress: %s:%d\nwebrtcLocalUDPAddress: :%d\nwebrtcIPsFromInterfaces: yes\n", c.Host, c.WebRTCPort, c.WebRTCPort+1)
+	fmt.Fprintf(&b, "webrtc: yes\nwebrtcAddress: %s:%d\nwebrtcLocalUDPAddress: :%d\nwebrtcIPsFromInterfaces: yes\n", c.Host, c.WebRTCPort, c.WebRTCUDPPort)
 	if len(c.ICEServers) > 0 {
 		b.WriteString("webrtcICEServers2:\n")
 		for _, s := range c.ICEServers {

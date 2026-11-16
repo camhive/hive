@@ -30,8 +30,10 @@ export interface paths {
                         "application/json": {
                             status?: string;
                             version?: string;
-                            /** @description Cameras recording now; only to requests from this machine (the updater, ADR-0018) */
+                            /** @description Cameras recording now; only to programs on this machine (the updater, ADR-0018): loopback, not relayed, no Origin header */
                             recording?: number;
+                            /** @description What hive-updater did and offers; only to programs on this machine (`hive status`, #109): loopback, not relayed, no Origin header, so never to a web page. Absent when the activity log cannot be read within a second. */
+                            updates?: components["schemas"]["UpdateReports"];
                         };
                     };
                 };
@@ -2239,7 +2241,7 @@ export interface components {
             /** @enum {string} */
             update_channel: "stable" | "beta";
         };
-        UpdateStatus: components["schemas"]["UpdateSettings"] & {
+        UpdateStatus: components["schemas"]["UpdateSettings"] & components["schemas"]["UpdateReports"] & {
             /** @example 0.1.6 */
             running: string;
             /** @description false: this build never updates itself */
@@ -2251,6 +2253,9 @@ export interface components {
             unsupported_reason?: "dev_build" | "no_root" | "no_updater";
             /** @description The running hive-updater reads hive.yaml only at start (older than v0.1.7): a changed setting applies after the service restarts */
             settings_need_restart?: boolean;
+        };
+        /** @description What hive-updater reported into the activity log */
+        UpdateReports: {
             /**
              * @description The version waiting (update.available): in manual mode for Update now, in automatic mode for the update window; newer than what runs and not rolled back
              * @example 0.1.8
@@ -2304,6 +2309,8 @@ export interface components {
             enabled: boolean;
             /** @description Sound is pulled and recorded only when true (ADR-0015); false by default */
             record_audio: boolean;
+            /** @description The camera's own retention in days (#61); 0 keeps footage until space runs out. Absent: the hive-wide retention_days from hive.yaml applies. The plan's archive.retention_days_max caps both. */
+            retention_days?: number;
             /** @description What the camera is, learned by the hive (ADR-0017); owners only, read-only */
             identity?: components["schemas"]["CameraIdentity"];
             /**
@@ -2359,7 +2366,7 @@ export interface components {
             }[];
         };
         CameraCreate: {
-            /** @description Stream URLs per name (main, sub) for ONVIF cameras, picked from a probe. */
+            /** @description Stream URLs per name (main, sub): for ONVIF cameras picked from a probe; RTSP cameras derive main from the address and may name a sub stream. */
             streams?: {
                 [key: string]: components["schemas"]["StreamInput"];
             };
@@ -2517,6 +2524,13 @@ export interface components {
             host?: string;
             /** @description Accept a device at the new host that is not the known camera (it was replaced) */
             replace_identity?: boolean;
+            /**
+             * @description RTSP cameras: the sub stream's rtsp(s) URL without credentials; an empty string removes the sub stream; 422 for ONVIF cameras, whose sub stream comes from a probe (capability camera.sub_stream)
+             * @example rtsp://192.168.1.50:554/ch1
+             */
+            sub_stream?: string;
+            /** @description Owner only. Keep this camera's footage this many days (0 = until space runs out); null puts it back on the hive-wide retention_days. The sweep applies it within five minutes; the plan's archive.retention_days_max caps it. */
+            retention_days?: number | null;
             credentials?: components["schemas"]["Credentials"];
         };
         LocalLogin: {

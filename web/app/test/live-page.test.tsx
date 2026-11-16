@@ -8,11 +8,16 @@ import { makeRouter } from "../src/router";
 import { transport } from "../src/lib/transport";
 import { resetCloudForTest } from "../src/lib/cloud";
 import { backoffMs, streamFor } from "../src/lib/reconnect";
+import { LiveTile } from "../src/components/LiveTile";
+import type { Signalling } from "../src/lib/live";
+import type { HiveCamera } from "@camhive/api";
 
 /** Minimal RTCPeerConnection: gathering completes at once, connects right after the answer is applied. */
 class FakePC extends EventTarget {
   static instances: FakePC[] = [];
   static failNext = 0;
+  /** The hive sends sound: the audio track unmutes after the answer (#95). */
+  static audio = false;
   localDescription: { type: string; sdp: string } | null = null;
   iceGatheringState = "complete";
   connectionState = "new";
@@ -28,9 +33,14 @@ class FakePC extends EventTarget {
     queueMicrotask(() => {
       this.connectionState = "connected";
       this.dispatchEvent(new Event("connectionstatechange"));
-      const ev = new Event("track") as Event & { streams: unknown[] };
-      ev.streams = [{ id: "ms", getTracks: () => [] }];
-      this.dispatchEvent(ev);
+      for (const kind of ["video", "audio"]) {
+        const track = Object.assign(new EventTarget(), { kind, muted: true });
+        const ev = new Event("track") as Event & { track: unknown; streams: unknown[] };
+        ev.track = track;
+        ev.streams = [{ id: "ms", getTracks: () => [] }];
+        this.dispatchEvent(ev);
+        if (kind === "video" || FakePC.audio) track.dispatchEvent(new Event("unmute"));
+      }
     });
   }
   close() { this.closed = true; }
@@ -94,12 +104,15 @@ function stub(state: StubState) {
   return calls;
 }
 
+let router: ReturnType<typeof makeRouter>;
+
 function mount() {
   transport.invalidateAll();
   FakePC.instances = [];
+  FakePC.audio = false;
   vi.stubGlobal("RTCPeerConnection", FakePC);
   localStorage.clear();
-  const router = makeRouter(createMemoryHistory({ initialEntries: ["/hives/hv_1/live"] }));
+  router = makeRouter(createMemoryHistory({ initialEntries: ["/hives/hv_1/live"] }));
   render(<App router={router} queryClient={new QueryClient({ defaultOptions: { queries: { retry: false } } })} />);
   return userEvent.setup();
 }
@@ -174,6 +187,103 @@ describe("hive page", () => {
     await waitFor(() => expect(screen.queryByTestId("camera-detail")).toBeNull());
     expect(screen.getAllByTestId("camera")).toHaveLength(3);
   }, 20_000);
+
+  it("opens a camera at its recordings from a tile or a list row; tapping the tile still opens it live (#84)", async () => {
+    stub({ role: "viewer", quality: "full", evicted: false, offerFails: 0, lan: true });
+    const user = mount();
+    let door = (await within(await screen.findByTestId("grid")).findAllByTestId("tile")).find((t) => t.dataset.camera === "cam_1")!;
+    await user.click(within(door).getByRole("button", { name: "Open Door" }));
+    expect(within(await screen.findByTestId("camera-detail")).getByTestId("tile").dataset.camera).toBe("cam_1"); // live, as before
+    expect(router.state.location.search).toEqual({ camera: "cam_1" });
+    await user.click(screen.getByRole("button", { name: "Close camera" }));
+    await waitFor(() => expect(screen.queryByTestId("camera-detail")).toBeNull());
+
+    const grid = await screen.findByTestId("grid");
+    door = (await within(grid).findAllByTestId("tile")).find((t) => t.dataset.camera === "cam_1")!;
+    const recordings = within(door).getByRole("button", { name: "Recordings of Door" });
+    expect(recordings).toHaveTextContent("Recordings"); // visible on touch, not a hover tooltip only
+    await user.click(recordings);
+    let detail = await screen.findByTestId("camera-detail");
+    expect(within(detail).queryByTestId("tile")).toBeNull(); // not live
+    expect(within(detail).getByRole("button", { name: "Back to live" })).toBeInTheDocument();
+    expect(within(detail).getByText("Pick a moment on the timeline to play it.")).toBeInTheDocument();
+    await waitFor(() => expect(within(detail).getByRole("slider", { name: "Timeline" })).toHaveFocus());
+    expect(router.state.location.search).toEqual({ camera: "cam_1", view: "recordings" });
+
+    await user.click(within(detail).getByRole("button", { name: "Back to live" }));
+    expect(await within(detail).findByTestId("tile")).toBeInTheDocument();
+    await waitFor(() => expect(router.state.location.search).toEqual({ camera: "cam_1" })); // a reload or shared link opens it live
+    await user.click(within(detail).getByRole("button", { name: "Close camera" }));
+    await waitFor(() => expect(screen.queryByTestId("camera-detail")).toBeNull());
+
+    await user.click(screen.getByRole("button", { name: "List" }));
+    const row = (await screen.findAllByTestId("camera")).find((r) => r.dataset.camera === "cam_2")!;
+    await user.click(within(row).getByRole("button", { name: "Recordings of Garden" }));
+    detail = await screen.findByTestId("camera-detail");
+    expect(within(detail).getByRole("heading", { name: "Garden" })).toBeInTheDocument();
+    expect(within(detail).queryByTestId("tile")).toBeNull();
+  }, 20_000);
+
+  it("offers sound only for a camera that sends it, muted by default, remembered per camera (#95)", async () => {
+    stub({ role: "viewer", quality: "full", evicted: false, offerFails: 0, lan: true });
+    // Records whether each play() ran muted; a refused one rejects like Chrome and Safari do.
+    const plays: boolean[] = [];
+    let refuse = false;
+    const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(function (this: HTMLMediaElement) {
+      plays.push(this.muted);
+      if (refuse && !this.muted) { refuse = false; return Promise.reject(new DOMException("blocked", "NotAllowedError")); }
+      return Promise.resolve();
+    });
+    const user = mount();
+    FakePC.audio = true;
+    const door = (await within(await screen.findByTestId("grid")).findAllByTestId("tile")).find((t) => t.dataset.camera === "cam_1")!;
+    const sound = await within(door).findByRole("button", { name: "Sound for Door" });
+    const video = door.querySelector("video")!;
+    expect(sound).toHaveAttribute("aria-pressed", "false");
+    expect(video.muted).toBe(true);
+    await user.click(sound);
+    expect(sound).toHaveAttribute("aria-pressed", "true");
+    expect(video.muted).toBe(false);
+    expect(play).toHaveBeenCalled();
+    expect(plays.at(-1)).toBe(false); // unmuted and played inside the tap
+    expect(localStorage.getItem("camhive.live.sound.hv_1.cam_1")).toBe("on"); // camera ids are unique only within a hive
+
+    // The opened camera remembers it; a browser that blocks sound without a tap keeps it muted and keeps the picture playing.
+    refuse = true;
+    plays.length = 0;
+    await user.click(within(door).getByRole("button", { name: "Open Door" }));
+    const big = within(await screen.findByTestId("camera-detail")).getByTestId("tile");
+    const again = await within(big).findByRole("button", { name: "Sound for Door" });
+    await waitFor(() => expect(again).toHaveAttribute("aria-pressed", "false"));
+    expect(big.querySelector("video")!.muted).toBe(true);
+    await waitFor(() => expect(plays.slice(-2)).toEqual([false, true])); // refused with sound, then played again muted
+    await user.click(again);
+    expect(again).toHaveAttribute("aria-pressed", "true");
+    expect(big.querySelector("video")!.muted).toBe(false);
+    await user.click(again);
+    expect(big.querySelector("video")!.muted).toBe(true);
+    expect(localStorage.getItem("camhive.live.sound.hv_1.cam_1")).toBeNull();
+  });
+
+  it("hides the sound control on a tile that stops streaming", async () => {
+    FakePC.audio = true;
+    const signal: Signalling = { offer: async () => ({ sdp: "v=0 answer", session: "s" }), candidates: async () => {}, close: async () => {} };
+    const camera: HiveCamera = { ...cam("cam_1", "Door"), source: { kind: "rtsp", address: "rtsp://x" }, record_audio: true };
+    vi.stubGlobal("RTCPeerConnection", FakePC);
+    const props = { hiveId: "hv_1", camera, stream: "main" as const, signal };
+    const { rerender } = render(<LiveTile {...props} />);
+    expect(await screen.findByRole("button", { name: "Sound for Door" })).toBeInTheDocument();
+    rerender(<LiveTile {...props} paused />);
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Sound for Door" })).toBeNull());
+  });
+
+  it("shows no sound control when the camera's audio track never carries media", async () => {
+    stub({ role: "viewer", quality: "full", evicted: false, offerFails: 0, lan: true });
+    mount();
+    const door = (await within(await screen.findByTestId("grid")).findAllByTestId("tile")).find((t) => t.dataset.camera === "cam_1")!;
+    await waitFor(() => expect(door.dataset.state).toBe("connected"));
+    expect(within(door).queryByRole("button", { name: "Sound for Door" })).toBeNull();
+  });
 
   it("reconnects with backoff after a failed offer, hides disabled cameras and PTZ from viewers and labels reduced quality", async () => {
     stub({ role: "viewer", quality: "sub", evicted: false, offerFails: 1, lan: false });

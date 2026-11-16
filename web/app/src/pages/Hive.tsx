@@ -20,8 +20,10 @@ import { HiveNav } from "@/components/HiveNav";
 import { CameraDetail } from "@/components/CameraDetail";
 import { AddCamera, CameraRow, groupSorted } from "@/components/CameraManage";
 import { LocalSessionBanner, LocalSignIn } from "@/components/LocalLogin";
+import { ArchiveLockNotice } from "@/components/ArchiveEncryption";
 
-export type HiveSearch = { camera?: string; day?: string };
+/** `view: "recordings"` opens the camera at its timeline instead of live (#84). */
+export type HiveSearch = { camera?: string; day?: string; view?: "recordings" };
 
 /**
  * One hive: every camera live in a grid (or a list without video), the opened
@@ -64,6 +66,7 @@ export function HivePage({ peer, playerDeps }: { peer?: PeerFactory; playerDeps?
   const day = search.day ?? dayKey(new Date());
   const go = (s: HiveSearch) => void nav({ to: "/hives/$id", params: { id: hive.id }, search: s });
   const openCamera = (c: HiveCamera) => go({ camera: c.id });
+  const openRecordings = (c: HiveCamera) => go({ camera: c.id, view: "recordings" });
   const pick = (l: Layout) => { setLayout(l); writeLayout(l); };
   const healthOf = (c: HiveCamera) => health.data?.find((h) => h.camera === c.id);
 
@@ -79,6 +82,7 @@ export function HivePage({ peer, playerDeps }: { peer?: PeerFactory; playerDeps?
       {local && !localSession && <p role="status" className="card muted" data-testid="local-mode">{t("live.localMode")}</p>}
       {localSession && <LocalSessionBanner hive={hive} />}
       {offerLocal && <LocalSignIn hive={hive} />}
+      {!open && <ArchiveLockNotice hive={hive} client={client} owner={owner} />}
       {!hive.online && !local && <p role="alert" className="card muted">{t("live.hiveOffline")}</p>}
       {evicted && <p role="alert" className="card error" data-testid="evicted">{t("live.evicted")}</p>}
       {access.isError && !evicted && <p role="alert" className="card error">{errorMessage(t, access.error)}</p>}
@@ -88,7 +92,7 @@ export function HivePage({ peer, playerDeps }: { peer?: PeerFactory; playerDeps?
 
       {open && grant && signal && (
         <CameraDetail key={open.id} hive={hive} grant={grant} quality={quality} client={client} camera={open} health={healthOf(open)} signal={signal}
-          day={day} onDay={(d) => go({ camera: open.id, day: d === dayKey(new Date()) ? undefined : d })} onClose={() => go({})}
+          day={day} recordings={search.view === "recordings"} onDay={(d) => go({ camera: open.id, day: d === dayKey(new Date()) ? undefined : d })} onClose={() => go({})}
           paused={evicted} peer={peer} playerDeps={playerDeps} />
       )}
 
@@ -99,7 +103,7 @@ export function HivePage({ peer, playerDeps }: { peer?: PeerFactory; playerDeps?
           {open && others.length > 0 && <h2 className="eyebrow mb-2">{t("live.otherCameras")}</h2>}
           {layout === "list" ? (
             <ul className="card !py-1 divide-y divide-[var(--border)]" data-testid="grid">
-              {others.map((c) => <CameraRow key={c.id} camera={c} online={healthOf(c)?.online} client={client} editable={owner} onOpen={() => openCamera(c)} />)}
+              {others.map((c) => <CameraRow key={c.id} hive={hive} camera={c} online={healthOf(c)?.online} client={client} editable={owner} onOpen={() => openCamera(c)} onRecordings={() => openRecordings(c)} />)}
               {owner && client && !adding && (
                 <li className="py-3"><button type="button" className="link text-sm" onClick={() => setAdding(true)}><span aria-hidden="true">+ </span>{t("cameras.add")}</button></li>
               )}
@@ -107,7 +111,7 @@ export function HivePage({ peer, playerDeps }: { peer?: PeerFactory; playerDeps?
           ) : (
             <div className={`grid ${COLUMNS[layout]} gap-2`} data-testid="grid">
               {others.map((c) => (
-                <LiveTile key={c.id} camera={c} health={healthOf(c)} stream={streamFor(quality, layout)} signal={signal} iceServers={grant.ice_servers} paused={evicted} peer={peer} onOpen={() => openCamera(c)} />
+                <LiveTile key={c.id} hiveId={hive.id} camera={c} health={healthOf(c)} stream={streamFor(quality, layout)} signal={signal} iceServers={grant.ice_servers} paused={evicted} peer={peer} onOpen={() => openCamera(c)} onRecordings={() => openRecordings(c)} />
               ))}
               {owner && client && !adding && (
                 <button type="button" className="aspect-video rounded-lg border-2 border-dashed flex items-center justify-center gap-1.5 text-sm muted hover:text-[var(--fg)] transition-colors" style={{ borderColor: "var(--border-strong)" }} onClick={() => setAdding(true)}>

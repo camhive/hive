@@ -19,7 +19,7 @@ type Cameras struct {
 	s *Store
 }
 
-const cameraColumns = `id, name, grp, source_kind, source_addr, username, password_enc, streams_json, enabled, created_at, updated_at, record_audio, identity_json, network`
+const cameraColumns = `id, name, grp, source_kind, source_addr, username, password_enc, streams_json, enabled, created_at, updated_at, record_audio, identity_json, network, retention_days`
 
 // Put inserts or replaces a camera (idempotent on ID).
 func (r *Cameras) Put(ctx context.Context, c camera.Camera) error {
@@ -36,15 +36,15 @@ func (r *Cameras) Put(ctx context.Context, c camera.Camera) error {
 		pw = r.s.seal(c.Credentials.Password)
 	}
 	_, err = r.s.db.ExecContext(ctx, `
-		INSERT INTO camera (`+cameraColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		INSERT INTO camera (`+cameraColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(id) DO UPDATE SET
 		  name=excluded.name, grp=excluded.grp, source_kind=excluded.source_kind, source_addr=excluded.source_addr,
 		  username=excluded.username, password_enc=excluded.password_enc, streams_json=excluded.streams_json,
 		  enabled=excluded.enabled, updated_at=excluded.updated_at, record_audio=excluded.record_audio,
-		  identity_json=excluded.identity_json, network=excluded.network`,
+		  identity_json=excluded.identity_json, network=excluded.network, retention_days=excluded.retention_days`,
 		string(c.ID), c.Name, c.Group, string(c.Source.Kind), c.Source.Address, c.Credentials.Username, pw, string(streams),
 		boolInt(c.Enabled), c.CreatedAt.UTC().Format(time.RFC3339Nano), c.UpdatedAt.UTC().Format(time.RFC3339Nano), boolInt(c.RecordAudio),
-		string(identity), string(c.Network))
+		string(identity), string(c.Network), c.Retention.Days)
 	if err != nil {
 		return fmt.Errorf("store: put camera: %w", err)
 	}
@@ -79,6 +79,28 @@ func (r *Cameras) List(ctx context.Context) ([]camera.Camera, error) {
 	return out, rows.Err()
 }
 
+// RetentionDays maps each camera with its own retention to its days
+// (#61); cameras missing from it follow the hive-wide value.
+func (r *Cameras) RetentionDays(ctx context.Context) (map[string]int, error) {
+	rows, err := r.s.db.QueryContext(ctx, `SELECT id, retention_days FROM camera WHERE retention_days IS NOT NULL`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]int{}
+	for rows.Next() {
+		var (
+			id   string
+			days int
+		)
+		if err := rows.Scan(&id, &days); err != nil {
+			return nil, err
+		}
+		out[id] = days
+	}
+	return out, rows.Err()
+}
+
 // Delete removes a camera; deleting an unknown id is not an error.
 func (r *Cameras) Delete(ctx context.Context, id camera.ID) error {
 	_, err := r.s.db.ExecContext(ctx, `DELETE FROM camera WHERE id = ?`, string(id))
@@ -97,9 +119,14 @@ func (r *Cameras) scan(row scanner) (camera.Camera, error) {
 		enabled, audio       int
 		created, updated     string
 		identityRaw, network string
+		retention            sql.NullInt64
 	)
-	if err := row.Scan(&id, &c.Name, &c.Group, &kind, &c.Source.Address, &c.Credentials.Username, &pw, &streamsRaw, &enabled, &created, &updated, &audio, &identityRaw, &network); err != nil {
+	if err := row.Scan(&id, &c.Name, &c.Group, &kind, &c.Source.Address, &c.Credentials.Username, &pw, &streamsRaw, &enabled, &created, &updated, &audio, &identityRaw, &network, &retention); err != nil {
 		return camera.Camera{}, err
+	}
+	if retention.Valid {
+		days := int(retention.Int64)
+		c.Retention.Days = &days
 	}
 	c.Network = camera.Network(network)
 	if err := json.Unmarshal([]byte(identityRaw), &c.Identity); err != nil {

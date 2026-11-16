@@ -3,6 +3,8 @@
 // send. So the bytes are fetched (through the transport) and fed to the
 // element: streamed into a MediaSource where the browser has one, otherwise
 // collected into a Blob.
+import { CamhiveError } from "@camhive/api";
+
 export type ByteSource = (path: string, signal: AbortSignal) => Promise<Response>;
 
 export interface PlayerDeps {
@@ -34,6 +36,12 @@ export function playPath(camera: string, stream: string, start: Date, durationS:
   return `/v0/cameras/${encodeURIComponent(camera)}/archive/play?${q}`;
 }
 
+/** The hive's error with its code (archive_locked, …), or a plain one when the answer has none. */
+async function refusal(res: Response): Promise<Error> {
+  const body = (await res.json().catch(() => undefined)) as { code?: string; message?: string } | undefined;
+  return body?.code ? new CamhiveError(res.status, body) : new Error(`playback ${res.status}`);
+}
+
 export class ArchivePlayer {
   private abort: AbortController | null = null;
   private url: string | null = null;
@@ -57,7 +65,7 @@ export class ArchivePlayer {
     const ctl = new AbortController();
     this.abort = ctl;
     const res = await this.source(playPath(camera, stream, start, durationS), ctl.signal);
-    if (!res.ok) throw new Error(`playback ${res.status}`);
+    if (!res.ok) throw await refusal(res);
     const served = res.headers.get(SERVED_STREAM_HEADER) || stream;
     const mime = mimeFor(codecs[served]);
     if (this.deps.mediaSource && this.deps.isTypeSupported(mime) && res.body) {

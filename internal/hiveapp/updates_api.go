@@ -1,6 +1,7 @@
 package hiveapp
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -38,22 +39,22 @@ type updateStatus struct {
 	// SettingsNeedRestart: the running updater reads hive.yaml only at
 	// start (older than v0.1.7).
 	SettingsNeedRestart bool `json:"settings_need_restart,omitempty"`
-	reports
+	UpdateReports
 }
 
-// reports is what hive-updater reported into the action log.
-type reports struct {
+// UpdateReports is what hive-updater reported into the action log.
+type UpdateReports struct {
 	// Available is waiting: in manual mode for Update now, in automatic
 	// mode for the update window.
 	Available string `json:"available,omitempty"`
 	// NeedsPackage needs a newer hive-updater than this one: a package
 	// install, not Update now.
 	NeedsPackage string      `json:"needs_package,omitempty"`
-	Last         *lastUpdate `json:"last,omitempty"`
+	Last         *LastUpdate `json:"last,omitempty"`
 }
 
-// lastUpdate is the updater's last update.applied or update.rolled_back.
-type lastUpdate struct {
+// LastUpdate is the updater's last update.applied or update.rolled_back.
+type LastUpdate struct {
 	Action string    `json:"action"`
 	From   string    `json:"from"`
 	To     string    `json:"to"`
@@ -156,7 +157,7 @@ func (a *api) writeUpdateStatus(w http.ResponseWriter, r *http.Request, u *Updat
 		writeError(w, http.StatusInternalServerError, "internal", "hive.yaml could not be read")
 		return
 	}
-	recent, err := a.d.Store.Actions().RecentOf(r.Context(), []string{"update.applied", "update.rolled_back", "update.available", "update.needs_package"}, 100)
+	reports, err := a.updateReports(r.Context())
 	if err != nil {
 		a.d.Logger.Error("action log", "err", err)
 		writeError(w, http.StatusInternalServerError, "internal", "the activity log could not be read")
@@ -164,16 +165,25 @@ func (a *api) writeUpdateStatus(w http.ResponseWriter, r *http.Request, u *Updat
 	}
 	why, restart := u.updaterState()
 	st := updateStatus{UpdateSettings: cfg.UpdateSettings(), Running: a.d.Version, Supported: why == "", UnsupportedReason: why, SettingsNeedRestart: restart}
-	st.reports = reported(a.d.Version, recent)
+	st.UpdateReports = reports
 	writeJSON(w, http.StatusOK, st)
+}
+
+// updateReports reads what hive-updater reported about this hive.
+func (a *api) updateReports(ctx context.Context) (UpdateReports, error) {
+	recent, err := a.d.Store.Actions().RecentOf(ctx, []string{"update.applied", "update.rolled_back", "update.available", "update.needs_package"}, 100)
+	if err != nil {
+		return UpdateReports{}, err
+	}
+	return reported(a.d.Version, recent), nil
 }
 
 // reported reads what hive-updater reported (newest first): the version
 // waiting and the one that needs a package, each newer than what runs and
 // not rolled back since, and the last update or rollback.
-func reported(running string, recent []store.Action) reports {
+func reported(running string, recent []store.Action) UpdateReports {
 	cur, _ := update.ParseVersion(running)
-	var out reports
+	var out UpdateReports
 	rolledBack := map[string]bool{}
 	for _, a := range recent {
 		var d struct{ From, To, Offered string }
@@ -182,7 +192,7 @@ func reported(running string, recent []store.Action) reports {
 		case "update.applied", "update.rolled_back":
 			rolledBack[d.To] = rolledBack[d.To] || a.Action == "update.rolled_back"
 			if out.Last == nil {
-				out.Last = &lastUpdate{Action: a.Action, From: d.From, To: d.To, At: a.At}
+				out.Last = &LastUpdate{Action: a.Action, From: d.From, To: d.To, At: a.At}
 			}
 		case "update.available":
 			out.Available = newestOffer(out.Available, d.Offered, cur, rolledBack)

@@ -17,6 +17,10 @@ Click a camera to **open** it. It moves to the top in a large player with the
 day's recordings on a timeline underneath (see [Archive](#archive)); the other
 cameras stay below in the size you chose. Close it with ×.
 
+Every tile and every line of the list has a **Recordings** button (clock
+icon). It opens the camera at its timeline instead of live: pick a moment on
+the timeline to play it, or *Back to live*.
+
 - **Quality.** The label *Full* or *Reduced (plan)* tells you which stream you
   get. Large tiles and the opened camera use the main stream; medium and small
   tiles use the sub stream for everyone; remote viewing on the Free plan uses
@@ -31,13 +35,23 @@ cameras stay below in the size you chose. Close it with ×.
 - **Session evicted.** Your plan allows a number of simultaneous remote
   sessions. When a newer sign-in pushes you out, the page says so; close the
   other device or upgrade.
+- **Sound.** A camera that records sound (*Record sound* in the camera's
+  *Edit* form, owners only) and has a microphone gets a speaker button on
+  its tile, next to fullscreen, so it stays there in fullscreen too. Live
+  starts muted, because browsers do not play sound on their own; tap the
+  button to hear it. The choice is remembered per camera on this device. If
+  the browser still refuses sound when the page opens, the picture keeps
+  playing, the button shows the sound off again and one tap turns it on.
+  Cameras without sound show no button. Each tile has its own button, so
+  several cameras can play sound at the same time.
 - **PTZ.** Owners and operators get a pad on the opened camera when it
   supports PTZ, see [Cameras](cameras.md#ptz).
 
 ## Archive
 
 The opened camera plays recordings from the hive's disk; there is no separate
-archive page. It starts live, and the timeline below shows today.
+archive page. It starts live (or at the timeline, when opened with
+**Recordings**), and the timeline below shows today.
 
 1. Click the **timeline** to play the recording from that moment. *Back to
    live* returns to live video.
@@ -163,28 +177,43 @@ operators included, cannot. It works on the home network without the cloud.
 
 The owner can have the hive encrypt its recordings, so that whoever takes
 the box or its disk cannot play them. It is off until the owner switches it
-on, and it cannot be switched off again. The app's screens for it come with
-#93; until then it is set through the hive's API.
+on, and it cannot be switched off again. The owner finds it on the hive's
+**Connection** tab under **Encrypted recordings** → **Manage
+encryption…** (it needs hive version 0.1.7 or later).
 
-- **Switching it on** asks for a passphrase of 10 to 256 characters. From
-  then on every recording is encrypted a few seconds after its file closes
-  (files are 2 minutes long while encryption is on), and so are the
-  recordings and exports already on the disk, in the background. Download
-  the **key file** right away and keep it somewhere other than the hive:
-  without the passphrase *and* the key file nobody can play the recordings
-  again, Camhive included. The key file alone is useless to a thief.
+- **Switching it on.** The app first says what it means: without the
+  passphrase *and* the key file nobody can play the recordings again,
+  Camhive included, and encryption cannot be switched off. After **I
+  understand, choose a passphrase**, type a passphrase of 10 to 256
+  characters twice and choose **Switch encryption on**. The app then asks
+  you to **Download key file** right away and finishes only after you did;
+  keep the file somewhere other than the hive (a USB stick, your password
+  manager). The key file alone is useless to a thief. From then on every
+  recording is encrypted a few seconds after its file closes (files are 2
+  minutes long while encryption is on), and so are the recordings and
+  exports already on the disk, in the background.
 - **After every restart** of the hive (an update, a power cut) the archive
   is **locked**. The hive records as always and live view works, and the
   timeline still shows when there are recordings, but playback, sound and
   exports wait until the owner unlocks the archive with the passphrase.
-  Members see that the archive is locked by its owner. The owner can lock it
-  again at any time; five wrong passphrases in 15 minutes block unlocking
-  for 15 minutes. Unlocking and locking also work with the emergency
-  sign-in on your network ([Connection](connection.md)); switching
-  encryption on, changing the passphrase and downloading the key file need
-  a sign-in through Camhive.
-- **Changing the passphrase** keeps the recordings as they are. A key file
-  downloaded earlier still opens with the old passphrase; download a new one.
+  The hive page says so: the owner taps **Unlock**, types the passphrase and
+  the recordings play again; members read that the archive is locked by its
+  owner. The same notice sits under an opened camera, where the sound and
+  export buttons are greyed out while it is locked. On the Connection tab
+  the owner can also **Lock recordings** again at any time. Five wrong
+  passphrases in 15 minutes block unlocking for 15 minutes; with a hive
+  newer than 0.1.7 the app says how long is left, with 0.1.7 itself only
+  that it is up to 15 minutes. Unlocking and locking also work with the emergency sign-in on
+  your network ([Connection](connection.md)); switching encryption on,
+  changing the passphrase and downloading the key file need a sign-in
+  through Camhive, and the app says so instead of offering them.
+- **Changing the passphrase** (**Change passphrase…**: the current one, then
+  the new one twice) keeps the recordings as they are. A key file downloaded
+  earlier still opens with the old passphrase, so the app offers **Download
+  the new key file** right after the change.
+- **If the app warns that new recordings are stored unencrypted,** the
+  hive could not read the archive key from its disk. Unlocking the
+  recordings writes it again and encryption resumes.
 - **Exports** are stored encrypted on the hive and download as normal MP4
   files while the archive is unlocked.
 - **What a stolen disk still shows:** the last minutes of each camera that

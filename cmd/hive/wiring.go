@@ -118,7 +118,7 @@ func assemble(ctx context.Context, cfg hiveconfig.Config, paths hiveconfig.Paths
 		parts.exports = deps.Exports
 		storageLow := events.NewCondition(st.Events(), "", hiveagent.EventStorageLow, events.WithLogger(log), events.Observe(parts.agent.EmitStart))
 		parts.sweeper = retention.New(parts.index, st.Segments(),
-			retention.Policy{DefaultDays: cfg.RetentionDays, MinFreeBytes: int64(cfg.MinFreeGB) << 30,
+			retention.Policy{DefaultDays: cfg.RetentionDays, CameraDays: st.Cameras().RetentionDays, MinFreeBytes: int64(cfg.MinFreeGB) << 30,
 				MaxDays: func() int { return licensing.Effective().Int(entitlements.RetentionDaysMax) }},
 			retention.Options{ArchiveDir: cfg.ArchiveDir, Logger: log.With("component", "retention"), Exports: deps.Exports,
 				OnStorageLow: func(free int64) {
@@ -186,19 +186,28 @@ func cloudKeys(cfg hiveconfig.Config, log *slog.Logger) (auth.Keys, error) {
 // newEngine builds the MediaMTX engine, or returns nil (and logs) when the
 // binary is missing so the API still runs.
 func newEngine(cfg hiveconfig.Config, paths hiveconfig.Paths, log *slog.Logger, opts ...video.Option) (*video.MediaMTX, error) {
-	ice := make([]video.ICEServer, 0, len(cfg.ICEServers))
-	for _, u := range cfg.ICEServers {
-		ice = append(ice, video.ICEServer{URL: u})
-	}
-	eng, err := video.NewMediaMTX(video.MediaMTXConfig{
-		ArchiveDir: cfg.ArchiveDir, SegmentDuration: time.Duration(cfg.SegmentMinutes) * time.Minute,
-		WorkDir: filepath.Join(paths.Data, "engine"), Binary: mediamtxBinary(), ICEServers: ice,
-	}, append([]video.Option{video.WithLogger(log.With("component", "video"))}, opts...)...)
+	c := engineConfig(cfg, paths)
+	c.Binary = mediamtxBinary()
+	eng, err := video.NewMediaMTX(c, append([]video.Option{video.WithLogger(log.With("component", "video"))}, opts...)...)
 	if errors.Is(err, video.ErrMissingTool) {
 		log.Error("video engine unavailable: mediamtx binary not found; cameras will not record", "err", err)
 		return nil, nil
 	}
 	return eng, err
+}
+
+// engineConfig is what the engine takes from hive.yaml, its ports (#61)
+// included.
+func engineConfig(cfg hiveconfig.Config, paths hiveconfig.Paths) video.MediaMTXConfig {
+	ice := make([]video.ICEServer, 0, len(cfg.ICEServers))
+	for _, u := range cfg.ICEServers {
+		ice = append(ice, video.ICEServer{URL: u})
+	}
+	return video.MediaMTXConfig{
+		ArchiveDir: cfg.ArchiveDir, SegmentDuration: time.Duration(cfg.SegmentMinutes) * time.Minute,
+		WorkDir: filepath.Join(paths.Data, "engine"), ICEServers: ice,
+		APIPort: cfg.EngineAPIPort, WebRTCPort: cfg.EngineWebRTCPort, WebRTCUDPPort: cfg.EngineWebRTCUDPPort,
+	}
 }
 
 // mediamtxBinary prefers the mediamtx shipped next to the hive executable

@@ -101,9 +101,10 @@ type Camera struct {
 	Credentials Credentials
 	Streams     map[Stream]StreamSpec
 	Enabled     bool
-	RecordAudio bool     // ADR-0015: sound is pulled from the camera only when on; off by default
-	Identity    Identity // ADR-0017: what the camera is, learned by the Hive
-	Network     Network  // ADR-0017: local or routed; empty until known
+	RecordAudio bool      // ADR-0015: sound is pulled from the camera only when on; off by default
+	Retention   Retention // #61: how long its footage is kept
+	Identity    Identity  // ADR-0017: what the camera is, learned by the Hive
+	Network     Network   // ADR-0017: local or routed; empty until known
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
@@ -120,6 +121,25 @@ type Patch struct {
 	Enabled     *bool
 	RecordAudio *bool
 	Credentials *Credentials
+	SubStream   *string // the sub stream's RTSP URL; "" removes it
+	Retention   *Retention
+}
+
+// MaxRetentionDays bounds a camera's own retention (ten years).
+const MaxRetentionDays = 3650
+
+// Retention says how long a camera keeps its footage: Days nil follows the
+// hive-wide retention_days, 0 keeps it until space runs out, n keeps it n
+// days. The plan's archive.retention_days_max caps both (ADR-0006).
+type Retention struct {
+	Days *int
+}
+
+func (r Retention) validate() error {
+	if r.Days != nil && (*r.Days < 0 || *r.Days > MaxRetentionDays) {
+		return fmt.Errorf("%w: retention days must be between 0 and %d", ErrInvalid, MaxRetentionDays)
+	}
+	return nil
 }
 
 // New validates spec and returns an enabled camera with a fresh ID.
@@ -147,6 +167,22 @@ func New(spec Spec, now time.Time) (Camera, error) {
 
 // Update returns a copy with the patch applied and UpdatedAt set to now.
 func (c Camera) Update(p Patch, now time.Time) (Camera, error) {
+	u := c.withFields(p)
+	if p.SubStream != nil {
+		if u.Source.Kind != SourceRTSP {
+			return Camera{}, fmt.Errorf("%w: a sub stream URL is for RTSP cameras; ONVIF cameras take theirs from a probe", ErrInvalid)
+		}
+		u.Streams = withSub(u.Streams, strings.TrimSpace(*p.SubStream))
+	}
+	u.UpdatedAt = now.UTC()
+	if err := u.validate(); err != nil {
+		return Camera{}, err
+	}
+	return u, nil
+}
+
+// withFields returns a copy with the patch's plain fields applied.
+func (c Camera) withFields(p Patch) Camera {
 	u := c
 	u.Streams = cloneStreams(c.Streams)
 	if p.Name != nil {
@@ -164,11 +200,10 @@ func (c Camera) Update(p Patch, now time.Time) (Camera, error) {
 	if p.Credentials != nil {
 		u.Credentials = *p.Credentials
 	}
-	u.UpdatedAt = now.UTC()
-	if err := u.validate(); err != nil {
-		return Camera{}, err
+	if p.Retention != nil {
+		u.Retention = *p.Retention
 	}
-	return u, nil
+	return u
 }
 
 // WithStreams returns a copy with streams replaced (e.g. after ONVIF
@@ -192,6 +227,13 @@ func (c Camera) validate() error {
 	case len(c.Group) > 100:
 		return fmt.Errorf("%w: group longer than 100 characters", ErrInvalid)
 	}
+	if err := c.Retention.validate(); err != nil {
+		return err
+	}
+	return c.validateStreams()
+}
+
+func (c Camera) validateStreams() error {
 	// An ONVIF camera may be created before its profiles are known; once any
 	// stream is set, main must be among them. RTSP cameras always have main.
 	if _, ok := c.Streams[Main]; !ok && (len(c.Streams) > 0 || c.Source.Kind == SourceRTSP) {
@@ -252,6 +294,17 @@ func validRTSP(raw string) error {
 		return errors.New("must not embed credentials")
 	}
 	return nil
+}
+
+// withSub sets the sub stream to url, or removes it when url is empty;
+// streams is a copy the caller owns.
+func withSub(streams map[Stream]StreamSpec, url string) map[Stream]StreamSpec {
+	if url == "" {
+		delete(streams, Sub)
+	} else {
+		streams[Sub] = StreamSpec{URL: url}
+	}
+	return streams
 }
 
 func cloneStreams(in map[Stream]StreamSpec) map[Stream]StreamSpec {

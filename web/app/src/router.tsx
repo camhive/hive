@@ -12,6 +12,7 @@ import { HiveSettings } from "@/pages/HiveSettings";
 import { HivePage, type HiveSearch } from "@/pages/Hive";
 import { Members } from "@/pages/Members";
 import { HiveSharing } from "@/pages/HiveSharing";
+import { HiveActivity } from "@/pages/HiveActivity";
 import { Invite } from "@/pages/Invite";
 import { Plan } from "@/pages/Plan";
 import { Activity } from "@/pages/Activity";
@@ -54,6 +55,7 @@ const hiveSettings = createRoute({ getParentRoute: () => root, path: "/hives/$id
 const hiveSearch = (s: Record<string, unknown>): HiveSearch => ({
   ...(typeof s.camera === "string" ? { camera: s.camera } : {}),
   ...(typeof s.day === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s.day) ? { day: s.day } : {}),
+  ...(s.view === "recordings" ? { view: "recordings" as const } : {}),
 });
 const hivePage = createRoute({ getParentRoute: () => root, path: "/hives/$id", component: HivePage, validateSearch: hiveSearch });
 // The live, archive and cameras pages became one hive page; old links and bookmarks land there.
@@ -71,6 +73,7 @@ const planPage = createRoute({ getParentRoute: () => root, path: "/plan", compon
 const activityPage = createRoute({ getParentRoute: () => root, path: "/activity", component: Activity });
 const notificationsPage = createRoute({ getParentRoute: () => root, path: "/notifications", component: Notifications });
 const hiveSharing = createRoute({ getParentRoute: () => root, path: "/hives/$id/sharing", component: HiveSharing });
+const hiveActivity = createRoute({ getParentRoute: () => root, path: "/hives/$id/activity", component: HiveActivity });
 const invite = createRoute({
   getParentRoute: () => root,
   path: "/invite",
@@ -78,7 +81,7 @@ const invite = createRoute({
   validateSearch: (s: Record<string, unknown>): { token?: string } => (typeof s.token === "string" ? { token: s.token } : {}),
 });
 
-export const routeTree = root.addChildren([home, register, confirm, login, forgot, reset, account, addHive, hiveSettings, hivePage, live, archive, camerasPage, membersPage, hiveSharing, invite, planPage, activityPage, notificationsPage]);
+export const routeTree = root.addChildren([home, register, confirm, login, forgot, reset, account, addHive, hiveSettings, hivePage, live, archive, camerasPage, membersPage, hiveSharing, hiveActivity, invite, planPage, activityPage, notificationsPage]);
 
 export function makeRouter(history?: Parameters<typeof createRouter>[0]["history"]) {
   return createRouter({ routeTree, history });

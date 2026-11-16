@@ -113,3 +113,40 @@ func TestRedactedStringNeverContainsSecrets(t *testing.T) {
 		t.Fatal("Credentials.String() leaked the password")
 	}
 }
+
+func TestUpdateSetsAndRemovesTheSubStream(t *testing.T) {
+	t0 := time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC)
+	c, _ := camera.New(camera.Spec{Name: "A", Source: camera.Source{Kind: camera.SourceRTSP, Address: "rtsp://h/ch0"}}, t0)
+	sub := " rtsp://h/ch1 "
+	u, err := c.Update(camera.Patch{SubStream: &sub}, t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.Streams[camera.Sub].URL != "rtsp://h/ch1" || u.Streams[camera.Main].URL != "rtsp://h/ch0" {
+		t.Fatalf("streams = %+v", u.Streams)
+	}
+	if _, ok := c.Streams[camera.Sub]; ok {
+		t.Fatal("Update must not mutate the receiver")
+	}
+	none := ""
+	if v, err := u.Update(camera.Patch{SubStream: &none}, t0); err != nil || len(v.Streams) != 1 {
+		t.Fatalf("remove sub: %+v, %v", v.Streams, err)
+	}
+	for _, bad := range []string{"http://h/ch1", "rtsp://u:p@h/ch1"} {
+		if _, err := c.Update(camera.Patch{SubStream: &bad}, t0); !errors.Is(err, camera.ErrInvalid) {
+			t.Errorf("%q: got %v, want ErrInvalid", bad, err)
+		}
+	}
+}
+
+func TestSubStreamPatchIsForRTSPCamerasOnly(t *testing.T) {
+	c, _ := camera.New(camera.Spec{Name: "A", Source: camera.Source{Kind: camera.SourceONVIF, Address: "http://h/onvif/device_service"}}, time.Now())
+	c, _ = c.WithStreams(map[camera.Stream]camera.StreamSpec{
+		camera.Main: {URL: "rtsp://h/main", ProfileToken: "p1"}, camera.Sub: {URL: "rtsp://h/sub", ProfileToken: "p2", Codec: "H264", Width: 640, Height: 360},
+	}, time.Now())
+	for _, url := range []string{"rtsp://h/other", ""} {
+		if _, err := c.Update(camera.Patch{SubStream: &url}, time.Now()); !errors.Is(err, camera.ErrInvalid) {
+			t.Errorf("%q on an ONVIF camera: got %v, want ErrInvalid (its sub stream comes from a probe)", url, err)
+		}
+	}
+}

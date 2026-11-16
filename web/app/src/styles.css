@@ -105,6 +105,7 @@
     border-radius: .25rem;
   }
   .link:hover { text-decoration-color: var(--fg); }
+  .link:disabled { opacity: .4; cursor: default; text-decoration-color: currentColor; }
   .link-danger { color: var(--danger); text-decoration-color: currentColor; text-decoration-thickness: 1px; }
 
   /* Buttons: the primary action is ink */

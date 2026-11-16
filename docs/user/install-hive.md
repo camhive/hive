@@ -105,12 +105,12 @@ directory and claim again. Recordings stay on disk.
 
 | Command | Effect |
 |---|---|
-| `hive status` | `running`, `stopped` or `unknown` |
+| `hive status` | `running`, `stopped` or `unknown`, then what the running hive reports: its version, the last update or rollback, the version on offer, and whether this command is older than the hive. Exits 0 whether or not a hive answers, 1 only when the service state cannot be read; scripts read the first line |
 | `hive start` / `stop` / `restart` | Control the service |
 | `hive install` / `uninstall` | Register or remove the service; footage is kept. The service runs `hive-updater`, which runs the hive (see Upgrading) |
 | `hive run` | Run in the foreground (for trying things out) |
 | `hive diag` | Write a diagnostic bundle, see [Troubleshooting](troubleshooting.md) |
-| `hive version` | Version, commit and build date |
+| `hive version` | Version, commit and build date of this command, marked `(this binary)`, then the running hive's version; `hive --version` prints only the first line |
 | `hive update` | Ask `hive-updater` to install an available update now (needs root / Administrator); the same as Update now in the app |
 
 With a custom data directory, prefix every command with
@@ -122,12 +122,14 @@ With a custom data directory, prefix every command with
 |---|---|---|
 | 16016/tcp | localhost only | Plain local API |
 | 16443/tcp | all interfaces | TLS local API for the web app on your network and for the relay |
-| 8890/udp | all interfaces | WebRTC live video |
-| 8889, 9997/tcp | localhost only | MediaMTX internals |
+| 8890/udp | all interfaces | WebRTC live video (`engine_webrtc_udp_port`) |
+| 8889, 9997/tcp | localhost only | MediaMTX internals (`engine_webrtc_port`, `engine_api_port`) |
 | one free port/tcp, chosen at start | localhost only | Camera streams handed from the hive to MediaMTX |
 
 Open 16443/tcp and 8890/udp on the computer's own firewall if it has one. Nothing
-needs to be opened on your router.
+needs to be opened on your router. If another program already uses one of the
+MediaMTX ports, move it in `hive.yaml`
+([configuration reference](../operations/config-reference.md#hive-hiveyaml)).
 
 ## Upgrading
 
@@ -178,8 +180,32 @@ installs within the window. The activity log of the hive shows
 `update.available` when a new version is found, `update.applied` when it
 runs, and `update.rolled_back` if the new version was not healthy; the
 service log prints `hive started ... version=` with the running version.
-`hive version` prints the version of the installed package, which the
-updater may have superseded (#109). Hives on
+The `hive` command you type is the binary the package installed; the
+updater runs its own copy of the newer version, so the two can differ.
+Both commands ask the running hive over its local API (`listen_addr`):
+
+```
+$ hive status
+running
+hive: 0.1.6 (a73f337, 2026-11-15)
+last update: 0.1.5 -> 0.1.6, applied 2026-11-16 03:12 +01:00
+update on offer: 0.1.7
+this command: 0.1.5 (0af03ce), older than the running hive; hive-updater runs its own copy
+
+$ hive version
+camhive-hive 0.1.5 (0af03ce) (this binary)
+running hive: 0.1.6 (a73f337, 2026-11-15)
+this command: 0.1.5 (0af03ce), older than the running hive; hive-updater runs its own copy
+```
+
+`last update` says `rolled_back` when the new version was not healthy;
+`needs a package install` names a version the updater cannot install by
+itself. An older command is harmless: install the new package when it
+comes out, or ignore it. `hive: not answering on 127.0.0.1:16016` means no
+hive runs there (stopped or still starting). Without the right to read
+`hive.yaml` the commands say `hive.yaml not readable, tried the default
+127.0.0.1:16016` and ask there; if `listen_addr` was moved, run them with
+`sudo`. Hives on
 v0.1.4 or older have no updater yet and need one manual install of the new
 package or archive:
 

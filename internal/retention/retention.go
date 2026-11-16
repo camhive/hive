@@ -27,31 +27,46 @@ import (
 // ErrInvalidPolicy wraps policy validation failures.
 var ErrInvalidPolicy = errors.New("retention: invalid policy")
 
+// errCameraDays marks a failed read of the cameras' own retention.
+var errCameraDays = errors.New("retention: cameras' retention")
+
 // Policy says what to keep. Zero values disable a rule.
 type Policy struct {
-	DefaultDays   int            // keep footage this many days; 0 = unlimited
-	DaysPerCamera map[string]int // per-camera override
-	MinFreeBytes  int64          // keep at least this much free on the archive disk
+	DefaultDays int // keep footage this many days; 0 = unlimited
+	// CameraDays reads, at every sweep, the cameras that keep footage for
+	// their own number of days (#61; camera id -> days, 0 = unlimited).
+	// Cameras missing from it, or all when nil, follow DefaultDays.
+	CameraDays   func(ctx context.Context) (map[string]int, error)
+	MinFreeBytes int64 // keep at least this much free on the archive disk
 	// MaxDays caps every retention setting from the license
 	// (archive.retention_days_max); nil or -1 means no cap.
 	MaxDays func() int
 }
 
-// Validate rejects negative limits.
+// Validate rejects negative limits. A camera's own days are validated
+// where the owner sets them (internal/domain/camera).
 func (p Policy) Validate() error {
 	if p.DefaultDays < 0 || p.MinFreeBytes < 0 {
 		return fmt.Errorf("%w: limits must not be negative", ErrInvalidPolicy)
 	}
-	for cam, d := range p.DaysPerCamera {
-		if d < 0 {
-			return fmt.Errorf("%w: camera %s days must not be negative", ErrInvalidPolicy, cam)
-		}
-	}
 	return nil
 }
 
-func (p Policy) days(camera string) int {
-	if d, ok := p.DaysPerCamera[camera]; ok {
+// cameraDays reads the cameras' own retention for one sweep.
+func (p Policy) cameraDays(ctx context.Context) (map[string]int, error) {
+	if p.CameraDays == nil {
+		return nil, nil
+	}
+	own, err := p.CameraDays(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", errCameraDays, err)
+	}
+	return own, nil
+}
+
+// days is how long camera keeps footage: its own days, else the default.
+func (p Policy) days(own map[string]int, camera string) int {
+	if d, ok := own[camera]; ok {
 		return p.cap(d)
 	}
 	return p.cap(p.DefaultDays)
@@ -155,16 +170,21 @@ func (s *Sweeper) Sweep(ctx context.Context) (Report, error) {
 	if err := s.pruneExports(ctx, now, &rep); err != nil {
 		return rep, err
 	}
-	remaining, err := s.byAge(ctx, segs, now, &rep)
-	if err != nil {
-		return rep, err
+	return rep, s.ageThenSpace(ctx, segs, now, &rep)
+}
+
+// ageThenSpace applies the age rule, then the space rule. When the
+// cameras' own retention cannot be read the age rule deletes nothing but
+// the space rule still runs: a full disk would stop recording.
+func (s *Sweeper) ageThenSpace(ctx context.Context, segs []archive.Segment, now time.Time, rep *Report) error {
+	remaining, err := s.byAge(ctx, segs, now, rep)
+	if err != nil && !errors.Is(err, errCameraDays) {
+		return err
 	}
-	if s.policy.MinFreeBytes > 0 {
-		if err := s.freeSpace(ctx, remaining, &rep); err != nil {
-			return rep, err
-		}
+	if s.policy.MinFreeBytes == 0 {
+		return err
 	}
-	return rep, nil
+	return errors.Join(err, s.freeSpace(ctx, remaining, rep))
 }
 
 // pruneExports removes old exports first: they are copies of footage.
@@ -180,11 +200,19 @@ func (s *Sweeper) pruneExports(ctx context.Context, now time.Time, rep *Report) 
 	return nil
 }
 
-// byAge deletes the segments past their camera's day limit and returns the rest.
+// byAge deletes the segments past their camera's day limit and returns the
+// rest. Without the cameras' own retention it deletes nothing (the shorter
+// hive-wide value would otherwise apply to every camera) and returns every
+// segment with an errCameraDays error.
 func (s *Sweeper) byAge(ctx context.Context, segs []archive.Segment, now time.Time, rep *Report) ([]archive.Segment, error) {
+	own, err := s.policy.cameraDays(ctx)
+	if err != nil {
+		s.log.Error("age rule skipped", "err", err)
+		return segs, err
+	}
 	remaining := segs[:0:0]
 	for _, seg := range segs {
-		if !s.expired(seg, now) {
+		if !expired(seg, s.policy.days(own, seg.Camera), now) {
 			remaining = append(remaining, seg)
 			continue
 		}
@@ -196,8 +224,7 @@ func (s *Sweeper) byAge(ctx context.Context, segs []archive.Segment, now time.Ti
 	return remaining, nil
 }
 
-func (s *Sweeper) expired(seg archive.Segment, now time.Time) bool {
-	days := s.policy.days(seg.Camera)
+func expired(seg archive.Segment, days int, now time.Time) bool {
 	if days == 0 || !seg.Complete {
 		return false
 	}

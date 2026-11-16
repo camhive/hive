@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/camhive/hive/internal/archive"
+	"github.com/camhive/hive/internal/domain/camera"
 	"github.com/camhive/hive/internal/export"
 	"github.com/camhive/hive/internal/retention"
 	"github.com/camhive/hive/internal/store"
@@ -99,6 +100,19 @@ func (f *fixture) add(t *testing.T, cam string, age time.Duration, complete bool
 	return seg
 }
 
+// ownRetention stores camera id with its own retention (#61).
+func (f *fixture) ownRetention(t *testing.T, id string, days int) {
+	t.Helper()
+	c, err := camera.New(camera.Spec{Name: id, Source: camera.Source{Kind: camera.SourceRTSP, Address: "rtsp://10.0.0.9/main"}}, f.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.ID, c.Retention = camera.ID(id), camera.Retention{Days: &days}
+	if err := f.st.Cameras().Put(context.Background(), c); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func (f *fixture) sweeper(policy retention.Policy) *retention.Sweeper {
 	return retention.New(f.idx, f.st.Segments(), policy, retention.Options{
 		FS:  f.fs,
@@ -124,7 +138,8 @@ func TestAgeRuleDeletesOnlyCompleteSegmentsOlderThanDays(t *testing.T) {
 	fresh := f.add(t, "cam_a", time.Hour, true)
 	other := f.add(t, "cam_b", 30*24*time.Hour, true) // cam_b keeps 60 days
 
-	s := f.sweeper(retention.Policy{DefaultDays: 7, DaysPerCamera: map[string]int{"cam_b": 60}})
+	f.ownRetention(t, "cam_b", 60)
+	s := f.sweeper(retention.Policy{DefaultDays: 7, CameraDays: f.st.Cameras().RetentionDays})
 	rep, err := s.Sweep(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -143,6 +158,45 @@ func TestAgeRuleDeletesOnlyCompleteSegmentsOlderThanDays(t *testing.T) {
 	dels, _ := f.st.Segments().Deletions(context.Background(), 10)
 	if len(dels) != 1 || dels[0].Reason != "age" || dels[0].Camera != "cam_a" || dels[0].Bytes != 100 {
 		t.Fatalf("deletion log = %+v", dels)
+	}
+}
+
+// #61: the owner changes a camera's retention in the app; the next sweep
+// applies it without a restart.
+func TestCameraRetentionIsReadAtEverySweep(t *testing.T) {
+	f := newFixture(t)
+	f.ownRetention(t, "cam_a", 60)
+	seg := f.add(t, "cam_a", 10*24*time.Hour, true)
+	s := f.sweeper(retention.Policy{DefaultDays: 7, CameraDays: f.st.Cameras().RetentionDays})
+	if rep, err := s.Sweep(context.Background()); err != nil || rep.ByAge != 0 {
+		t.Fatalf("60 days: %+v, %v", rep, err)
+	}
+	f.ownRetention(t, "cam_a", 5)
+	if rep, err := s.Sweep(context.Background()); err != nil || rep.ByAge != 1 || contains(f.fs.paths(), seg.Path) {
+		t.Fatalf("5 days: %+v, %v", rep, err)
+	}
+}
+
+// A sweep that cannot read the cameras' retention deletes nothing by age:
+// it would otherwise apply the shorter hive-wide value to every camera.
+// The space rule still runs: a full disk would stop recording (#117 review).
+func TestUnreadableCameraRetentionDeletesNothingByAgeButStillFreesSpace(t *testing.T) {
+	f := newFixture(t)
+	f.fs.free = 1000
+	old := f.add(t, "cam_a", 10*24*time.Hour, true)
+	newer := f.add(t, "cam_a", time.Hour, true)
+	// free is now 800; the policy wants 850: the oldest segment goes for space.
+	broken := errors.New("disk I/O error")
+	s := f.sweeper(retention.Policy{DefaultDays: 7, MinFreeBytes: 850, CameraDays: func(context.Context) (map[string]int, error) { return nil, broken }})
+	rep, err := s.Sweep(context.Background())
+	if !errors.Is(err, broken) {
+		t.Fatalf("err = %v", err)
+	}
+	if rep.ByAge != 0 || rep.BySpace != 1 || contains(f.fs.paths(), old.Path) || !contains(f.fs.paths(), newer.Path) {
+		t.Fatalf("report %+v, files %v", rep, f.fs.paths())
+	}
+	if len(f.ok) != 1 || len(f.low) != 0 {
+		t.Fatalf("space target met: ok %v low %v", f.ok, f.low)
 	}
 }
 
@@ -229,7 +283,7 @@ func TestSweepIsIdempotentAndZeroPolicyDeletesNothing(t *testing.T) {
 }
 
 func TestPolicyValidation(t *testing.T) {
-	for _, p := range []retention.Policy{{DefaultDays: -1}, {MinFreeBytes: -5}, {DaysPerCamera: map[string]int{"x": -2}}} {
+	for _, p := range []retention.Policy{{DefaultDays: -1}, {MinFreeBytes: -5}} {
 		if err := p.Validate(); !errors.Is(err, retention.ErrInvalidPolicy) {
 			t.Errorf("%+v: %v", p, err)
 		}

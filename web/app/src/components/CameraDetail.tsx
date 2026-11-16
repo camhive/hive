@@ -21,6 +21,9 @@ import { useCloudReachable } from "@/lib/cloud";
 import { Field } from "@/components/Field";
 import { CameraEditForm, ReplaceButton, useCameraActions } from "@/components/CameraManage";
 import { useHiveCapability } from "@/lib/capabilities";
+import { encryptionKey, useArchiveEncryption } from "@/lib/archiveEncryption";
+import { ArchiveLockNotice } from "@/components/ArchiveEncryption";
+import { saveBlob } from "@/lib/download";
 
 export type CameraDetailProps = {
   hive: Hive;
@@ -33,6 +36,8 @@ export type CameraDetailProps = {
   signal: Signalling;
   /** The day on the timeline; a past day opens the recording instead of live video. */
   day: string;
+  /** Opened for its recordings (#84): starts at the timeline, not live. */
+  recordings?: boolean;
   onDay: (day: string) => void;
   onClose: () => void;
   paused?: boolean;
@@ -45,11 +50,11 @@ export type CameraDetailProps = {
  * underneath. Seeking on the timeline plays the recording from there;
  * "Back to live" returns. Owners edit, switch off and remove the camera here.
  */
-export function CameraDetail({ hive, grant, quality, client, camera, health, signal, day, onDay, onClose, paused, peer, playerDeps }: CameraDetailProps) {
+export function CameraDetail({ hive, grant, quality, client, camera, health, signal, day, recordings, onDay, onClose, paused, peer, playerDeps }: CameraDetailProps) {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const today = dayKey(new Date());
-  const [mode, setMode] = useState<"live" | "archive">(day === today ? "live" : "archive");
+  const [mode, setMode] = useState<"live" | "archive">(day === today && !recordings ? "live" : "archive");
   const [stream, setStream] = useState<StreamName>("main");
   const calendar = useCalendar(client, camera.id, stream);
   const timeline = useTimeline(client, camera.id, stream, day);
@@ -74,6 +79,10 @@ export function CameraDetail({ hive, grant, quality, client, camera, health, sig
   const operator = owner || grant.role === "operator";
   const canDelete = useHiveCapability(hive, "archive.delete"); // minor entry point: hidden on an old hive (ADR-0022)
   const actions = useCameraActions(camera, client, onClose);
+  const locked = useArchiveEncryption(hive, client).data?.state === "locked"; // ADR-0019: no playback, sound or export until unlocked
+  // A 423 can be newer than the state last read (a restart): ask again, and the notice with the unlock appears.
+  const relock = () => void qc.invalidateQueries({ queryKey: encryptionKey(hive.id) });
+  useEffect(() => { if (locked) setExporting(false); }, [locked]);
 
   useEffect(() => () => { player.current?.stop(); sound.current?.stop(); }, []);
   // Another camera or day: start from a clean player.
@@ -108,8 +117,17 @@ export function CameraDetail({ hive, grant, quality, client, camera, health, sig
       playing.current = { at, seconds: duration };
       if (soundOn) void startSound();
     } catch (err) {
-      setPlayError(err instanceof CamhiveError ? errorMessage(t, err) : t("archive.playbackFailed"));
+      showFailure(err, t("archive.playbackFailed"));
     }
+  }
+
+  // A locked archive has its notice with the unlock; the answer may be newer than the state last read.
+  function showFailure(err: unknown, fallback: string) {
+    if (err instanceof CamhiveError && err.code === "archive_locked") {
+      relock();
+      return;
+    }
+    setPlayError(err instanceof CamhiveError ? errorMessage(t, err) : fallback);
   }
 
   // Sound is fetched only while the viewer wants it (ADR-0015).
@@ -121,7 +139,7 @@ export function CameraDetail({ hive, grant, quality, client, camera, health, sig
       await sound.current.start(camera.id, stream, w.at, w.seconds);
     } catch (err) {
       setSoundOn(false);
-      setPlayError(errorMessage(t, err));
+      showFailure(err, errorMessage(t, err));
     }
   }
 
@@ -169,15 +187,7 @@ export function CameraDetail({ hive, grant, quality, client, camera, health, sig
     canvas.width = v.videoWidth;
     canvas.height = v.videoHeight;
     canvas.getContext("2d")?.drawImage(v, 0, 0, v.videoWidth, v.videoHeight);
-    canvas.toBlob((blob) => {
-      if (!blob) return;
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = snapshotName(camera.name, at);
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 10_000);
-    }, "image/png");
+    canvas.toBlob((blob) => { if (blob) saveBlob(blob, snapshotName(camera.name, at)); }, "image/png");
   }
 
   function backToLive() {
@@ -188,7 +198,7 @@ export function CameraDetail({ hive, grant, quality, client, camera, health, sig
     setPlayError(null);
     setExporting(false);
     setMode("live");
-    if (day !== today) onDay(today);
+    onDay(today); // also drops view=recordings, so a reload or a shared link opens live
   }
 
   function pickDay(d: string) {
@@ -218,11 +228,11 @@ export function CameraDetail({ hive, grant, quality, client, camera, health, sig
       </div>
       {actions.error && <p role="alert" className="error text-sm">{actions.error}</p>}
       {actions.mismatch && <ReplaceButton onReplace={actions.replace} />}
-      {actions.editing && <div className="card"><CameraEditForm camera={camera} onSubmit={actions.patch} /></div>}
+      {actions.editing && <div className="card"><CameraEditForm hive={hive} camera={camera} onSubmit={actions.patch} /></div>}
       {alerts && owner && cloud && <div className="card"><CameraAlerts hiveId={hive.id} cameraId={camera.id} /></div>}
 
       {live && (
-        <LiveTile camera={camera} health={health} stream={streamFor(quality, "detail")} signal={signal} iceServers={grant.ice_servers} paused={paused} peer={peer}>
+        <LiveTile hiveId={hive.id} camera={camera} health={health} stream={streamFor(quality, "detail")} signal={signal} iceServers={grant.ice_servers} paused={paused} peer={peer}>
           {operator && client && <PtzPad client={client} cameraId={camera.id} />}
         </LiveTile>
       )}
@@ -230,14 +240,16 @@ export function CameraDetail({ hive, grant, quality, client, camera, health, sig
         <video ref={video} className="w-full h-full object-contain" controls playsInline data-testid="player" onTimeUpdate={onTimeUpdate} onEnded={onEnded}
           onError={(e) => { if (e.currentTarget.getAttribute("src")) setPlayError(t("archive.playbackFailed")); }} />
         <audio ref={audioEl} hidden />
+        {!position && !playError && <p className="pointer-events-none absolute inset-0 flex items-center justify-center p-4 text-center text-sm text-white/80">{t("archive.pickMoment")}</p>}
         {position && <span className="absolute top-2 left-2 text-xs glass px-2 py-0.5 rounded" data-testid="position">{position.toLocaleString()}</span>}
       </div>
       {playError && <p role="alert" className="error text-sm">{playError}</p>}
+      <ArchiveLockNotice hive={hive} client={client} owner={owner} onUnlocked={() => { if (!live && position) void seek(position); }} />
 
       <div className="flex flex-wrap items-center justify-between gap-2">
         {!live ? (
           <div className="flex flex-wrap items-center gap-2 text-sm">
-            <button type="button" className="btn btn-secondary btn-sm" aria-pressed={soundOn} onClick={toggleSound}>{soundOn ? t("archive.soundOn") : t("archive.soundOff")}</button>
+            <button type="button" className="btn btn-secondary btn-sm" aria-pressed={soundOn} disabled={locked} onClick={toggleSound}>{soundOn ? t("archive.soundOn") : t("archive.soundOff")}</button>
             <label className="muted" htmlFor="speed">{t("archive.speed")}</label>
             <select id="speed" className="input input-sm !w-auto" value={rate} onChange={(e) => changeRate(Number(e.target.value))}>
               {[1, 2, 4, 8].map((r) => <option key={r} value={r}>{r}×</option>)}
@@ -251,12 +263,12 @@ export function CameraDetail({ hive, grant, quality, client, camera, health, sig
             <option value="main">main</option>
             <option value="sub">sub</option>
           </select>
-          {operator && client && <button type="button" className="btn btn-secondary btn-sm" onClick={() => setExporting((v) => !v)} disabled={!position}>{t("archive.exportFromHere")}</button>}
+          {operator && client && <button type="button" className="btn btn-secondary btn-sm" onClick={() => setExporting((v) => !v)} disabled={!position || locked}>{t("archive.exportFromHere")}</button>}
           {owner && client && canDelete.has && <button type="button" className="btn btn-ghost btn-sm" aria-expanded={deleting} onClick={() => setDeleting((v) => !v)}>{t("deletion.thisDay")}</button>}
           {!live && <button type="button" className="btn btn-sm" onClick={backToLive}><span className="dot" style={{ color: "var(--accent)" }} aria-hidden="true" />{t("live.backToLive")}</button>}
         </div>
       </div>
-      <Timeline day={day} ranges={ranges} events={marks} position={live ? (day === today ? new Date() : null) : position} onSeek={(at) => void seek(at)} activity={activity} />
+      <Timeline day={day} ranges={ranges} events={marks} position={live ? (day === today ? new Date() : null) : position} onSeek={(at) => void seek(at)} activity={activity} focus={recordings} />
       <EventList marks={marks} onSeek={(at) => void seek(at)} />
       {calendar.data && (days.length === 0 ? <p className="muted text-sm">{t("archive.noFootage")}</p> : <DayStrip footage={days} day={day} today={today} onPick={pickDay} />)}
 
@@ -275,7 +287,7 @@ export function CameraDetail({ hive, grant, quality, client, camera, health, sig
               await qc.invalidateQueries({ queryKey: ["exports"] });
             }} />
           )}
-          <ExportList client={client} hive={hive} token={grant.token} />
+          <ExportList client={client} hive={hive} token={grant.token} locked={locked} onLocked={relock} />
         </div>
       )}
     </section>
@@ -305,18 +317,13 @@ function ExportForm({ capMinutes, start, onSubmit }: { capMinutes: number; start
   );
 }
 
-function ExportList({ client, hive, token }: { client: HiveClient; hive: Hive; token: string }) {
+function ExportList({ client, hive, token, locked, onLocked }: { client: HiveClient; hive: Hive; token: string; locked: boolean; onLocked: () => void }) {
   const { t } = useTranslation();
   const jobs = useExports(client);
   async function download(j: ExportJob) {
     const res = await transport.fetch(hive, `/v0/exports/${encodeURIComponent(j.id ?? "")}/file`, { token });
-    if (!res.ok) return;
-    const url = URL.createObjectURL(await res.blob());
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = j.file_name ?? "export.mp4";
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    if (res.ok) saveBlob(await res.blob(), j.file_name ?? "export.mp4");
+    else if (res.status === 423) onLocked();
   }
   if (!jobs.data?.length) return null;
   return (
@@ -328,7 +335,7 @@ function ExportList({ client, hive, token }: { client: HiveClient; hive: Hive; t
             <span>{j.start ? new Date(j.start).toLocaleString() : ""} · {Math.round((j.duration_seconds ?? 0) / 60)} min · {j.stream}</span>
             <span className="flex items-center gap-2">
               <span className="muted">{t(`archive.status.${j.status ?? "running"}`)}{j.error ? `: ${j.error}` : ""}</span>
-              {j.status === "done" && <button type="button" className="link" onClick={() => void download(j)}>{t("archive.download")}</button>}
+              {j.status === "done" && <button type="button" className="link" disabled={locked} onClick={() => void download(j)}>{t("archive.download")}</button>}
             </span>
           </li>
         ))}

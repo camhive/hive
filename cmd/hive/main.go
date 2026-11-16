@@ -4,7 +4,8 @@
 //	hive install | uninstall | start | stop | status   manage the OS service
 //	hive run                                          run in the foreground
 //	hive diag                                         write a diagnostic bundle
-//	hive --version
+//	hive version                                      this binary and the running hive
+//	hive --version                                    this binary, one line
 //
 // Files live in the OS-conventional data directory (see hiveconfig), or under
 // CAMHIVE_DATA_DIR when set; the service is installed with that environment.
@@ -46,7 +47,7 @@ func run(args []string, stdout, stderr *os.File) int {
 	if len(args) > 0 {
 		cmd = args[0]
 	}
-	if cmd == "--version" || cmd == "version" {
+	if cmd == "--version" { // one line, for scripts
 		fmt.Fprintln(stdout, "camhive-hive", version.Current())
 		return 0
 	}
@@ -73,13 +74,7 @@ func run(args []string, stdout, stderr *os.File) int {
 		}
 		return 0
 	case "status":
-		st, err := svc.Status()
-		if err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
-		}
-		fmt.Fprintln(stdout, statusString(st))
-		return 0
+		return runStatus(svc.Status, version.Current(), paths, stdout, stderr)
 	case "install", "uninstall", "start", "stop", "restart":
 		if err := service.Control(svc, cmd); err != nil {
 			fmt.Fprintln(stderr, err)
@@ -88,7 +83,7 @@ func run(args []string, stdout, stderr *os.File) int {
 		fmt.Fprintf(stdout, "%s: %s ok\n", serviceName, cmd)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "unknown command %q\nusage: hive [run|claim|install|uninstall|start|stop|restart|status|update|diag|local-login|--version]\n", cmd)
+		fmt.Fprintf(stderr, "unknown command %q\nusage: hive [run|claim|install|uninstall|start|stop|restart|status|update|diag|local-login|version|--version]\n", cmd)
 		return 2
 	}
 }
@@ -126,6 +121,9 @@ func standalone(cmd string, args []string, paths hiveconfig.Paths, stdout, stder
 		return requestUpdate(journal.DefaultDir(), stdout, stderr), true
 	case "local-login":
 		return runLocalLogin(paths, args[1:], os.Stdin, stdout, stderr), true
+	case "version":
+		reportVersion(context.Background(), stdout, stderr, version.Current(), paths)
+		return 0, true
 	}
 	return 0, false
 }

@@ -2,6 +2,7 @@ package hiveapp_test
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -48,5 +49,26 @@ func TestCORSPreflightAndSimpleRequests(t *testing.T) {
 	_ = res3.Body.Close()
 	if res3.Header.Get("Access-Control-Allow-Origin") != "*" {
 		t.Fatal("healthz must be probe-able cross-origin")
+	}
+}
+
+// A rate-limited unlock or local sign-in says in Retry-After how long it
+// lasts; the app is always cross-origin to the hive and Retry-After is not
+// CORS-safelisted, so the hive must expose it or the browser hides it.
+func TestCORSExposesRetryAfter(t *testing.T) {
+	f := newAPI(t)
+	res, err := http.Get(f.srv.URL + "/healthz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	exposed := map[string]bool{}
+	for _, h := range strings.Split(res.Header.Get("Access-Control-Expose-Headers"), ",") {
+		exposed[strings.TrimSpace(h)] = true
+	}
+	for _, want := range []string{"Retry-After", "Content-Disposition", "X-Camhive-Stream"} {
+		if !exposed[want] {
+			t.Errorf("Access-Control-Expose-Headers = %q, missing %s", res.Header.Get("Access-Control-Expose-Headers"), want)
+		}
 	}
 }

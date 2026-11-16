@@ -61,6 +61,8 @@ describe("local sessions", () => {
 
     const refused = (async () => new Response(JSON.stringify({ code: "local_login_rate_limited", message: "" }), { status: 429, headers: { "Retry-After": "540" } })) as typeof fetch;
     await expect(signInLocally(hive, "anna", "x", refused)).rejects.toMatchObject({ code: "local_login_rate_limited", status: 429, retryAfterS: 540 });
+    const hidden = (async () => new Response(JSON.stringify({ code: "local_login_rate_limited", message: "" }), { status: 429 })) as typeof fetch; // a hive up to v0.1.7: CORS hides Retry-After
+    await expect(signInLocally(hive, "anna", "x", hidden)).rejects.toMatchObject({ status: 429, retryAfterS: null });
     await expect(signInLocally({ ...hive, lan: undefined }, "anna", "x", f)).rejects.toBeInstanceOf(CamhiveError);
   });
 });

@@ -256,7 +256,8 @@ type cameraView struct {
 	Streams     map[string]camera.StreamSpec `json:"streams"`
 	Enabled     bool                         `json:"enabled"`
 	RecordAudio bool                         `json:"record_audio"`
-	Identity    *camera.Identity             `json:"identity,omitempty"` // owner only (ADR-0017)
+	Retention   *int                         `json:"retention_days,omitempty"` // absent: the hive-wide value (#61); every role: it says how far back the archive goes, which the calendar shows them anyway
+	Identity    *camera.Identity             `json:"identity,omitempty"`       // owner only (ADR-0017)
 	Network     string                       `json:"network,omitempty"`
 	CreatedAt   time.Time                    `json:"created_at"`
 	UpdatedAt   time.Time                    `json:"updated_at"`
@@ -275,7 +276,7 @@ func toView(c camera.Camera, claims auth.Claims) cameraView {
 	v := cameraView{
 		ID: string(c.ID), Name: c.Name, Group: c.Group,
 		Source:  sourceView{Kind: string(c.Source.Kind), Address: c.Source.Address},
-		Streams: map[string]camera.StreamSpec{}, Enabled: c.Enabled, RecordAudio: c.RecordAudio, Network: string(c.Network), CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
+		Streams: map[string]camera.StreamSpec{}, Enabled: c.Enabled, RecordAudio: c.RecordAudio, Retention: c.Retention.Days, Network: string(c.Network), CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
 	}
 	if claims.Role == auth.RoleOwner {
 		id := c.Identity
@@ -322,8 +323,43 @@ type cameraPatch struct {
 	} `json:"credentials"`
 	// Host moves the camera to another host (ADR-0017); ReplaceIdentity
 	// accepts a device that is not the known camera (a replacement).
-	Host            *string `json:"host"`
-	ReplaceIdentity bool    `json:"replace_identity"`
+	Host            *string        `json:"host"`
+	ReplaceIdentity bool           `json:"replace_identity"`
+	Retention       retentionInput `json:"retention_days"`
+	// SubStream sets the sub stream's RTSP URL; "" removes it (#63).
+	SubStream *string `json:"sub_stream"`
+}
+
+// retentionInput is retention_days in a camera patch (#61): absent leaves
+// it, null puts the camera back on the hive-wide value, a number of days
+// gives the camera its own.
+type retentionInput struct {
+	set  bool
+	days *int
+}
+
+// UnmarshalJSON runs only when the key is present, null included.
+func (r *retentionInput) UnmarshalJSON(b []byte) error {
+	r.set = true
+	return json.Unmarshal(b, &r.days)
+}
+
+func (r retentionInput) patch() *camera.Retention {
+	if !r.set {
+		return nil
+	}
+	return &camera.Retention{Days: r.days}
+}
+
+// detail is the action log's value: absent, "hive" or the days.
+func (r retentionInput) detail() any {
+	switch {
+	case !r.set:
+		return nil
+	case r.days == nil:
+		return "hive"
+	}
+	return *r.days
 }
 
 // applyPatch returns the camera with the patch applied and, when the host
@@ -341,11 +377,16 @@ func (a *api) applyPatch(w http.ResponseWriter, r *http.Request, c camera.Camera
 }
 
 func (in cameraPatch) patch() camera.Patch {
-	p := camera.Patch{Name: in.Name, Group: in.Group, Enabled: in.Enabled, RecordAudio: in.RecordAudio}
+	p := camera.Patch{Name: in.Name, Group: in.Group, Enabled: in.Enabled, RecordAudio: in.RecordAudio, Retention: in.Retention.patch(), SubStream: in.SubStream}
 	if in.Credentials != nil {
 		p.Credentials = &camera.Credentials{Username: in.Credentials.Username, Password: in.Credentials.Password}
 	}
 	return p
+}
+
+// changesFields reports whether the patch changes more than the host.
+func (in cameraPatch) changesFields() bool {
+	return in.Name != nil || in.Group != nil || in.Enabled != nil || in.RecordAudio != nil || in.Credentials != nil || in.Retention.set || in.SubStream != nil
 }
 
 // recordPatch logs a move and an update separately, each only when it happened.
@@ -353,8 +394,9 @@ func (a *api) recordPatch(r *http.Request, old, now camera.Camera, in cameraPatc
 	if now.Host() != old.Host() {
 		a.record(r, "camera.move", string(now.ID), map[string]any{"old": old.Host(), "new": now.Host(), "replaced_identity": in.ReplaceIdentity})
 	}
-	if in.Name != nil || in.Group != nil || in.Enabled != nil || in.RecordAudio != nil || in.Credentials != nil {
-		a.record(r, "camera.update", string(now.ID), map[string]any{"name": in.Name, "group": in.Group, "enabled": in.Enabled, "record_audio": in.RecordAudio, "credentials_changed": in.Credentials != nil})
+	if in.changesFields() {
+		a.record(r, "camera.update", string(now.ID), map[string]any{"name": in.Name, "group": in.Group, "enabled": in.Enabled, "record_audio": in.RecordAudio,
+			"credentials_changed": in.Credentials != nil, "retention_days": in.Retention.detail(), "sub_stream": in.SubStream})
 	}
 }
 
@@ -506,20 +548,63 @@ func (a *api) internal(w http.ResponseWriter, err error) {
 	writeError(w, http.StatusInternalServerError, "internal", "internal error")
 }
 
-// health answers liveness and version; on loopback (the updater on the
-// same machine, ADR-0018) also how many cameras record.
+// Health is GET /healthz. Recording and Updates go only to programs on
+// this machine (localTool), never to web pages there: hive-updater checks
+// an update with them (ADR-0018), and `hive status` reports the running
+// hive, which may be newer than the package's binary (#109).
+type Health struct {
+	Status    string         `json:"status"`
+	Version   string         `json:"version"`
+	Recording *int           `json:"recording,omitempty"`
+	Updates   *UpdateReports `json:"updates,omitempty"`
+}
+
+// health answers liveness and version; to a local tool also how many
+// cameras record and what the updater reported.
 func (a *api) health(w http.ResponseWriter, r *http.Request) {
-	out := map[string]any{"status": "ok", "version": a.d.Version}
-	if a.d.Health != nil && fromLoopback(r) {
-		n := 0
-		for _, c := range a.d.Health.All() {
-			if c.Enabled && c.Online {
-				n++
-			}
-		}
-		out["recording"] = n
+	out := Health{Status: "ok", Version: a.d.Version}
+	if localTool(r) {
+		out.Recording, out.Updates = a.recording(), a.healthUpdates(r)
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// recording counts the cameras recording now; nil without a video engine.
+func (a *api) recording() *int {
+	if a.d.Health == nil {
+		return nil
+	}
+	n := 0
+	for _, c := range a.d.Health.All() {
+		if c.Enabled && c.Online {
+			n++
+		}
+	}
+	return &n
+}
+
+// healthUpdates is what the updater reported; nil when it cannot be read
+// within a second: liveness must not depend on the action log, or a slow
+// database could make hive-updater (5 s timeout) roll an update back.
+func (a *api) healthUpdates(r *http.Request) *UpdateReports {
+	if a.d.Store == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), time.Second)
+	defer cancel()
+	u, err := a.updateReports(ctx)
+	if err != nil {
+		a.d.Logger.Warn("healthz: action log", "err", err)
+		return nil
+	}
+	return &u
+}
+
+// localTool: a request from a program on this machine (hive-updater, the
+// hive CLI), not from a web page there: a browser on the hive's machine is
+// loopback too, and sends Origin on every cross-origin request.
+func localTool(r *http.Request) bool {
+	return fromLoopback(r) && r.Header.Get("Origin") == ""
 }
 
 // fromLoopback: a request from this machine that did not come through the relay.

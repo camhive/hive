@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 
 	"gopkg.in/yaml.v3"
 
@@ -123,6 +124,13 @@ type Config struct {
 	// the LAN (ADR-0012); the relay pipes into it over loopback. Empty
 	// disables the listener. Access still needs a token.
 	TLSListenAddr string `yaml:"tls_listen_addr"`
+	// Ports of the video engine (MediaMTX, #61), to move when another
+	// program on the host holds them: its control API and WebRTC
+	// signalling (WHEP) on loopback, WebRTC media over UDP on every
+	// interface.
+	EngineAPIPort       int `yaml:"engine_api_port"`
+	EngineWebRTCPort    int `yaml:"engine_webrtc_port"`
+	EngineWebRTCUDPPort int `yaml:"engine_webrtc_udp_port"`
 	// Updates (ADR-0018), read by hive-updater. UpdateURL hosts the signed
 	// metadata (an untrusted transport); UpdateChannel is stable or beta;
 	// UpdateWindow is when updates may install (local time, HH:MM-HH:MM);
@@ -135,8 +143,13 @@ type Config struct {
 	UpdateRoot    string `yaml:"update_root"`
 }
 
+// DefaultListenAddr is where the hive serves its loopback API unless
+// hive.yaml says otherwise.
+const DefaultListenAddr = "127.0.0.1:16016"
+
 func defaults(p Paths) Config {
-	return Config{ListenAddr: "127.0.0.1:16016", TLSListenAddr: "0.0.0.0:16443", ArchiveDir: p.Archive, LogLevel: "info", SegmentMinutes: 10, RetentionDays: 30, MinFreeGB: 10, ExportDays: 7, ExportMaxGB: 10,
+	return Config{ListenAddr: DefaultListenAddr, TLSListenAddr: "0.0.0.0:16443", ArchiveDir: p.Archive, LogLevel: "info", SegmentMinutes: 10, RetentionDays: 30, MinFreeGB: 10, ExportDays: 7, ExportMaxGB: 10,
+		EngineAPIPort: 9997, EngineWebRTCPort: 8889, EngineWebRTCUDPPort: 8890,
 		UpdateURL: "https://updates.dev.camhive.app", UpdateChannel: "stable", UpdateWindow: "02:00-05:00", Updates: "automatic"}
 }
 
@@ -160,7 +173,49 @@ func (c Config) Validate() error {
 	if err := c.validateStorage(); err != nil {
 		return err
 	}
+	if err := c.validatePorts(); err != nil {
+		return err
+	}
 	return c.validateUpdates()
+}
+
+// enginePort names one of the video engine's ports.
+type enginePort struct {
+	key  string
+	port int
+}
+
+// validatePorts checks the video engine's ports (#61): each a port, and
+// the TCP ports of the hive's listeners and of the engine all different.
+// UDP and TCP may share a number.
+func (c Config) validatePorts() error {
+	api, webrtc := enginePort{"engine_api_port", c.EngineAPIPort}, enginePort{"engine_webrtc_port", c.EngineWebRTCPort}
+	for _, p := range []enginePort{api, webrtc, {"engine_webrtc_udp_port", c.EngineWebRTCUDPPort}} {
+		if p.port < 1 || p.port > 65535 {
+			return fmt.Errorf("hiveconfig: %s %d is not a port (1-65535)", p.key, p.port)
+		}
+	}
+	taken := map[int]string{}
+	for _, p := range []enginePort{{"listen_addr", listenPort(c.ListenAddr)}, {"tls_listen_addr", listenPort(c.TLSListenAddr)}, api, webrtc} {
+		if p.port == 0 { // no TLS listener
+			continue
+		}
+		if other, ok := taken[p.port]; ok {
+			return fmt.Errorf("hiveconfig: %s %d is already used by %s", p.key, p.port, other)
+		}
+		taken[p.port] = p.key
+	}
+	return nil
+}
+
+// listenPort is the port of a listen address; 0 when there is none.
+func listenPort(addr string) int {
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return 0
+	}
+	n, _ := strconv.Atoi(port)
+	return n
 }
 
 var windowRE = regexp.MustCompile(`^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$`)

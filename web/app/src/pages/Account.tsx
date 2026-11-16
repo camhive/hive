@@ -9,6 +9,7 @@ import { errorMessage } from "@/lib/errors";
 import { useMe } from "@/lib/session";
 import { recoveryCodesFile } from "@/lib/qr";
 import { Field } from "@/components/Field";
+import { InstallCard } from "@/components/InstallCard";
 
 type Session = { id: string; current: boolean; created_at: string; last_seen_at: string; user_agent: string };
 
@@ -29,6 +30,7 @@ export function Account() {
         <Link to="/notifications" className="btn btn-secondary btn-sm">{t("notify.title")}</Link>
         <Link to="/members" className="btn btn-secondary btn-sm">{t("members.title")}</Link>
       </nav>
+      <InstallCard />
       <PasswordCard />
       <TotpCard enabled={me.data.totp_enabled} email={me.data.email} />
       <SessionsCard />

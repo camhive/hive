@@ -29,6 +29,7 @@ Use this for cameras without ONVIF, or when discovery cannot see them.
 | Name | Required, up to 100 characters |
 | Group | Optional label used to sort the list |
 | RTSP URL | The **main** stream, `rtsp://host:554/path`. Do not put the login into the URL |
+| Sub stream URL | Optional: the camera's second, smaller stream (`rtsp://` or `rtsps://`, no login in the URL); the same login is used |
 | Username, Password | The camera's login; the hive stores the password encrypted |
 
 The camera's manual or vendor support page lists the path. Common ones:
@@ -47,9 +48,11 @@ A quick check from any computer with ffmpeg installed:
 ffprobe -rtsp_transport tcp "rtsp://user:pass@192.168.1.50:554/av_stream/ch0"
 ```
 
-The RTSP form currently takes the main stream only; a sub stream can be added
-later by editing the camera once that field exists. Until then the app uses the
-main stream wherever a sub stream would be preferred.
+Fill in the sub stream when the camera has one (the Sub column of the table
+above): grids and remote viewing then use it instead of the full stream. You
+can add, change or remove it later in **Edit**; an empty field removes it.
+Hives older than v0.1.8 take the sub stream only when the camera is added;
+editing it needs v0.1.8.
 
 ## Main and sub streams
 
@@ -64,13 +67,15 @@ stream when a camera has only one.
   pulls the camera and records it. Switch it off to stop recording while
   keeping the camera and its history. Switched-off cameras stay visible to the
   owner so they can be switched back on.
-- **Edit** changes name, group, login and address. Leave the password empty
+- **Edit** changes name, group, login, address and, for RTSP cameras, the sub
+  stream URL. Leave the password empty
   to keep the current one. A new address (IP or host name) keeps the camera,
   its recordings and its shares; ports and paths stay. If another device
   answers there, the hive says so and moves the camera only when you confirm
   it is a new camera (then it learns the new device).
 - **Remove** deletes the camera from the hive. Its recordings stay on disk
-  until retention removes them.
+  until retention removes them, by the hive-wide retention: a camera's own
+  retention goes with the camera.
 
 ## When a camera gets a new address
 
@@ -123,3 +128,25 @@ Recording is configured in `hive.yaml` on the hive, not in the app yet:
 segment length (10 minutes), retention in days (30) and the free-space floor
 (10 GB) below which the oldest footage is removed first. See the
 [configuration reference](../operations/config-reference.md#hive-hiveyaml).
+
+### Keeping one camera's footage longer or shorter
+
+A camera can keep its footage for its own number of days instead of the
+hive-wide value: a driveway camera for 90 days, an indoor camera for 3.
+The app has no field for it yet; the hive's API takes it
+(`PATCH /v0/cameras/{id}` with `retention_days`, owner only):
+
+- a number from 0 to 3650 keeps that camera's footage that many days;
+  0 keeps it until the disk needs the space;
+- `null` puts the camera back on the hive-wide value.
+
+The change applies at the next retention sweep, within five minutes, without
+a restart, and the action log records it. Your plan's longest retention caps
+a camera's days as it caps the hive-wide value. The free-space floor still
+applies to every camera: when the disk runs low, the oldest footage goes
+first, whatever its camera keeps.
+
+A camera's own retention needs a hive newer than 0.1.7. After going back to an older version the hive keeps the setting in
+its database but ignores it: every camera follows the hive-wide value, so a
+90-day camera under a 30-day hive loses days 30–90 at the next sweep.
+The engine ports in `hive.yaml` are ignored the same way.

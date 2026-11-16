@@ -15,7 +15,7 @@ const hive = { id: "hv_1", name: "Home", status: "active", online: true, claimed
 type Cam = { id: string; name: string; group: string; enabled: boolean; source: { kind: string; address: string }; streams: Record<string, { URL: string; Codec?: string; Width?: number; Height?: number }>; created_at: string; updated_at: string; credentials?: { username: string };
   identity?: Record<string, string>; network?: string };
 
-function stub(role: "owner" | "viewer") {
+function stub(role: "owner" | "viewer", hiveExtra: Record<string, unknown> = {}) {
   const cams: Cam[] = [{ id: "cam_1", name: "Door", group: "Outside", enabled: true, source: { kind: "rtsp", address: "rtsp://10.0.0.9/s" }, streams: { main: { URL: "rtsp://10.0.0.9/s", Codec: "H264", Width: 1920, Height: 1080 } }, created_at: "", updated_at: "", credentials: { username: "admin" } }];
   const bodies: Record<string, unknown[]> = {};
   vi.stubGlobal("fetch", (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -48,10 +48,12 @@ function stub(role: "owner" | "viewer") {
           return json(201, c);
         }
         case "PATCH /v0/cameras/cam_1": {
-          const { host, replace_identity, ...b } = body as { enabled?: boolean; name?: string; group?: string; host?: string; replace_identity?: boolean };
+          const { host, replace_identity, sub_stream, ...b } = body as { enabled?: boolean; name?: string; group?: string; host?: string; replace_identity?: boolean; sub_stream?: string };
           // ADR-0017: another device answers at 10.0.0.50.
           if (host === "10.0.0.50" && !replace_identity) return json(409, { code: "camera_mismatch", message: "" });
           if (host) cams[0]!.source.address = `rtsp://${host}/s`;
+          if (sub_stream) cams[0]!.streams.sub = { URL: sub_stream };
+          if (sub_stream === "") delete cams[0]!.streams.sub;
           Object.assign(cams[0]!, b);
           return json(200, cams[0]);
         }
@@ -61,7 +63,7 @@ function stub(role: "owner" | "viewer") {
     }
     switch (key) {
       case "GET /v1/me": return json(200, { id: "acc_1", email: "anna@example.de", locale: "en", totp_enabled: false, created_at: "" });
-      case "GET /v1/hives": return json(200, { hives: [hive], shared: [] });
+      case "GET /v1/hives": return json(200, { hives: [{ ...hive, ...hiveExtra }], shared: [] });
       case "POST /v1/hives/hv_1/access": return json(201, { token: "tok", session_id: "s_1", expires_at: new Date(Date.now() + 900_000).toISOString(), offline: false, role, cameras: ["*"], hive, quality: "full", ice_servers: [] });
       default: return json(404, { error: { code: "not_found", message: "" } });
     }
@@ -177,6 +179,81 @@ describe("camera management on the hive page", () => {
     await user.click(within(door).getByRole("button", { name: "It is a new camera, use it" }));
     await waitFor(() => expect(bodies["PATCH /v0/cameras/cam_1"]!.at(-1)).toEqual({ name: "Door", group: "Outside", record_audio: false, host: "10.0.0.50", replace_identity: true }));
     await waitFor(() => expect(cams[0]!.source.address).toBe("rtsp://10.0.0.50/s"));
+  });
+
+  it("takes an optional sub stream URL for RTSP cameras when adding and editing (#63)", async () => {
+    const { cams, bodies } = stub("owner", { version: "0.1.8", capabilities: ["camera.sub_stream"] });
+    const user = mount();
+    await user.click(await screen.findByRole("button", { name: "List" }));
+    await screen.findByTestId("camera");
+
+    await user.click(screen.getByRole("button", { name: "Add camera" }));
+    await user.click(screen.getByRole("tab", { name: "RTSP address" }));
+    const form = screen.getByRole("form", { name: "RTSP address" });
+    await user.type(within(form).getByLabelText("Name"), "Cellar");
+    await user.type(within(form).getByLabelText("RTSP URL"), "rtsp://10.0.0.7/ch0");
+    for (const bad of ["http://10.0.0.7/ch1", "rtsp://admin:pw@10.0.0.7/ch1", "10.0.0.7/ch1"]) {
+      await user.clear(within(form).getByLabelText("Sub stream URL (optional)"));
+      await user.type(within(form).getByLabelText("Sub stream URL (optional)"), bad);
+      await user.click(within(form).getByRole("button", { name: "Add camera" }));
+      expect(await within(form).findByRole("alert")).toHaveTextContent("rtsp:// or rtsps://");
+      expect(within(form).getByLabelText("Sub stream URL (optional)")).toHaveAccessibleDescription(/second, smaller stream.*rtsp:\/\/ or rtsps:\/\//);
+    }
+    expect(bodies["POST /v0/cameras"]).toBeUndefined();
+    await user.clear(within(form).getByLabelText("Sub stream URL (optional)"));
+    await user.type(within(form).getByLabelText("Sub stream URL (optional)"), "rtsps://10.0.0.7/ch1");
+    await user.click(within(form).getByRole("button", { name: "Add camera" }));
+    await waitFor(() => expect(cams).toHaveLength(2));
+    expect(bodies["POST /v0/cameras"]![0]).toMatchObject({ source: { kind: "rtsp", address: "rtsp://10.0.0.7/ch0" }, streams: { sub: { url: "rtsps://10.0.0.7/ch1" } } });
+
+    // Without a sub stream the create body names none.
+    await user.click(screen.getByRole("button", { name: "Add camera" }));
+    await user.click(screen.getByRole("tab", { name: "RTSP address" }));
+    const again = screen.getByRole("form", { name: "RTSP address" });
+    await user.type(within(again).getByLabelText("Name"), "Attic");
+    await user.type(within(again).getByLabelText("RTSP URL"), "rtsp://10.0.0.8/ch0");
+    await user.click(within(again).getByRole("button", { name: "Add camera" }));
+    await waitFor(() => expect(cams).toHaveLength(3));
+    expect(bodies["POST /v0/cameras"]![1]).not.toHaveProperty("streams");
+
+    // Edit: set a sub stream, then remove it again.
+    const door = screen.getAllByTestId("camera").find((r) => r.dataset.camera === "cam_1")!;
+    await user.click(within(door).getByRole("button", { name: "Edit" }));
+    let edit = within(door).getByRole("form", { name: "Edit Door" });
+    const sub = within(edit).getByLabelText("Sub stream URL (optional)");
+    expect(sub).toHaveValue("");
+    await user.type(sub, "ftp://10.0.0.9/ch1");
+    await user.click(within(edit).getByRole("button", { name: "Save" }));
+    expect(await within(edit).findByRole("alert")).toHaveTextContent("rtsp:// or rtsps://");
+    expect(bodies["PATCH /v0/cameras/cam_1"]).toBeUndefined();
+    await user.clear(sub);
+    await user.type(sub, "rtsp://10.0.0.9/ch1");
+    await user.click(within(edit).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(bodies["PATCH /v0/cameras/cam_1"]![0]).toEqual({ name: "Door", group: "Outside", record_audio: false, sub_stream: "rtsp://10.0.0.9/ch1" }));
+    await waitFor(() => expect(cams[0]!.streams.sub).toEqual({ URL: "rtsp://10.0.0.9/ch1" }));
+
+    await user.click(within(door).getByRole("button", { name: "Edit" }));
+    edit = within(door).getByRole("form", { name: "Edit Door" });
+    expect(within(edit).getByLabelText("Sub stream URL (optional)")).toHaveValue("rtsp://10.0.0.9/ch1");
+    await user.click(within(edit).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(bodies["PATCH /v0/cameras/cam_1"]![1]).toEqual({ name: "Door", group: "Outside", record_audio: false })); // unchanged: not sent
+    await user.click(within(door).getByRole("button", { name: "Edit" }));
+    edit = within(door).getByRole("form", { name: "Edit Door" });
+    await user.clear(within(edit).getByLabelText("Sub stream URL (optional)"));
+    await user.click(within(edit).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(bodies["PATCH /v0/cameras/cam_1"]![2]).toEqual({ name: "Door", group: "Outside", record_audio: false, sub_stream: "" }));
+  }, 20_000);
+
+  it("offers no sub stream edit on a hive that cannot take it, nor for ONVIF cameras", async () => {
+    const { cams } = stub("owner", { version: "0.1.7", capabilities: ["archive.delete", "camera.identity"] }); // v0.1.7 shipped without it
+    cams.push({ id: "cam_2", name: "Garden", group: "", enabled: true, source: { kind: "onvif", address: "http://10.0.0.5/onvif/device_service" }, streams: { main: { URL: "rtsp://10.0.0.5/main" } }, created_at: "", updated_at: "" });
+    const user = mount();
+    await user.click(await screen.findByRole("button", { name: "List" }));
+    const [door, garden] = await screen.findAllByTestId("camera");
+    await user.click(within(door!).getByRole("button", { name: "Edit" }));
+    expect(within(door!).queryByLabelText("Sub stream URL (optional)")).toBeNull();
+    await user.click(within(garden!).getByRole("button", { name: "Edit" }));
+    expect(within(garden!).queryByLabelText("Sub stream URL (optional)")).toBeNull();
   });
 
   it("tells the owner to reserve the address of a camera behind a router", async () => {

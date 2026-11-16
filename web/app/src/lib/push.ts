@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { unwrap } from "@camhive/api";
 import { api } from "./api";
+import { browserEnv } from "./install";
 
 const KEY = ["me", "push"];
 
@@ -33,12 +34,10 @@ export function pushSupport(env: { serviceWorker: boolean; pushManager: boolean;
 /** What this browser can do right now. */
 export function browserSupport(): Support {
   const nav = typeof navigator === "undefined" ? undefined : navigator;
-  const ua = nav?.userAgent ?? "";
   return pushSupport({
     serviceWorker: !!nav && "serviceWorker" in nav,
     pushManager: typeof window !== "undefined" && "PushManager" in window,
-    ios: /iPhone|iPad|iPod/.test(ua),
-    standalone: typeof window !== "undefined" && (window.matchMedia?.("(display-mode: standalone)").matches || (nav as { standalone?: boolean } | undefined)?.standalone === true),
+    ...browserEnv(),
   });
 }
 

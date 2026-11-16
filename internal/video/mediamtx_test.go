@@ -11,8 +11,23 @@ import (
 
 func testCfg() MediaMTXConfig {
 	return MediaMTXConfig{
-		Host: "127.0.0.1", APIPort: 19997, WebRTCPort: 18889,
+		Host: "127.0.0.1", APIPort: 19997, WebRTCPort: 18889, WebRTCUDPPort: 18900,
 		ArchiveDir: "/var/lib/camhive/archive", SegmentDuration: 10 * time.Second,
+	}
+}
+
+// #61: without settings the engine listens where MediaMTX does by default;
+// media follows signalling when only that was moved (tests do).
+func TestPortsDefaultToMediaMTXs(t *testing.T) {
+	c := MediaMTXConfig{}
+	c.applyDefaults()
+	if c.APIPort != 9997 || c.WebRTCPort != 8889 || c.WebRTCUDPPort != 8890 {
+		t.Fatalf("defaults = %d %d %d", c.APIPort, c.WebRTCPort, c.WebRTCUDPPort)
+	}
+	moved := MediaMTXConfig{WebRTCPort: 18889}
+	moved.applyDefaults()
+	if moved.WebRTCUDPPort != 18890 {
+		t.Fatalf("media follows signalling when unset: %d", moved.WebRTCUDPPort)
 	}
 }
 
@@ -31,7 +46,7 @@ func TestBaseYAMLEnablesOnlyWhatTheHiveUses(t *testing.T) {
 		"webrtc: yes", "webrtcAddress: 127.0.0.1:18889",
 		// Media (ICE over UDP) must reach browsers on the LAN; signalling
 		// stays with the Hive, which checks access tokens first.
-		"webrtcLocalUDPAddress: :18890",
+		"webrtcLocalUDPAddress: :18900", // its own setting, not WebRTCPort+1 (#61)
 		"rtmp: no", "hls: no", "srt: no", "moq: no",
 		// The Hive reads the archive itself (ADR-0019 §6).
 		"playback: no",

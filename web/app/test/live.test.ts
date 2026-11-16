@@ -58,6 +58,29 @@ function fakeSignal(): Signalling & { calls: string[] } {
 }
 
 describe("LiveSession", () => {
+  it("reports sound only once the hive's audio track carries media; MediaMTX answers an audio section even for cameras without a microphone (#95)", async () => {
+    let pc: FakePC | undefined;
+    let sound = 0;
+    await LiveSession.start({ signal: fakeSignal(), camera: "cam_1", peer: (c) => (pc = new FakePC(c)), onAudio: () => sound++ });
+    const track = (kind: string, muted: boolean) => {
+      const t = Object.assign(new EventTarget(), { kind, muted });
+      const ev = new Event("track") as Event & { track: unknown; streams: unknown[] };
+      ev.track = t;
+      ev.streams = [{}];
+      pc!.dispatchEvent(ev);
+      return t;
+    };
+    const video = track("video", true);
+    video.dispatchEvent(new Event("unmute"));
+    const audio = track("audio", true);
+    expect(sound).toBe(0); // an audio section with no packets yet: nothing to unmute
+    audio.dispatchEvent(new Event("unmute"));
+    audio.dispatchEvent(new Event("unmute"));
+    expect(sound).toBe(1);
+    track("audio", false); // already flowing when the track event comes
+    expect(sound).toBe(2);
+  });
+
   it("offers recvonly video+audio, applies the answer, trickles late candidates, reports state and closes", async () => {
     const pcs: FakePC[] = [];
     const signal = fakeSignal();
@@ -80,7 +103,8 @@ describe("LiveSession", () => {
     await Promise.resolve();
     expect(signal.calls[1]).toBe('cand https://hive/whep/abc "a=mid:0\\r\\na=candidate:1 1 udp 2 192.168.1.5 5000 typ host\\r\\n"');
 
-    const trackEv = new Event("track") as Event & { streams: unknown[] };
+    const trackEv = new Event("track") as Event & { track: unknown; streams: unknown[] };
+    trackEv.track = { kind: "video", muted: false };
     trackEv.streams = [{ id: "ms" }];
     pc.dispatchEvent(trackEv);
     expect(tracks).toHaveLength(1);

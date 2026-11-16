@@ -24,6 +24,7 @@ var all = []Capability{
 		"POST /v0/archive/encryption/lock", "POST /v0/archive/encryption/passphrase", "GET /v0/archive/encryption/key-file",
 	}},
 	{Name: "camera.identity", Endpoints: []string{"GET /v0/cameras/{id}", "PATCH /v0/cameras/{id}"}},                        // ADR-0017
+	{Name: "camera.sub_stream", Endpoints: []string{"PATCH /v0/cameras/{id}"}},                                              // #63
 	{Name: "local_login", Endpoints: []string{"PUT /v0/local-login", "POST /v0/local-login/sessions"}},                      // #57
 	{Name: "motion", Endpoints: []string{"GET /v0/cameras/{id}/events"}},                                                    // ADR-0020
 	{Name: "updates", Endpoints: []string{"GET /v0/hive/updates", "PUT /v0/hive/updates", "POST /v0/hive/updates/install"}}, // #82

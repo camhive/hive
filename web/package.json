@@ -6,7 +6,7 @@
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "generate": "pnpm -r generate",
-    "check:generated": "pnpm -r generate && git diff --exit-code -- web/packages/api/src/schema.d.ts"
+    "check:generated": "pnpm -r generate && git diff --exit-code -- packages/api/src/schema.d.ts packages/api/src/hive-schema.d.ts"
   },
   "license": "SEE LICENSE IN ../LICENSE"
 }

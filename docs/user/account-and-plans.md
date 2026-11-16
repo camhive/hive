@@ -112,6 +112,19 @@ Push needs a device first (below); until then you get e-mail only.
 sign-ins, claims, grants, exports, plan changes, with who did it and when.
 *Export* downloads all data we hold about you as JSON.
 
+### A hive's own activity
+
+The hive keeps its own log, on its disk, of what happened to it: cameras
+added, changed, moved or removed, exports, deleted recordings, updates
+(available, installed, rolled back), archive encryption (switched on,
+unlocked, locked, passphrase changed, wrong passphrases), the key file
+download, the local emergency sign-in, live views and what the cloud sent
+it (licence, certificate, sharing). Open the hive → *Activity* to read it, newest
+first, with who did it (you, the Camhive cloud, the updater or the hive
+itself; other people's accounts show as their account id), when, and on which camera. *Load more* reaches further back, up to
+the last 1000 entries. Only the hive's owner sees this tab; it needs the
+hive to be reachable, at home or through the relay.
+
 ## Removing a hive
 
 Hive → *Settings* → *Remove hive*. The hive is revoked in the cloud, stops

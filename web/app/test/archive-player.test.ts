@@ -115,4 +115,23 @@ describe("ArchivePlayer", () => {
     const p = new ArchivePlayer(fakeVideo(), async () => new Response("", { status: 502 }), { mediaSource: null });
     await expect(p.play("cam_1", "main", new Date(), 60)).rejects.toThrow("playback 502");
   });
+
+  it("passes the hive's error code on, so a locked archive is told apart from a failure (ADR-0019)", async () => {
+    const locked = new Response(JSON.stringify({ code: "archive_locked", message: "archive is locked" }), { status: 423, headers: { "Content-Type": "application/json" } });
+    const p = new ArchivePlayer(fakeVideo(), async () => locked, { mediaSource: null });
+    await expect(p.play("cam_1", "main", new Date(), 60)).rejects.toMatchObject({ name: "CamhiveError", status: 423, code: "archive_locked" });
+  });
+
+  it("treats an answer the hive broke off (a tampered sealed segment) as an error, not as the end of the footage", async () => {
+    let pulls = 0;
+    const broken = () => new ReadableStream<Uint8Array>({ pull(c) { if (pulls++ === 0) c.enqueue(new Uint8Array([1])); else c.error(new TypeError("network error")); } });
+    const onError = vi.fn();
+    const p = new ArchivePlayer(fakeVideo(), async () => new Response(broken(), { status: 200 }), mse({ onError }));
+    const done = p.play("cam_1", "main", new Date(), 60);
+    await Promise.resolve(); await Promise.resolve();
+    FakeMS.last!.open();
+    await done;
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledTimes(1));
+    expect(FakeMS.last!.ended).toBe(false);
+  });
 });
