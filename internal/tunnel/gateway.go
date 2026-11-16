@@ -166,14 +166,14 @@ func (g *Gateway) handleHive(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	g.register(id, hc)
-	defer g.unregister(id, hc)
 	g.log.Info("hive online", "hive", id, "version", hello.Version)
 	if g.cfg.Hooks.OnOnline != nil {
 		g.cfg.Hooks.OnOnline(id)
 	}
 
 	go hc.pingLoop(ctx, g.cfg.PingInterval)
-	hc.readLoop(ctx) // returns when the connection drops
+	hc.readLoop(ctx)     // returns when the connection drops
+	g.unregister(id, hc) // before OnOffline: Online then means a newer connection
 	g.log.Info("hive offline", "hive", id)
 	if g.cfg.Hooks.OnOffline != nil {
 		g.cfg.Hooks.OnOffline(id)

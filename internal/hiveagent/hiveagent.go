@@ -63,7 +63,9 @@ type Agent struct {
 	binHash string
 
 	mu     sync.Mutex
-	queue  []protocol.Event // events waiting for a connection
+	queue  []queued      // events waiting for a connection
+	prompt []promptEvent // the prompt lane: short-lived events sent before the queue
+	seq    uint64        // numbers every queued event, so a send pops exactly what it sent
 	notify chan struct{}
 	relay  *Relay   // tunnel.open target; nil until SetRelay
 	tls    *TLSInfo // LAN TLS listener; nil until SetTLS

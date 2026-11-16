@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/camhive/hive/internal/store"
@@ -36,12 +37,13 @@ type Segment struct {
 // MediaMTX writes <YYYY-MM-DD_HH-MM-SS-ffffff_±HHMM>.mp4 from our recordPath
 // template, in the hive's local time with the UTC offset appended. Names
 // without an offset (older recordings) are read as UTC. Go layouts cannot
-// express "-ffffff", so the name is parsed by hand.
+// express "-ffffff", so the name is parsed by hand. A sealed segment
+// (ADR-0019) has SealedExt appended.
 const fileNameLayout = "2006-01-02_15-04-05"
 
-var fileNameRE = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}-\d{6}(_(Z|[+-]\d{4}))?\.mp4$`)
+var fileNameRE = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}-\d{6}(_(Z|[+-]\d{4}))?\.mp4(\.age)?$`)
 
-// ParsePath interprets ARCHIVE/<camera>/<stream>/<timestamp>.mp4. Paths
+// ParsePath interprets ARCHIVE/<camera>/<stream>/<timestamp>.mp4[.age]. Paths
 // outside root or with another shape are rejected.
 func ParsePath(root, path string) (Segment, bool) {
 	rel, err := filepath.Rel(root, path)
@@ -52,7 +54,7 @@ func ParsePath(root, path string) (Segment, bool) {
 	if len(parts) != 3 || !fileNameRE.MatchString(parts[2]) {
 		return Segment{}, false
 	}
-	start, ok := parseFileTime(strings.TrimSuffix(parts[2], ".mp4"))
+	start, ok := parseFileTime(strings.TrimSuffix(strings.TrimSuffix(parts[2], SealedExt), ".mp4"))
 	if !ok {
 		return Segment{}, false
 	}
@@ -120,15 +122,19 @@ func formatFileTime(t time.Time) string {
 // 2: and the activity profile (ADR-0015).
 const AnalysisVersion = 2
 
-// Index is the archive index over the store.
+// Index is the archive index over the store. Reconcile and Seal take turns
+// (mu): both rewrite rows from the files, and a row Seal points at a sealed
+// file must not be overwritten by a reconcile that listed the plain one.
 type Index struct {
 	repo *store.Segments
 	log  *slog.Logger
+	open SegmentOpener
+	mu   sync.Mutex
 }
 
 // NewIndex creates an Index backed by s.
 func NewIndex(s *store.Store, opts ...Option) *Index {
-	idx := &Index{repo: s.Segments(), log: slog.New(slog.DiscardHandler)}
+	idx := &Index{repo: s.Segments(), log: slog.New(slog.DiscardHandler), open: OpenPlain}
 	for _, o := range opts {
 		o(idx)
 	}
@@ -140,6 +146,10 @@ type Option func(*Index)
 
 // WithLogger sets the logger.
 func WithLogger(l *slog.Logger) Option { return func(i *Index) { i.log = l } }
+
+// WithOpener sets how segment files are read to fill rows; the default
+// reads plain files only. The hive passes the archive key's (ADR-0019).
+func WithOpener(open SegmentOpener) Option { return func(i *Index) { i.open = open } }
 
 func toRow(s Segment) store.SegmentRow {
 	row := store.SegmentRow{Camera: s.Camera, Stream: s.Stream, Start: s.Start, Duration: s.Duration, Bytes: s.Bytes, Path: s.Path, Complete: s.Complete, Analysis: s.Analysis}
@@ -248,6 +258,8 @@ type Report struct {
 // indexed (duration parsed from the fMP4), rows without files are removed,
 // the newest file of each stream is marked incomplete. It is idempotent.
 func (i *Index) Reconcile(ctx context.Context, root string) (Report, error) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
 	found, err := scan(root)
 	if err != nil {
 		return Report{}, err
@@ -288,7 +300,9 @@ func (i *Index) indexFound(ctx context.Context, found []Segment, byKey map[strin
 		if had && settled(old, seg) {
 			continue
 		}
-		if err := i.fill(&seg); err != nil {
+		if err := i.fill(&seg); errors.Is(err, ErrLocked) {
+			i.log.Debug("segment sealed and the archive locked: read once unlocked", "path", seg.Path)
+		} else if err != nil {
 			i.log.Warn("segment unreadable", "path", seg.Path, "err", err)
 		}
 		if err := i.repo.Upsert(ctx, toRow(seg)); err != nil {
@@ -313,15 +327,20 @@ func key(camera, stream string, start time.Time) string {
 	return camera + "/" + stream + "/" + formatFileTime(start)
 }
 
-// fill reads size and duration from the file.
+// fill reads size (as stored, sealed or not) and duration from the file.
 func (i *Index) fill(seg *Segment) error {
 	st, err := os.Stat(seg.Path)
 	if err != nil {
 		return err
 	}
 	seg.Bytes = st.Size()
-	data, err := os.ReadFile(seg.Path) //nolint:gosec // path produced by scan under our archive root
+	f, err := i.open(*seg)
 	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	data := make([]byte, f.Size())
+	if err := readAt(f, data, 0); err != nil {
 		return err
 	}
 	d, err := FMP4Duration(data)
@@ -335,8 +354,20 @@ func (i *Index) fill(seg *Segment) error {
 	return nil
 }
 
-// scan lists segment files under root, newest per stream marked incomplete.
+// scan lists the segments under root, a sealed file winning over its plain
+// leftover, the newest plain one per stream marked incomplete.
 func scan(root string) ([]Segment, error) {
+	out, err := listFiles(root)
+	if err != nil {
+		return nil, err
+	}
+	out = preferSealed(out)
+	markIncomplete(out)
+	return out, nil
+}
+
+// listFiles lists every segment file under root with its size.
+func listFiles(root string) ([]Segment, error) {
 	var out []Segment
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		switch {
@@ -359,11 +390,11 @@ func scan(root string) ([]Segment, error) {
 	if err != nil {
 		return nil, fmt.Errorf("archive: scan %s: %w", root, err)
 	}
-	markIncomplete(out)
 	return out, nil
 }
 
-// markIncomplete flags the newest segment of every stream as still open.
+// markIncomplete flags the newest segment of every stream as still open,
+// unless it is sealed: only a closed segment is sealed.
 func markIncomplete(segs []Segment) {
 	newest := map[string]int{}
 	for k, seg := range segs {
@@ -373,6 +404,6 @@ func markIncomplete(segs []Segment) {
 		}
 	}
 	for k := range segs {
-		segs[k].Complete = newest[segs[k].Camera+"/"+segs[k].Stream] != k
+		segs[k].Complete = segs[k].Sealed() || newest[segs[k].Camera+"/"+segs[k].Stream] != k
 	}
 }

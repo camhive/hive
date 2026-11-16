@@ -168,6 +168,8 @@ func TestRecoverFailsInterruptedJobsAndRemovesPartialFiles(t *testing.T) {
 	_ = os.WriteFile(part, []byte("half"), 0o600)
 	part2 := filepath.Join(dir, ".exp_cut2-456.part")
 	_ = os.WriteFile(part2, []byte("half"), 0o600)
+	seal := filepath.Join(dir, ".exp_done.mp4.age.tmp") // a seal of a finished export, cut off
+	_ = os.WriteFile(seal, []byte("half"), 0o600)
 	keep := filepath.Join(dir, "exp_other.mp4")
 	_ = os.WriteFile(keep, []byte("done"), 0o600)
 	m := export.NewManager(dir, fetchOK, repo)
@@ -179,7 +181,7 @@ func TestRecoverFailsInterruptedJobsAndRemovesPartialFiles(t *testing.T) {
 				t.Fatalf("%s: interrupted job = %+v, %v", when, j, err)
 			}
 		}
-		for _, p := range []string{part, part2} {
+		for _, p := range []string{part, part2, seal} {
 			if _, err := os.Stat(p); !errors.Is(err, os.ErrNotExist) {
 				t.Fatalf("%s: partial file %s still there: %v", when, p, err)
 			}

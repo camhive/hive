@@ -55,6 +55,15 @@ type Deps struct {
 	// Local issues and verifies the owner's local sessions (#57); nil
 	// refuses local tokens and local sign-in.
 	Local *auth.LocalSessions
+	// Updates lets the owner manage hive-updater (#82); nil answers 503
+	// not_ready.
+	Updates *UpdateControl
+	// Vault is the archive key (ADR-0019); nil: encryption is not
+	// available and its state is off.
+	Vault ArchiveVault
+	// Emit sends an event to the cloud (hiveagent.Agent.Emit): the audit
+	// of archive key changes. Nil sends nothing.
+	Emit func(name string, data any)
 }
 
 // licensed is the effective local entitlement set.
@@ -80,6 +89,10 @@ func NewAPI(d Deps) http.Handler {
 	api := &api{d: d, logins: newLoginLimiter(time.Now)}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", api.health)
+	mux.Handle("GET /v0/hive", api.auth(api.getHive))
+	mux.Handle("GET /v0/hive/updates", api.auth(api.getUpdates))
+	mux.Handle("PUT /v0/hive/updates", api.auth(api.setUpdates))
+	mux.Handle("POST /v0/hive/updates/install", api.auth(api.installUpdate))
 	mux.Handle("GET /v0/cameras", api.auth(api.listCameras))
 	mux.Handle("POST /v0/cameras", api.auth(api.createCamera))
 	mux.Handle("GET /v0/cameras/{id}", api.auth(api.getCamera))
@@ -92,6 +105,12 @@ func NewAPI(d Deps) http.Handler {
 	mux.Handle("POST /v0/cameras/{id}/exports", api.auth(api.createExport))
 	mux.Handle("GET /v0/exports", api.auth(api.listExports))
 	mux.Handle("POST /v0/archive/deletions", api.auth(api.deleteRecordings))
+	mux.Handle("GET /v0/archive/encryption", api.auth(api.encryptionStatus))
+	mux.Handle("POST /v0/archive/encryption", api.auth(api.enableEncryption))
+	mux.Handle("POST /v0/archive/encryption/unlock", api.auth(api.unlockArchive))
+	mux.Handle("POST /v0/archive/encryption/lock", api.auth(api.lockArchive))
+	mux.Handle("POST /v0/archive/encryption/passphrase", api.auth(api.changePassphrase))
+	mux.Handle("GET /v0/archive/encryption/key-file", api.auth(api.keyFile))
 	mux.Handle("GET /v0/exports/{id}", api.auth(api.getExport))
 	mux.Handle("GET /v0/exports/{id}/file", api.auth(api.exportFile))
 	mux.Handle("GET /v0/cameras/{id}/health", api.auth(api.cameraHealth))

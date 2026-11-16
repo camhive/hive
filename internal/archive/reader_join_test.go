@@ -33,19 +33,36 @@ var t0 = time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC)
 // is given.
 func segmentBytes(t *testing.T, info *mtxi, seconds int) []byte {
 	t.Helper()
+	return buildSegment(t, segmentSpec{info: info, seconds: seconds, gop: 1})
+}
+
+// segmentSpec describes a synthetic segment: seconds 1 s fragments of two
+// half-second samples, a sync sample opening every gop-th fragment, each
+// sample padded to payload bytes; with sound, a second track whose samples
+// are never marked sync.
+type segmentSpec struct {
+	info    *mtxi
+	seconds int
+	gop     int
+	payload int
+	sound   bool
+}
+
+func buildSegment(t testing.TB, spec segmentSpec) []byte {
+	t.Helper()
 	init := fmp4.Init{Tracks: []*fmp4.InitTrack{{ID: 1, TimeScale: 90000, Codec: &codecs.H264{SPS: joinSPS, PPS: []byte{0x08}}}}}
-	if info != nil {
-		init.UserData = []amp4.IBox{info}
+	if spec.sound {
+		init.Tracks = append(init.Tracks, &fmp4.InitTrack{ID: 2, TimeScale: 8000, Codec: &codecs.LPCM{BitDepth: 16, SampleRate: 8000, ChannelCount: 1}})
+	}
+	if spec.info != nil {
+		init.UserData = []amp4.IBox{spec.info}
 	}
 	var buf seekablebuffer.Buffer
 	if err := init.Marshal(&buf); err != nil {
 		t.Fatal(err)
 	}
-	for s := range seconds {
-		p := fmp4.Part{SequenceNumber: uint32(s), Tracks: []*fmp4.PartTrack{{ID: 1, BaseTime: uint64(s) * 90000, Samples: []*fmp4.Sample{
-			{Duration: 45000, Payload: []byte{0, 0, 0, 1, 0x65, byte(s)}},
-			{Duration: 45000, IsNonSyncSample: true, Payload: []byte{0, 0, 0, 1, 0x41, byte(s)}},
-		}}}}
+	for s := range spec.seconds {
+		p := fmp4.Part{SequenceNumber: uint32(s), Tracks: spec.tracksAt(s)}
 		if err := p.Marshal(&buf); err != nil {
 			t.Fatal(err)
 		}
@@ -53,7 +70,31 @@ func segmentBytes(t *testing.T, info *mtxi, seconds int) []byte {
 	return buf.Bytes()
 }
 
-func putSegment(t *testing.T, root string, start time.Time, data []byte) {
+// tracksAt is the fragment of second s: the video run and, with sound, two
+// sound samples marked non-sync.
+func (spec segmentSpec) tracksAt(s int) []*fmp4.PartTrack {
+	sample := func(nal byte) []byte {
+		p := make([]byte, max(spec.payload, 6))
+		copy(p, []byte{0, 0, 0, 1, nal, byte(s)})
+		return p
+	}
+	first := &fmp4.Sample{Duration: 45000, Payload: sample(0x65)}
+	if s%spec.gop != 0 {
+		first = &fmp4.Sample{Duration: 45000, IsNonSyncSample: true, Payload: sample(0x41)}
+	}
+	tracks := []*fmp4.PartTrack{{ID: 1, BaseTime: uint64(s) * 90000, Samples: []*fmp4.Sample{
+		first, {Duration: 45000, IsNonSyncSample: true, Payload: sample(0x41)},
+	}}}
+	if spec.sound {
+		tracks = append(tracks, &fmp4.PartTrack{ID: 2, BaseTime: uint64(s) * 8000, Samples: []*fmp4.Sample{
+			{Duration: 4000, IsNonSyncSample: true, Payload: make([]byte, 32)},
+			{Duration: 4000, IsNonSyncSample: true, Payload: make([]byte, 32)},
+		}})
+	}
+	return tracks
+}
+
+func putSegment(t testing.TB, root string, start time.Time, data []byte) {
 	t.Helper()
 	dir := filepath.Join(root, "cam_1", "main")
 	if err := os.MkdirAll(dir, 0o750); err != nil {
@@ -67,7 +108,12 @@ func putSegment(t *testing.T, root string, start time.Time, data []byte) {
 // spanLength reads a span and returns how much video it holds.
 func spanLength(t *testing.T, root string, start time.Time, length time.Duration) time.Duration {
 	t.Helper()
-	body, err := NewReader(root, OpenPlain).Span(context.Background(), "cam_1", "main", start, length)
+	return spanLengthWith(t, root, OpenPlain, start, length)
+}
+
+func spanLengthWith(t *testing.T, root string, open SegmentOpener, start time.Time, length time.Duration) time.Duration {
+	t.Helper()
+	body, err := NewReader(root, open).Span(context.Background(), "cam_1", "main", start, length)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,6 +190,19 @@ func TestSpanReadsASegmentStillBeingWritten(t *testing.T) {
 	}
 }
 
+// A segment cut inside a box header (the engine had written fewer than 8
+// bytes of the next box) holds what is complete, read from its start or
+// from a seek into it.
+func TestSpanReadsASegmentCutInsideABoxHeader(t *testing.T) {
+	root := t.TempDir()
+	putSegment(t, root, t0, append(segmentBytes(t, nil, 3), 0, 0, 0))
+	for _, from := range []time.Duration{0, 1500 * time.Millisecond} {
+		if got := spanLength(t, root, t0.Add(from), time.Minute); got != 3*time.Second-from {
+			t.Errorf("from %v: span holds %v, want %v", from, got, 3*time.Second-from)
+		}
+	}
+}
+
 func TestSpanEndsWithTheCallersContext(t *testing.T) {
 	root := t.TempDir()
 	putSegment(t, root, t0, segmentBytes(t, nil, 30))
@@ -210,9 +269,11 @@ func TestSpanOfAnUnreadableSegmentIsAnError(t *testing.T) {
 	}
 }
 
-// countingOpener opens plain files and counts how many are still open.
+// countingOpener opens plain files and counts how many are still open
+// and how many bytes were read from them.
 type countingOpener struct {
 	opened, open atomic.Int32
+	read         atomic.Int64
 }
 
 func (c *countingOpener) Open(seg Segment) (SegmentFile, error) {
@@ -229,6 +290,12 @@ type countedFile struct {
 	SegmentFile
 	c    *countingOpener
 	once sync.Once
+}
+
+func (f *countedFile) ReadAt(p []byte, off int64) (int, error) {
+	n, err := f.SegmentFile.ReadAt(p, off)
+	f.c.read.Add(int64(n))
+	return n, err
 }
 
 func (f *countedFile) Close() error {

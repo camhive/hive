@@ -22,8 +22,11 @@ type SegmentFile interface {
 type SegmentOpener func(seg Segment) (SegmentFile, error)
 
 // OpenPlain opens an unencrypted segment file.
-func OpenPlain(seg Segment) (SegmentFile, error) {
-	f, err := os.Open(seg.Path) // the path comes from listing our own archive root
+func OpenPlain(seg Segment) (SegmentFile, error) { return OpenFile(seg.Path) }
+
+// OpenFile opens an unencrypted segment or export file.
+func OpenFile(path string) (SegmentFile, error) {
+	f, err := os.Open(path) //nolint:gosec // the path comes from listing our own archive or export directory
 	if err != nil {
 		return nil, err
 	}
@@ -44,3 +47,14 @@ type plainFile struct {
 
 // Size implements SegmentFile.
 func (f plainFile) Size() int64 { return f.size }
+
+// readAt fills p from off. A ReaderAt may answer a read that reaches the
+// end of the file with io.EOF beside the full count (age's does, a plain
+// file does not): only a short read is an error, and io.ReaderAt always
+// gives one with it.
+func readAt(f SegmentFile, p []byte, off int64) error {
+	if n, err := f.ReadAt(p, off); n < len(p) {
+		return err
+	}
+	return nil
+}

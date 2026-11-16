@@ -65,6 +65,7 @@ func (r *Reader) segments(camera, stream string) ([]Segment, error) {
 			out = append(out, seg)
 		}
 	}
+	out = preferSealed(out)
 	sort.Slice(out, func(i, j int) bool { return out[i].Start.Before(out[j].Start) })
 	return out, nil
 }

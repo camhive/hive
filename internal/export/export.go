@@ -14,8 +14,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
+	"filippo.io/age"
+
+	"github.com/camhive/hive/internal/archive"
 	"github.com/camhive/hive/internal/store"
 )
 
@@ -77,6 +81,22 @@ type Job struct {
 // Fetch returns the fMP4 bytes for a request (the engine's playback stream).
 type Fetch func(ctx context.Context, req Request) (io.ReadCloser, error)
 
+// Vault seals exports to the archive key and opens them again (ADR-0019
+// §2): the hive's archivekey.Vault.
+type Vault interface {
+	Recipient() age.Recipient // nil: exports are kept in clear
+	Open(path string) (archive.SegmentFile, error)
+}
+
+// plainVault keeps exports in clear: encryption is off.
+type plainVault struct{}
+
+// Recipient implements Vault: nothing seals.
+func (plainVault) Recipient() age.Recipient { return nil }
+
+// Open implements Vault: files are read as they are.
+func (plainVault) Open(path string) (archive.SegmentFile, error) { return archive.OpenFile(path) }
+
 // Manager runs export jobs. Each job's worker is the only writer of its row
 // once Start has stored it.
 type Manager struct {
@@ -85,6 +105,11 @@ type Manager struct {
 	jobs   *store.Exports
 	onDone func(Job)
 	keep   Keep
+	vault  Vault
+	// files serialises what changes a finished job's file and row: sealing
+	// and removal (prune, the owner's deletion). Without it a seal could
+	// write back a row that a removal had just deleted.
+	files sync.Mutex
 }
 
 // Option customises a Manager.
@@ -94,9 +119,12 @@ type Option func(*Manager)
 // e.g. to write the action log.
 func WithOnDone(f func(Job)) Option { return func(m *Manager) { m.onDone = f } }
 
+// WithVault seals exports while encryption is on and opens sealed ones.
+func WithVault(v Vault) Option { return func(m *Manager) { m.vault = v } }
+
 // NewManager creates a Manager writing files into dir and jobs into the store.
 func NewManager(dir string, fetch Fetch, jobs *store.Exports, opts ...Option) *Manager {
-	m := &Manager{dir: dir, fetch: fetch, jobs: jobs, onDone: func(Job) {}}
+	m := &Manager{dir: dir, fetch: fetch, jobs: jobs, onDone: func(Job) {}, vault: plainVault{}}
 	for _, o := range opts {
 		o(m)
 	}
@@ -131,9 +159,11 @@ func (m *Manager) failInterrupted(ctx context.Context) error {
 	return nil
 }
 
+// removePartials removes what a cut-off export or seal left: temp files.
 func (m *Manager) removePartials() error {
-	parts, _ := filepath.Glob(filepath.Join(m.dir, ".*.part")) // the pattern is fixed and valid
-	for _, p := range parts {
+	parts, _ := filepath.Glob(filepath.Join(m.dir, ".*.part"))    // the pattern is fixed and valid
+	seals, _ := filepath.Glob(filepath.Join(m.dir, ".*.age.tmp")) // as above
+	for _, p := range append(parts, seals...) {
 		if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
@@ -165,7 +195,7 @@ func (m *Manager) run(ctx context.Context, job Job) {
 	} else {
 		job.Status = StatusDone
 		if st, err := os.Stat(m.path(job.ID)); err == nil {
-			job.Bytes = st.Size()
+			job.Bytes = st.Size() // as stored: sealed when encryption is on
 		}
 	}
 	if err := m.jobs.Put(ctx, toRow(job)); err != nil {
@@ -176,7 +206,9 @@ func (m *Manager) run(ctx context.Context, job Job) {
 
 // write streams the fetch into a temp file and renames it into place, so a
 // failed or interrupted export never leaves a half file under the final name.
+// With encryption on it is sealed as it is written: never in clear on disk.
 func (m *Manager) write(ctx context.Context, job Job) error {
+	to := m.vault.Recipient()
 	src, err := m.fetch(ctx, job.Request)
 	if err != nil {
 		return err
@@ -187,7 +219,7 @@ func (m *Manager) write(ctx context.Context, job Job) error {
 		return err
 	}
 	tmpName := tmp.Name()
-	if _, err := io.Copy(tmp, src); err != nil {
+	if err := copyTo(tmp, src, to); err != nil {
 		_ = tmp.Close()
 		_ = os.Remove(tmpName)
 		return err
@@ -196,10 +228,36 @@ func (m *Manager) write(ctx context.Context, job Job) error {
 		_ = os.Remove(tmpName)
 		return err
 	}
-	return os.Rename(tmpName, m.path(job.ID))
+	out := m.plainPath(job.ID)
+	if to != nil {
+		out += archive.SealedExt
+	}
+	return os.Rename(tmpName, out)
 }
 
-func (m *Manager) path(id string) string { return filepath.Join(m.dir, id+".mp4") }
+// copyTo copies src to w, sealed to the archive key when to is set.
+func copyTo(w io.Writer, src io.Reader, to age.Recipient) error {
+	if to != nil {
+		return archive.SealTo(w, src, to)
+	}
+	_, err := io.Copy(w, src)
+	return err
+}
+
+func (m *Manager) plainPath(id string) string { return filepath.Join(m.dir, id+".mp4") }
+
+// path is where a job's file is: sealed or, without a seal, in clear.
+func (m *Manager) path(id string) string {
+	if sealed := m.plainPath(id) + archive.SealedExt; fileExists(sealed) {
+		return sealed
+	}
+	return m.plainPath(id)
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
 
 // Get returns a job or ErrNotFound.
 func (m *Manager) Get(ctx context.Context, id string) (Job, error) {
@@ -226,7 +284,8 @@ func (m *Manager) List(ctx context.Context, owner string) ([]Job, error) {
 	return out, nil
 }
 
-// FilePath returns the finished file's path, or ErrNotReady.
+// FilePath returns the finished file's path as stored (sealed while
+// encryption is on), or ErrNotReady.
 func (m *Manager) FilePath(ctx context.Context, id string) (string, error) {
 	j, err := m.Get(ctx, id)
 	if err != nil {
@@ -236,6 +295,63 @@ func (m *Manager) FilePath(ctx context.Context, id string) (string, error) {
 		return "", ErrNotReady
 	}
 	return m.path(id), nil
+}
+
+// Open opens a finished export for download: a sealed one through the
+// archive key (archive.ErrLocked while it is locked), so the owner gets
+// plain MP4.
+func (m *Manager) Open(ctx context.Context, id string) (archive.SegmentFile, error) {
+	path, err := m.FilePath(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return m.vault.Open(path)
+}
+
+// Seal seals the finished exports kept in clear (made before encryption was
+// switched on) and stores their sealed size; it returns how many it sealed.
+func (m *Manager) Seal(ctx context.Context, to age.Recipient) (int, error) {
+	rows, err := m.jobs.All(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, r := range rows {
+		sealed, err := m.sealOne(ctx, r.ID, to)
+		if err != nil {
+			return n, err
+		}
+		if sealed {
+			n++
+		}
+	}
+	return n, nil
+}
+
+// sealOne seals one finished export kept in clear, re-reading its row under
+// the files lock: a job removed since the listing stays removed.
+func (m *Manager) sealOne(ctx context.Context, id string, to age.Recipient) (bool, error) {
+	m.files.Lock()
+	defer m.files.Unlock()
+	row, err := m.jobs.Get(ctx, id)
+	if errors.Is(err, store.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	job := fromRow(row)
+	if job.Status != StatusDone || !fileExists(m.plainPath(job.ID)) {
+		return false, nil
+	}
+	out, err := archive.SealFile(m.plainPath(job.ID), to)
+	if err != nil {
+		return false, err
+	}
+	if st, err := os.Stat(out); err == nil {
+		job.Bytes = st.Size()
+	}
+	return true, m.jobs.Put(ctx, toRow(job))
 }
 
 func toRow(j Job) store.ExportJob {

@@ -127,15 +127,12 @@ func supervisorWith(t *testing.T, hives *fakeHives, src update.Channel, with fun
 	}
 	var events []string
 	var mu sync.Mutex
-	w := update.AllDay
 	cfg := update.SupervisorConfig{
 		Versions: vs, Runner: hives, Health: hives.Health,
-		Hive: "hv_1", Updater: v(t, "0.1.4"), Window: w, Mode: update.Automatic,
+		Policy: func() update.Policy { return update.Policy{Mode: update.Automatic, Window: update.AllDay, Source: src} },
+		Hive:   "hv_1", Updater: v(t, "0.1.4"),
 		CheckEvery: time.Hour, HealthTimeout: 300 * time.Millisecond, Poll: 10 * time.Millisecond, Restart: 10 * time.Millisecond,
 		Report: func(kind string, data map[string]any) { mu.Lock(); events = append(events, kind); mu.Unlock() },
-	}
-	if src != nil {
-		cfg.Source = src
 	}
 	if with != nil {
 		with(&cfg)
@@ -232,7 +229,9 @@ func count(h *fakeHives, ver string) int {
 func TestManualModeInstallsOnlyWhenAsked(t *testing.T) {
 	hives := &fakeHives{}
 	src := &fakeSource{target: update.Target{Version: v(t, "0.1.5"), Rollout: 100}}
-	s, vs, events := supervisorWith(t, hives, src, func(c *update.SupervisorConfig) { c.Mode = update.Manual })
+	s, vs, events := supervisorWith(t, hives, src, func(c *update.SupervisorConfig) {
+		c.Policy = func() update.Policy { return update.Policy{Mode: update.Manual, Window: update.AllDay, Source: src} }
+	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go s.Run(ctx)
@@ -256,4 +255,61 @@ func TestWithoutAChannelTheHiveJustRuns(t *testing.T) {
 	eventually(t, func() bool { return hives.runningVersion() == "0.1.4" })
 	s.CheckNow(ctx)
 	s.AskNow(ctx)
+}
+
+// #82: the owner changes mode, window and channel in the app; the updater
+// asks for its policy at every check, so the next check follows them
+// without a restart.
+func TestChangedSettingsApplyAtTheNextCheck(t *testing.T) {
+	hives := &fakeHives{}
+	stable := &fakeSource{target: update.Target{Version: v(t, "0.1.5"), Rollout: 100}}
+	beta := &fakeSource{target: update.Target{Version: v(t, "0.1.6-beta.1"), Rollout: 100}}
+	var mu sync.Mutex
+	policy := update.Policy{Mode: update.Manual, Window: update.AllDay, Source: stable}
+	set := func(change func(*update.Policy)) { mu.Lock(); change(&policy); mu.Unlock() }
+	s, vs, events := supervisorWith(t, hives, nil, func(c *update.SupervisorConfig) {
+		c.Policy = func() update.Policy { mu.Lock(); defer mu.Unlock(); return policy }
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go s.Run(ctx)
+	eventually(t, func() bool { e := events(); return len(e) > 0 && e[0] == "update.available" })
+
+	night, _ := update.ParseWindow("02:00-02:01")
+	set(func(p *update.Policy) { p.Mode, p.Window = update.Automatic, night })
+	s.CheckNow(ctx)
+	if cur, _ := vs.Current(); cur.String() != "0.1.4" && !night.Contains(time.Now()) {
+		t.Fatalf("installed outside the new window: %v", cur)
+	}
+
+	set(func(p *update.Policy) { p.Window, p.Source = update.AllDay, beta })
+	s.CheckNow(ctx)
+	eventually(t, func() bool { return hives.runningVersion() == "0.1.6-beta.1" })
+	if cur, _ := vs.Current(); cur.String() != "0.1.6-beta.1" {
+		t.Fatalf("current = %v", cur)
+	}
+}
+
+// In automatic mode a version waiting for the window is reported once, so
+// the owner sees it waiting instead of "no update".
+func TestAWaitingUpdateIsReportedOnce(t *testing.T) {
+	hives := &fakeHives{}
+	src := &fakeSource{target: update.Target{Version: v(t, "0.1.5"), Rollout: 100}}
+	now := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
+	night, _ := update.ParseWindow("02:00-05:00")
+	s, vs, events := supervisorWith(t, hives, src, func(c *update.SupervisorConfig) {
+		c.Policy = func() update.Policy { return update.Policy{Mode: update.Automatic, Window: night, Source: src} }
+		c.Now = func() time.Time { return now }
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go s.Run(ctx)
+	eventually(t, func() bool { return len(events()) > 0 })
+	s.CheckNow(ctx)
+	if e := events(); len(e) != 1 || e[0] != "update.available" {
+		t.Fatalf("events = %v", e)
+	}
+	if cur, _ := vs.Current(); cur.String() != "0.1.4" {
+		t.Fatalf("installed outside the window: %v", cur)
+	}
 }

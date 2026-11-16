@@ -11,6 +11,7 @@ import (
 
 	"github.com/camhive/hive/internal/hiveconfig"
 	"github.com/camhive/hive/internal/update"
+	"github.com/camhive/hive/internal/update/journal"
 	"github.com/camhive/hive/internal/version"
 )
 
@@ -43,6 +44,9 @@ func TestAssembleSeedsThePackagedBundleIntoAPrivateStore(t *testing.T) {
 	if st, _ := os.Stat(dir); runtime.GOOS != "windows" && st.Mode().Perm() != 0o700 {
 		t.Fatalf("store mode = %v", st.Mode().Perm())
 	}
+	if v, _ := journal.Announced(dir); v != "0.1.5" { // reads hive.yaml at every check (#82)
+		t.Fatalf("announced = %q", v)
+	}
 	if !strings.Contains(logs.String(), "url=https://updates.dev.camhive.app/stable") {
 		t.Fatalf("logs = %s", logs.String())
 	}
@@ -74,5 +78,27 @@ func TestVersionCommand(t *testing.T) {
 	}
 	if code := run([]string{"bogus"}, &out, &errb); code != 2 {
 		t.Fatalf("unknown command: %d", code)
+	}
+}
+
+func TestDataPathsFollowCAMHIVE_DATA_DIR(t *testing.T) {
+	def := hiveconfig.DefaultPathsFor("linux", func(string) string { return "" })
+	if got := dataPaths(def, ""); got != def {
+		t.Fatalf("no override: %+v", got)
+	}
+	if got := dataPaths(def, "/media/usb/camhive"); got.Config != filepath.Join("/media/usb/camhive", "hive.yaml") {
+		t.Fatalf("override: %+v", got)
+	}
+}
+
+// The updater tells the hive it starts whether it updates it (#82).
+func TestLaunchVerdict(t *testing.T) {
+	for _, c := range []struct {
+		release, source bool
+		want            string
+	}{{true, true, "on"}, {false, true, "dev_build"}, {false, false, "dev_build"}, {true, false, "no_root"}} {
+		if got := launchVerdict(c.release, c.source); got != c.want {
+			t.Errorf("%+v: %q", c, got)
+		}
 	}
 }

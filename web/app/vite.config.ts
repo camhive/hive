@@ -36,6 +36,7 @@ export default defineConfig({
         navigateFallback: "/index.html",
         navigateFallbackDenylist: [/^\/v1\//, /^\/v0\//, /^\/healthz/],
         runtimeCaching: [], // nothing beyond the precached shell
+        importScripts: ["push-sw.js"], // Web Push: show and open notifications (ADR-0021)
       },
       devOptions: { enabled: false },
     }),

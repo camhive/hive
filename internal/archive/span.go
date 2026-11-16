@@ -103,7 +103,7 @@ func readSegmentInit(f SegmentFile) (*fmp4.Init, error) {
 		return nil, errors.New("header too large")
 	}
 	raw := make([]byte, n)
-	if _, err := f.ReadAt(raw, 0); err != nil {
+	if err := readAt(f, raw, 0); err != nil {
 		return nil, err
 	}
 	var init fmp4.Init
@@ -130,7 +130,7 @@ func boxAt(f SegmentFile, off int64) (boxHeader, error) {
 	if off+8 > f.Size() {
 		return boxHeader{}, errTruncated
 	}
-	if _, err := f.ReadAt(hdr[:8], off); err != nil {
+	if err := readAt(f, hdr[:8], off); err != nil {
 		return boxHeader{}, err
 	}
 	b := boxHeader{typ: string(hdr[4:8]), off: off, size: int64(binary.BigEndian.Uint32(hdr[:4]))}
@@ -138,7 +138,7 @@ func boxAt(f SegmentFile, off int64) (boxHeader, error) {
 	case 0: // to the end of the file
 		b.size = f.Size() - off
 	case 1: // a 64-bit size follows
-		if _, err := f.ReadAt(hdr[8:16], off+8); err != nil {
+		if err := readAt(f, hdr[8:16], off+8); err != nil {
 			return boxHeader{}, errTruncated
 		}
 		b.size = int64(binary.BigEndian.Uint64(hdr[8:16])) //nolint:gosec // checked against the file size below
@@ -148,6 +148,10 @@ func boxAt(f SegmentFile, off int64) (boxHeader, error) {
 	}
 	return b, nil
 }
+
+// walkBeforeStart turns the walk of skipBeforeStart on; tests switch it off
+// to compare with a read from offset 0, as the reader did before #100.
+var walkBeforeStart = true
 
 // spanWriter writes one span across the segments that hold it.
 type spanWriter struct {
@@ -246,7 +250,7 @@ func sameTracks(a, b []*fmp4.InitTrack) bool {
 // far into the segment the samples it read reach.
 func (sw *spanWriter) writeParts(f SegmentFile, startDTS time.Duration) (time.Duration, error) {
 	var elapsed time.Duration
-	for off := int64(0); ; {
+	for off := sw.skipBeforeStart(f, startDTS); ; {
 		if err := sw.ctx.Err(); err != nil {
 			return 0, err
 		}
@@ -270,38 +274,82 @@ func (sw *spanWriter) writeParts(f SegmentFile, startDTS time.Duration) (time.Du
 }
 
 // nextFragment reads the next moof and the mdat after it, from off on.
-// io.EOF: there is none.
+// errTruncated: there is no complete one.
 func nextFragment(f SegmentFile, off int64) (fmp4.Parts, int64, error) {
-	for {
-		if off >= f.Size() {
-			return nil, 0, io.EOF
-		}
-		moof, err := boxAt(f, off)
-		if err != nil {
-			return nil, 0, err
-		}
-		if moof.typ != "moof" {
-			off += moof.size
-			continue
-		}
-		mdat, err := boxAt(f, off+moof.size)
-		if err != nil {
-			return nil, 0, err
-		}
-		n := moof.size + mdat.size
-		if n > maxFragmentBytes {
-			return nil, 0, fmt.Errorf("archive: fragment of %d bytes", n)
-		}
-		raw := make([]byte, n)
-		if _, err := f.ReadAt(raw, off); err != nil {
-			return nil, 0, err
-		}
-		var parts fmp4.Parts
-		if err := parts.Unmarshal(raw); err != nil {
-			return nil, 0, err
-		}
-		return parts, off + n, nil
+	moof, err := findBox(f, off, "moof")
+	if err != nil {
+		return nil, 0, err
 	}
+	mdat, err := boxAt(f, moof.off+moof.size)
+	if err != nil {
+		return nil, 0, err
+	}
+	n := moof.size + mdat.size
+	if n > maxFragmentBytes {
+		return nil, 0, fmt.Errorf("archive: fragment of %d bytes", n)
+	}
+	raw := make([]byte, n)
+	if err := readAt(f, raw, moof.off); err != nil {
+		return nil, 0, err
+	}
+	var parts fmp4.Parts
+	if err := parts.Unmarshal(raw); err != nil {
+		return nil, 0, err
+	}
+	return parts, moof.off + n, nil
+}
+
+// skipBeforeStart walks the fragments whose samples all lie before the
+// span's start reading only their moofs (issue #100), and returns where
+// reading samples resumes: for every track, the fragment of its last sync
+// sample before the start. The muxer keeps the samples from that sample on
+// so the player can decode the first frame, and drops everything earlier,
+// so what it writes does not change. How far the segment reaches is taken
+// from the fragments read: each track skipped has a later sample in the
+// fragment reading resumes at or after it.
+//
+// The walk reads only timing, so it is laxer than fmp4.Parts, which reads
+// the samples: a skipped fragment whose payload Parts would refuse (a trun
+// without a data offset, a sample outside the fragment, a box other than
+// mdat after the moof) no longer fails the span. A moof the walk cannot
+// read ends the walk, and the full read meets it there.
+func (sw *spanWriter) skipBeforeStart(f SegmentFile, startDTS time.Duration) int64 {
+	if !walkBeforeStart {
+		return 0
+	}
+	keep := map[int]int64{} // track ID -> offset of the fragment its kept samples start in
+	off := int64(0)
+	for {
+		runs, next, err := nextMoof(f, off)
+		if err != nil {
+			break // the full read starts here and meets the same end or error
+		}
+		if !sw.beforeStart(runs, startDTS) {
+			break
+		}
+		for _, r := range runs {
+			if _, seen := keep[r.id]; r.sync || !seen {
+				keep[r.id] = off
+			}
+		}
+		off = next
+	}
+	for _, k := range keep {
+		off = min(off, k)
+	}
+	return off
+}
+
+// beforeStart says whether every sample of a fragment lies before the
+// span's start.
+func (sw *spanWriter) beforeStart(runs []*trackRun, startDTS time.Duration) bool {
+	for _, r := range runs {
+		ts, ok := sw.timeScale(r.id)
+		if !ok || (r.samples > 0 && int64(r.lastDTS())+toTrackUnits(startDTS, ts) >= 0) { //nolint:gosec // decode times of recordings fit in int64
+			return false
+		}
+	}
+	return true
 }
 
 // writeFragment feeds one fragment's tracks to the muxer. done: a track

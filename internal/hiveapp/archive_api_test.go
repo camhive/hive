@@ -52,6 +52,12 @@ func (p *fakePlayback) asked() export.Request {
 
 func newArchiveAPI(t *testing.T) (*apiFixture, *fakePlayback, camera.Camera) {
 	t.Helper()
+	return newArchiveAPIWith(t, nil)
+}
+
+// newArchiveAPIWith is newArchiveAPI with more dependencies.
+func newArchiveAPIWith(t *testing.T, with func(d *hiveapp.Deps)) (*apiFixture, *fakePlayback, camera.Camera) {
+	t.Helper()
 	iss, _ := auth.NewIssuer("k1")
 	st, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "hive.db"), make([]byte, 32))
 	if err != nil {
@@ -69,13 +75,17 @@ func newArchiveAPI(t *testing.T) (*apiFixture, *fakePlayback, camera.Camera) {
 			Activity: &archive.Activity{StepS: 10, VideoKbps: []int{100 + i, 900}, SoundDB: []int{-90, -20}}})
 	}
 	berlin, _ := time.LoadLocation("Europe/Berlin")
-	h := hiveapp.NewAPI(hiveapp.Deps{
+	d := hiveapp.Deps{
 		Store: st, Verifier: auth.NewVerifier("hv_1", auth.Keys{"k1": iss.PublicKey()}), Version: "test",
 		Index: idx, Playback: play.fetch, Exports: export.NewManager(t.TempDir(), play.fetch, st.Exports()), Location: berlin,
-	})
+	}
+	if with != nil {
+		with(&d)
+	}
+	h := hiveapp.NewAPI(d)
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
-	return &apiFixture{srv: srv, iss: iss, st: st}, play, cam
+	return &apiFixture{srv: srv, iss: iss, st: st, h: h}, play, cam
 }
 
 func TestCalendarAndTimelineFromTheIndex(t *testing.T) {

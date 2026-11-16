@@ -26,6 +26,7 @@ export function Account() {
       <nav className="flex flex-wrap gap-2" aria-label={t("account.more")}>
         <Link to="/plan" className="btn btn-secondary btn-sm">{t("plan.title")}</Link>
         <Link to="/activity" className="btn btn-secondary btn-sm">{t("activity.title")}</Link>
+        <Link to="/notifications" className="btn btn-secondary btn-sm">{t("notify.title")}</Link>
         <Link to="/members" className="btn btn-secondary btn-sm">{t("members.title")}</Link>
       </nav>
       <PasswordCard />

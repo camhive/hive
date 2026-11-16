@@ -105,7 +105,16 @@
     "camera_mismatch": "Another device answers at that address. If you replaced the camera, confirm it below.",
     "lan_only": "This works only on the hive's address in your home network, not through the Camhive relay.",
     "local_login_disabled": "Local sign-in is not switched on for this hive. Switch it on in the hive's settings while Camhive is reachable, or run “hive local-login set” on the hive.",
-    "local_login_rate_limited": "Too many failed sign-ins. Try again later."
+    "local_login_rate_limited": "Too many failed sign-ins. Try again later.",
+    "archive_locked": "The recordings are encrypted and locked. The owner unlocks them with the passphrase after every restart of the hive.",
+    "encryption_on": "Encryption is already switched on for this hive.",
+    "encryption_off": "Encryption is not switched on for this hive.",
+    "wrong_passphrase": "Wrong passphrase.",
+    "unlock_rate_limited": "Too many wrong passphrases. Try again later.",
+    "invalid_update_window": "The update window needs two different times, like 02:00 to 05:00.",
+    "updates_unavailable": "This hive cannot update itself.",
+    "push_not_configured": "Push notifications are not set up on this server.",
+    "push_endpoint": "This browser's push service is not supported."
   },
   "account": {
     "title": "Account",
@@ -444,9 +453,9 @@
         "full": "full quality"
       },
       "notify.channels": {
-        "basic": "basic push",
-        "rich": "rich push + e-mail",
-        "all": "push, e-mail, webhooks"
+        "basic": "e-mail + push",
+        "rich": "e-mail + push",
+        "all": "e-mail, push, webhooks (planned)"
       },
       "analytics.level": {
         "motion": "motion",
@@ -552,5 +561,97 @@
     "locked_one": "Too many failed sign-ins. Try again in {{count}} minute.",
     "locked_other": "Too many failed sign-ins. Try again in {{count}} minutes.",
     "unreachable": "The hive does not answer on your network right now. Make sure this device is on the same network as the hive."
+  },
+  "capability": {
+    "needsUpdate": "This needs hive version {{since}} or later; this hive runs {{running}}.",
+    "unknownVersion": "an unknown version",
+    "ownerHelp": "Update the hive: with automatic updates it installs the new version in its update window, or install it on the hive's computer.",
+    "download": "Download the hive",
+    "askOwner": "Ask the hive's owner to update it."
+  },
+  "updates": {
+    "title": "Updates",
+    "help": "The hive installs signed updates itself and goes back to the previous version on its own when a new one does not run well.",
+    "open": "Manage updates…",
+    "running": "Running version",
+    "mode": "Install updates",
+    "automatic": "Automatically, in the update window",
+    "manual": "Only when I click Update now",
+    "channel": "Channel",
+    "stable": "Stable",
+    "beta": "Beta (earlier releases)",
+    "window": "Update window (the hive's local time)",
+    "from": "From",
+    "to": "To",
+    "save": "Save",
+    "saved": "Saved. The hive's next update check follows these settings.",
+    "available": "Version {{version}} is available.",
+    "noneWaiting": "No update is waiting.",
+    "updateNow": "Update now",
+    "requested": "Requested: the hive installs it within a minute and restarts. The result appears in the activity log.",
+    "lastApplied": "Updated from {{from}} to {{to}} on {{date}}.",
+    "lastRolledBack": "Version {{to}} did not run well; the hive went back to {{from}} on {{date}}.",
+    "needRestart": "This hive's updater is older than these settings: changes apply after the hive's service restarts (sudo hive restart). The next update brings a newer updater only with a package install.",
+    "unsupported": {
+      "dev_build": "This is a development build: it never updates itself.",
+      "no_root": "This build has no update keys: it never updates itself.",
+      "no_updater": "The hive does not run under hive-updater, so it cannot update itself. Install the package again or run `hive install`."
+    },
+    "inWindow": "Version {{version}} installs in the update window, {{from}} to {{to}}.",
+    "needsPackage": "Version {{version}} needs a newer hive-updater than this hive has: install the current package on the hive's computer. Update now cannot install it."
+  },
+  "notify": {
+    "title": "Notifications",
+    "intro": "What reaches you when something happens on your hives. E-mails go to {{email}}.",
+    "events": "Events",
+    "event": "Event",
+    "channel": {
+      "email": "e-mail",
+      "push": "push"
+    },
+    "group": {
+      "offline": "Camera or hive offline",
+      "storage": "Storage low",
+      "motion": "Motion"
+    },
+    "groupHelp": {
+      "offline": "After 3 minutes for a camera, 5 for a hive; and when it is back.",
+      "storage": "The archive disk can no longer keep its free-space target; once each time this starts.",
+      "motion": "When motion starts on a camera; at most once per camera cooldown."
+    },
+    "perCamera": "Motion per camera: open the camera on its hive page and choose Notifications.",
+    "quiet": "Quiet hours",
+    "quietHelp": "No motion notifications in this window. Offline and storage notifications still come.",
+    "from": "From",
+    "until": "Until",
+    "save": "Save",
+    "saved": "Saved.",
+    "cameraButton": "Notifications",
+    "cameraTitle": "Notifications for this camera",
+    "cameraMotion": "Motion notifications for this camera",
+    "cooldown": "At most every",
+    "minutes_one": "{{count}} minute",
+    "minutes_other": "{{count}} minutes",
+    "motionOffEverywhere": "Motion notifications are switched off on the Notifications page."
+  },
+  "push": {
+    "title": "Push on your devices",
+    "notConfigured": "Push notifications are not set up on this server yet. E-mail still works.",
+    "unsupported": "This browser cannot receive push notifications.",
+    "installFirst": "On iPhone and iPad, push works only in the installed app: tap Share, then Add to Home Screen, and open Camhive from there.",
+    "enable": "Get push notifications on this device",
+    "enabledHere": "This device gets push notifications.",
+    "permissionRefused": "Notifications are blocked for this site. Allow them in the browser's site settings and try again.",
+    "limit_one": "Your plan includes {{count}} device.",
+    "limit_other": "Your plan includes {{count}} devices.",
+    "limitUnlimited": "Your plan includes any number of devices.",
+    "sleeping": "over your plan's limit, gets nothing until you upgrade or remove another",
+    "lastUsed": "last notified {{when}}",
+    "unnamed": "Device",
+    "remove": "Remove",
+    "removeNamed": "Remove {{name}}",
+    "test": "Send a test notification",
+    "testSent_one": "Sent to {{count}} device.",
+    "testSent_other": "Sent to {{count}} devices."
   }
 }

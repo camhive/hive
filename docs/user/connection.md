@@ -73,6 +73,14 @@ local-login` on the hive's computer. Every change, sign-in and failed attempt
 is in the hive's action log (a failed attempt notes whether the username was
 right, never what was typed).
 
+A local sign-in reaches cameras and recordings, but not the hive's update
+settings: changing them or pressing *Update now* needs a sign-in through
+Camhive (updates need the internet anyway). With encrypted recordings (see
+[Live and archive](live-and-archive.md#encrypted-recordings)) a local
+sign-in can unlock them with the passphrase after a restart, and lock them
+again; switching encryption on, changing the passphrase and downloading the
+key file need a sign-in through Camhive.
+
 Use it when the cloud cannot reach the hive:
 
 1. Be on the same network as the hive, in a browser where you used the app

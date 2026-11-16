@@ -405,7 +405,9 @@ func (m *MediaMTX) AddSource(ctx context.Context, src Source) error {
 
 // putPath creates or replaces an engine path that waits for a publisher.
 func (m *MediaMTX) putPath(ctx context.Context, name string) error {
-	body := m.pathConfig()
+	m.mu.Lock()
+	body := m.pathConfig() // SetSegmentDuration may change it
+	m.mu.Unlock()
 	status, resp, err := m.api(ctx, http.MethodPost, "/v3/config/paths/add/"+name, body)
 	if err != nil {
 		return err
@@ -558,6 +560,42 @@ func (m *MediaMTX) SetICEServers(ctx context.Context, servers []ICEServer) error
 		return fmt.Errorf("video: set ICE servers: %d: %s", status, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// SetSegmentDuration changes how long recording segments are, for the
+// paths there are and those added later; it implements
+// SegmentDurationSetter. MediaMTX closes each path's current segment and
+// starts the next one with the new length.
+func (m *MediaMTX) SetSegmentDuration(ctx context.Context, d time.Duration) error {
+	m.mu.Lock()
+	m.SegmentDuration = d
+	m.mu.Unlock()
+	body, _ := json.Marshal(map[string]any{"recordSegmentDuration": d.String()})
+	for _, name := range m.pathNames() {
+		status, out, err := m.api(ctx, http.MethodPatch, "/v3/config/paths/patch/"+name, body)
+		if errors.Is(err, ErrNotReady) {
+			return nil // not running: the paths get it when they are added again
+		}
+		if err != nil {
+			return err
+		}
+		if status/100 != 2 {
+			return fmt.Errorf("video: segment duration of %s: %d: %s", name, status, strings.TrimSpace(string(out)))
+		}
+	}
+	return nil
+}
+
+// pathNames lists the paths being pulled into, sorted.
+func (m *MediaMTX) pathNames() []string {
+	m.pullsMu.Lock()
+	defer m.pullsMu.Unlock()
+	names := make([]string, 0, len(m.pulls))
+	for name := range m.pulls {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func (m *MediaMTX) api(ctx context.Context, method, path string, body []byte) (int, []byte, error) {

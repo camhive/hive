@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetCloudForTest } from "../src/lib/cloud";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { QueryClient } from "@tanstack/react-query";
@@ -60,5 +60,34 @@ describe("hive connection settings", () => {
     await user.click(screen.getByRole("button", { name: "Remove hive" }));
     await waitFor(() => expect(calls).toContain("DELETE /v1/hives/hv_1"));
     await waitFor(() => expect(router.state.location.pathname).toBe("/"));
+  });
+
+  it("shows owner deletion disabled with the update notice on a hive without archive.delete (ADR-0022)", async () => {
+    const calls: string[] = [];
+    const render2 = async (h: Record<string, unknown>) => {
+      vi.stubGlobal("fetch", (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+        calls.push(`${new Request(input, init).method} ${url.pathname}`);
+        switch (`${new Request(input, init).method} ${url.pathname}`) {
+          case "GET /v1/me": return json(200, { id: "acc_1", email: "anna@example.de", locale: "en", totp_enabled: false, created_at: "2026-11-09T00:00:00Z" });
+          case "GET /v1/hives": return json(200, { hives: [h], shared: [] });
+          default: throw new TypeError("Failed to fetch");
+        }
+      }) as typeof fetch);
+      transport.invalidateAll();
+      const router = makeRouter(createMemoryHistory({ initialEntries: ["/hives/hv_1/settings"] }));
+      const view = render(<App router={router} queryClient={new QueryClient({ defaultOptions: { queries: { retry: false } } })} />);
+      const section = await screen.findByRole("region", { name: "Delete recordings" });
+      return { section, unmount: view.unmount };
+    };
+
+    const old = await render2({ ...hive, version: "0.1.6", capabilities: ["camera.identity", "motion"] });
+    expect(within(old.section).getByRole("note")).toHaveTextContent("This needs hive version 0.1.3 or later; this hive runs 0.1.6.");
+    expect(within(old.section).getByRole("button", { name: "Delete recordings…" })).toBeDisabled();
+    old.unmount();
+
+    const current = await render2({ ...hive, version: "0.1.6", capabilities: ["archive.delete"] });
+    expect(within(current.section).queryByRole("note")).toBeNull();
+    expect(within(current.section).getByRole("button", { name: "Delete recordings…" })).toBeEnabled();
   });
 });

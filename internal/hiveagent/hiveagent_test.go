@@ -7,11 +7,13 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/camhive/hive/internal/auth"
+	"github.com/camhive/hive/internal/capability"
 	"github.com/camhive/hive/internal/entitlements"
 	"github.com/camhive/hive/internal/health"
 	"github.com/camhive/hive/internal/hiveagent"
@@ -400,5 +402,18 @@ func TestLicenseSetVerifiesStoresRestoresAndGates(t *testing.T) {
 	lic4.Set(lic2.Current())
 	if lic4.State() != auth.LicenseGraceOn || !lic4.Usable() || lic4.Effective().Int(entitlements.HivesMax) != 10 {
 		t.Fatal("grace keeps the licensed set and offline tokens")
+	}
+}
+
+// ADR-0022: the heartbeat carries the capability list, so the cloud and
+// the hive list know it without a LAN or relay connection.
+func TestHeartbeatCarriesTheCapabilities(t *testing.T) {
+	ag, _, _, _ := newAgent(t)
+	raw, _ := json.Marshal(ag.Heartbeat())
+	var hb struct {
+		Capabilities []string `json:"capabilities"`
+	}
+	if err := json.Unmarshal(raw, &hb); err != nil || !slices.Equal(hb.Capabilities, capability.Names()) {
+		t.Fatalf("heartbeat capabilities = %v (%v), want %v", hb.Capabilities, err, capability.Names())
 	}
 }

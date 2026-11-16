@@ -26,6 +26,9 @@ func TestMain(m *testing.M) {
 		fmt.Println("ready")
 		<-c
 		os.Exit(0)
+	case "env":
+		fmt.Println("launched=" + os.Getenv(update.LaunchedEnv))
+		os.Exit(0)
 	case "stubborn":
 		signal.Ignore(syscall.SIGTERM)
 		fmt.Println("ready")
@@ -63,6 +66,22 @@ func TestExecRunnerStopsTheHiveGentlyThenFirmly(t *testing.T) {
 		if mode == "stubborn" && (err == nil || time.Since(start) > 5*time.Second) {
 			t.Fatalf("stubborn child: %v after %v", err, time.Since(start))
 		}
+	}
+}
+
+// The updater tells the hive it started whether it updates it (#82): the
+// hive's status depends on it.
+func TestExecRunnerTellsTheHiveWhoLaunchedIt(t *testing.T) {
+	exe, _ := os.Executable()
+	t.Setenv("UPDATE_TEST_CHILD", "env")
+	var out strings.Builder
+	r := update.ExecRunner{Args: []string{"-test.run=^$"}, Stdout: &out, Env: []string{update.LaunchedEnv + "=no_root"}}
+	p, err := r.Start(context.Background(), update.Version{}, exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Wait(); err != nil || !strings.Contains(out.String(), "launched=no_root") {
+		t.Fatalf("child saw %q (%v)", out.String(), err)
 	}
 }
 

@@ -19,7 +19,8 @@ const at = (h: number, m = 0) => new Date(day.getTime() + (h * 60 + m) * 60_000)
 /** A day button's accessible name: the full date. */
 const dayName = (key: string) => dayStart(key).toLocaleDateString("en", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 
-function stub(opts: { exportMax: number }) {
+function stub(opts: { exportMax: number; hive?: Record<string, unknown> }) {
+  const h = opts.hive ?? hive;
   const calls: string[] = [];
   const jobs: unknown[] = [];
   vi.stubGlobal("fetch", (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -53,8 +54,8 @@ function stub(opts: { exportMax: number }) {
     }
     switch (`${req.method} ${u.pathname}`) {
       case "GET /v1/me": return json(200, { id: "acc_1", email: "anna@example.de", locale: "en", totp_enabled: false, created_at: "" });
-      case "GET /v1/hives": return json(200, { hives: [hive], shared: [] });
-      case "POST /v1/hives/hv_1/access": return json(201, { token: "tok", session_id: "s_1", expires_at: new Date(Date.now() + 900_000).toISOString(), offline: false, role: "owner", cameras: ["*"], hive, quality: "full", export_max_minutes: opts.exportMax, ice_servers: [] });
+      case "GET /v1/hives": return json(200, { hives: [h], shared: [] });
+      case "POST /v1/hives/hv_1/access": return json(201, { token: "tok", session_id: "s_1", expires_at: new Date(Date.now() + 900_000).toISOString(), offline: false, role: "owner", cameras: ["*"], hive: h, quality: "full", export_max_minutes: opts.exportMax, ice_servers: [] });
       default: return json(404, { error: { code: "not_found", message: "" } });
     }
   }) as typeof fetch);
@@ -176,6 +177,16 @@ describe("archive on the hive page", () => {
     await waitFor(() => expect(calls.find((c) => c.includes("/archive/play"))).toBeDefined());
     const play = new URL("https://x" + calls.find((c) => c.includes("/archive/play"))!.split(" ")[1]!);
     expect(play.searchParams.get("start")).toBe(at(8, 15));
+  }, 20_000);
+
+  it("hides Delete this day on a hive too old for owner deletion (ADR-0022)", async () => {
+    stub({ exportMax: 10, hive: { ...hive, version: "0.1.2" } });
+    const { user } = mount("/hives/hv_1/archive?day=2026-11-09");
+    const list = await screen.findByTestId("events", {}, { timeout: 5000 });
+    await user.click(within(list).getByText("Events (3)"));
+    await user.click((await within(list).findAllByRole("button"))[2]!); // play: the archive controls are shown
+    expect(await screen.findByRole("button", { name: "Snapshot" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete this day…" })).toBeNull();
   }, 20_000);
 
   it("drags and wheels the timeline, follows playback, plays on into the next window, changes speed and saves a snapshot", async () => {

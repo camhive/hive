@@ -57,6 +57,13 @@ type ICEUpdater interface {
 	SetICEServers(ctx context.Context, servers []ICEServer) error
 }
 
+// SegmentDurationSetter is implemented by engines that can change their
+// segment length at runtime: encrypted streams record 2-minute segments so
+// that little footage waits in clear before it is sealed (ADR-0019 §2).
+type SegmentDurationSetter interface {
+	SetSegmentDuration(ctx context.Context, d time.Duration) error
+}
+
 // Segment is one recorded archive file.
 type Segment struct {
 	Start    time.Time

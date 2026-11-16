@@ -6,6 +6,8 @@ import (
 	"os"
 	"sort"
 	"time"
+
+	"github.com/camhive/hive/internal/archive"
 )
 
 // Keep says how long and how much of finished exports the hive keeps (#59).
@@ -130,10 +132,15 @@ func (m *Manager) Remove(ctx context.Context, match Footage, dryRun bool) (Prune
 	return p, nil
 }
 
-// removeJob deletes a job's file (already gone is fine) and its row.
+// removeJob deletes a job's file, sealed or in clear (already gone is
+// fine), and its row.
 func (m *Manager) removeJob(ctx context.Context, j Job) error {
-	if err := os.Remove(m.path(j.ID)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
+	m.files.Lock()
+	defer m.files.Unlock()
+	for _, p := range []string{m.plainPath(j.ID) + archive.SealedExt, m.plainPath(j.ID)} {
+		if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
 	}
 	return m.jobs.Delete(ctx, j.ID)
 }

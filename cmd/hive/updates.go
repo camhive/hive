@@ -12,7 +12,10 @@ import (
 	"time"
 
 	"github.com/camhive/hive/internal/hiveagent"
+	"github.com/camhive/hive/internal/hiveapp"
+	"github.com/camhive/hive/internal/hiveconfig"
 	"github.com/camhive/hive/internal/store"
+	"github.com/camhive/hive/internal/update"
 	"github.com/camhive/hive/internal/update/journal"
 )
 
@@ -70,10 +73,16 @@ func requestUpdate(dir string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "hive-updater does not run on this machine (no", dir+")")
 		return 1
 	}
-	if err := os.WriteFile(filepath.Join(dir, "update-request"), nil, 0o600); err != nil {
+	if err := journal.RequestUpdate(dir); err != nil {
 		fmt.Fprintln(stderr, "cannot ask for an update:", err, "(run as root / Administrator)")
 		return 1
 	}
 	fmt.Fprintln(stdout, "update requested: hive-updater checks within a minute; see `hive status` and the activity log")
 	return 0
+}
+
+// updateControl is the owner's handle on hive-updater for the API (#82):
+// whether the updater started this hive comes from its environment.
+func updateControl(paths hiveconfig.Paths, dir string) *hiveapp.UpdateControl {
+	return &hiveapp.UpdateControl{Paths: paths, Dir: dir, Launched: os.Getenv(update.LaunchedEnv)}
 }

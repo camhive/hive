@@ -19,9 +19,6 @@ var ErrInvalidScope = errors.New("retention: invalid deletion scope")
 // reasonOwner marks deletions the owner asked for in deletion_log.
 const reasonOwner = "owner"
 
-// writingWindow: a newest file modified this recently is still being written.
-const writingWindow = 2 * time.Minute
-
 // Scope is what the owner asked to delete (ADR-0016): every stream of the
 // cameras, between From and To.
 type Scope struct {
@@ -113,7 +110,7 @@ func (s *Sweeper) writing(seg archive.Segment) bool {
 		return false
 	}
 	mod, err := s.opts.FS.Modified(seg.Path)
-	return err == nil && s.opts.Now().Sub(mod) < writingWindow
+	return err == nil && archive.StillWriting(seg, mod, s.opts.Now())
 }
 
 func summarize(hit []scoped) []CameraPlan {

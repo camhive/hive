@@ -33,7 +33,7 @@ the plan's count. Cameras are never counted and traffic is never metered.
 | Remote quality | sub stream | full | full |
 | Sharing recipients | 2 | 5 | 15 |
 | Remote export | 5/day, up to 5 min | unlimited, up to 60 min | unlimited, API |
-| Notifications | basic push, 1 device | rich push + e-mail, 5 devices | + webhooks (planned) |
+| Notifications | e-mail + push, 1 push device | e-mail + push, 5 push devices | e-mail + push, 20 push devices, + webhooks (planned) |
 | Analytics | motion | + object detection (planned) | + faces/plates, search (planned) |
 | Early access to updates | | | yes |
 
@@ -48,6 +48,63 @@ once per account.
 recording and stay reachable on your network), extra members are deactivated,
 remote sessions drop to the Free count. Upgrading again restores everything.
 You get banners 14, 7 and 1 day before expiry.
+
+## Notifications
+
+Camhive tells the owner of a hive when something needs attention. Open
+*Account* → *Notifications* to choose what reaches you and how.
+
+| Event | When it is sent | By default |
+|---|---|---|
+| A camera is offline | when it has sent no video for 3 minutes; a camera back within that time sends nothing | e-mail and push |
+| A hive cannot be reached | when it has been disconnected from Camhive for 5 minutes (power cut, internet down) | e-mail and push |
+| Back online | after an offline notification, when the camera or hive is back, on the same channels | as the offline one |
+| Storage low | when the archive disk can no longer keep the free space you set; once each time this starts | e-mail and push |
+| Motion | when motion starts on a camera; then not again for that camera until its cooldown (10 minutes unless you change it) has passed | push (e-mail is off) |
+
+Push needs a device first (below); until then you get e-mail only.
+
+- **Channels.** Every plan includes e-mail and push. Webhooks for Pro are
+  planned (#111).
+- **Push devices.** Under *Push on your devices*, choose *Get push
+  notifications on this device* in each browser or phone that should get
+  them, and allow notifications when the browser asks. Free includes one
+  device, Plus five, Pro twenty. The list shows your devices; remove
+  one you no longer use. After a downgrade, the devices above the new
+  limit are kept but get nothing (marked *over your plan's limit*) until
+  you upgrade or remove another. *Send a test notification* (once a minute) checks that
+  push reaches your devices. Tapping a notification opens the camera (for
+  motion, on that day's recordings) or the hive.
+- **Signing out** removes this browser from your devices: on a shared
+  computer the next person does not get your notifications. Sign in and
+  enable push again to get them back.
+- **iPhone and iPad** deliver push only to the installed app: in Safari tap
+  *Share* → *Add to Home Screen*, open Camhive from the home screen, then
+  enable push there (iOS 16.4 or newer).
+- **Blocked notifications.** If you once refused, the browser does not ask
+  again: allow notifications for the Camhive site in the browser's site
+  settings, then enable push again.
+- **Quiet hours** stop motion notifications in a daily window, for example
+  while you are at home in the evening. Offline and storage notifications
+  still come, because they need you to act.
+- **Per camera.** Open the camera on its hive page and choose
+  *Notifications* to switch motion notifications off for that camera or to
+  change how often it may notify you (every 1 to 60 minutes).
+- **Motion that happens while the hive is offline** is not notified later;
+  it is on the hive's timeline. A notification about motion arrives within
+  seconds or not at all.
+- **What the cloud keeps.** For each notification: which hive and camera,
+  the camera's name, what kind of event, when, how much space was free
+  (storage low only), how motion was seen (camera or picture), and whether
+  it was delivered. Never a picture or video. These records are deleted
+  after 30 days.
+- **Times** in notifications are in your time zone. The app saves your
+  browser's zone each time you change these settings; until you do, German
+  accounts get German time and all others UTC.
+- Only the owner of a hive gets its notifications; members with shared
+  cameras do not yet.
+- A hive put to sleep after a plan ended sends no notifications until it is
+  active again.
 
 ## Activity
 

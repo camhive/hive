@@ -4,6 +4,7 @@ go 1.27.3
 
 require (
 	aidanwoods.dev/go-paseto v1.6.0
+	filippo.io/age v1.3.2
 	github.com/abema/go-mp4 v1.7.3
 	github.com/bluenviron/gortsplib/v5 v5.6.7
 	github.com/bluenviron/mediacommon/v2 v2.9.6
@@ -25,6 +26,7 @@ require (
 
 require (
 	aidanwoods.dev/go-result v0.3.1 // indirect
+	filippo.io/hpke v0.4.0 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/dustin/go-humanize v1.1.0 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
@@ -55,7 +57,6 @@ require (
 	github.com/pion/transport/v5 v5.1.4 // indirect
 	github.com/pion/turn/v5 v5.1.3 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
-	github.com/rogpeppe/go-internal v1.16.0 // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 // indirect
 	github.com/secure-systems-lab/go-securesystemslib v0.11.0 // indirect
 	github.com/sigstore/protobuf-specs v0.5.0 // indirect

@@ -158,3 +158,37 @@ operators included, cannot. It works on the home network without the cloud.
   cameras, which span, how much), which cannot be deleted. The app does not
   show that log yet; the owner can read it from the hive's API
   (`GET /v0/actions`).
+
+## Encrypted recordings
+
+The owner can have the hive encrypt its recordings, so that whoever takes
+the box or its disk cannot play them. It is off until the owner switches it
+on, and it cannot be switched off again. The app's screens for it come with
+#93; until then it is set through the hive's API.
+
+- **Switching it on** asks for a passphrase of 10 to 256 characters. From
+  then on every recording is encrypted a few seconds after its file closes
+  (files are 2 minutes long while encryption is on), and so are the
+  recordings and exports already on the disk, in the background. Download
+  the **key file** right away and keep it somewhere other than the hive:
+  without the passphrase *and* the key file nobody can play the recordings
+  again, Camhive included. The key file alone is useless to a thief.
+- **After every restart** of the hive (an update, a power cut) the archive
+  is **locked**. The hive records as always and live view works, and the
+  timeline still shows when there are recordings, but playback, sound and
+  exports wait until the owner unlocks the archive with the passphrase.
+  Members see that the archive is locked by its owner. The owner can lock it
+  again at any time; five wrong passphrases in 15 minutes block unlocking
+  for 15 minutes. Unlocking and locking also work with the emergency
+  sign-in on your network ([Connection](connection.md)); switching
+  encryption on, changing the passphrase and downloading the key file need
+  a sign-in through Camhive.
+- **Changing the passphrase** keeps the recordings as they are. A key file
+  downloaded earlier still opens with the old passphrase; download a new one.
+- **Exports** are stored encrypted on the hive and download as normal MP4
+  files while the archive is unlocked.
+- **What a stolen disk still shows:** the last minutes of each camera that
+  were not yet encrypted, when and how much each camera recorded (not what),
+  and the events. While the archive is unlocked the key is in the hive's
+  memory: a computer that hibernates, or swaps memory to disk, can write it
+  there. On Windows, crash dumps an administrator switched on can hold it too.

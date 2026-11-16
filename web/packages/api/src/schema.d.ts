@@ -369,6 +369,92 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/me/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Notification preferences of the signed-in account (defaults until saved) */
+        get: operations["getMeNotifications"];
+        /** Replace the notification preferences; cameras must be on hives the account owns, each once */
+        put: operations["putMeNotifications"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/push": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Web Push for the signed-in account (ADR-0021) - the key browsers subscribe with, the devices and the plan's device count */
+        get: operations["getMePush"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/push/devices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Register this browser's push subscription; the same browser again updates its device */
+        post: operations["postMePushDevices"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/push/devices/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove a push device */
+        delete: operations["deleteMePushDevicesById"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/push/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Send a test notification to the account's active devices (once a minute) */
+        post: operations["postMePushTest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/entitlements": {
         parameters: {
             query?: never;
@@ -925,7 +1011,7 @@ export interface components {
         Error: {
             error: {
                 /** @enum {string} */
-                code: "bad_json" | "invalid" | "weak_password" | "invalid_credentials" | "locked" | "email_unverified" | "account_disabled" | "bad_code" | "unauthenticated" | "mfa_required" | "totp_state" | "csrf" | "not_found" | "rate_limited" | "bad_key" | "already_claimed" | "unknown_code" | "renewal_refused" | "hive_offline" | "owner_only" | "member_state" | "hive_state" | "plan_limit" | "bad_invitation" | "wrong_account" | "promo_invalid" | "promo_redeemed" | "hive_unreachable" | "hive_not_ready" | "hive_error" | "internal";
+                code: "bad_json" | "invalid" | "weak_password" | "invalid_credentials" | "locked" | "email_unverified" | "account_disabled" | "bad_code" | "unauthenticated" | "mfa_required" | "totp_state" | "csrf" | "not_found" | "rate_limited" | "bad_key" | "already_claimed" | "unknown_code" | "renewal_refused" | "hive_offline" | "owner_only" | "member_state" | "hive_state" | "plan_limit" | "bad_invitation" | "wrong_account" | "promo_invalid" | "promo_redeemed" | "hive_unreachable" | "hive_not_ready" | "hive_error" | "push_not_configured" | "push_endpoint" | "internal";
                 message: string;
             };
         };
@@ -1018,6 +1104,8 @@ export interface components {
             };
             /** @example hv_0123456789abcdef.relay.camhive.app */
             relay_host?: string;
+            /** @description What the hive's software can do, from its heartbeat (ADR-0022). Absent: the last heartbeat had no list (v0.1.6 or older), assume the v0.1.6 baseline. */
+            capabilities?: string[];
         };
         AccessGrant: {
             /** @description PASETO v4.public; send to the hive as Bearer */
@@ -1060,6 +1148,51 @@ export interface components {
              * @example relay.camhive.app
              */
             relay_domain?: string;
+        };
+        NotifyToggle: {
+            email: boolean;
+            push: boolean;
+        };
+        /** @description The signed-in account's notification preferences (ADR-0021); a camera without an entry gets motion on with a 10-minute cooldown */
+        NotificationSettings: {
+            /**
+             * @description IANA zone for times in notifications and for quiet hours; the app sends the browser's. Before the first save: Europe/Berlin for German accounts, else UTC
+             * @example Europe/Berlin
+             */
+            time_zone: string;
+            events: {
+                offline: components["schemas"]["NotifyToggle"];
+                storage: components["schemas"]["NotifyToggle"];
+                motion: components["schemas"]["NotifyToggle"];
+            };
+            /** @description A daily window in which motion notifications are dropped; absent or null for none */
+            quiet_hours?: null | {
+                /** @example 22:00 */
+                start: string;
+                /** @example 07:00 */
+                end: string;
+            };
+            cameras: {
+                hive_id: string;
+                camera_id: string;
+                motion: boolean;
+                cooldown_minutes: number;
+            }[];
+            /** @description Channels the account's plan includes and this cloud can deliver */
+            readonly channels?: ("email" | "push")[];
+        };
+        PushDevice: {
+            id: string;
+            /** @example Firefox on Linux */
+            label: string;
+            /** @description hex SHA-256 of the subscription endpoint, so a browser can tell whether it is this device; the endpoint itself never leaves the cloud */
+            endpoint_sha256: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            last_used_at?: string;
+            /** @description false for devices above notify.devices after a downgrade; they are kept and receive again after an upgrade */
+            active: boolean;
         };
     };
     responses: {
@@ -1639,6 +1772,170 @@ export interface operations {
             };
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+        };
+    };
+    getMeNotifications: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description preferences */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationSettings"];
+                };
+            };
+        };
+    };
+    putMeNotifications: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Requested-With"?: components["parameters"]["csrf"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotificationSettings"];
+            };
+        };
+        responses: {
+            /** @description saved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationSettings"];
+                };
+            };
+            400: components["responses"]["Error"];
+        };
+    };
+    getMePush: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description push state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description false when the cloud has no VAPID key; registering then answers push_not_configured */
+                        configured: boolean;
+                        /** @description applicationServerKey for PushManager.subscribe (base64url P-256 point) */
+                        public_key?: string;
+                        devices: components["schemas"]["PushDevice"][];
+                        /** @description devices that receive: notify.devices, at most 20 on every plan */
+                        limit: number;
+                    };
+                };
+            };
+        };
+    };
+    postMePushDevices: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Requested-With"?: components["parameters"]["csrf"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description PushSubscription.endpoint; must be a known push service */
+                    endpoint: string;
+                    keys: {
+                        /** @description base64url */
+                        p256dh: string;
+                        /** @description base64url */
+                        auth: string;
+                    };
+                    label?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description registered */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PushDevice"];
+                };
+            };
+            400: components["responses"]["Error"];
+            402: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    deleteMePushDevicesById: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Requested-With"?: components["parameters"]["csrf"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    postMePushTest: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Requested-With"?: components["parameters"]["csrf"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description sent */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description devices that took it */
+                        sent: number;
+                    };
+                };
+            };
+            429: components["responses"]["Error"];
+            503: components["responses"]["Error"];
         };
     };
     getEntitlements: {

@@ -98,11 +98,14 @@ func TestRealHiveUpdatesAndABrokenBuildRollsBack(t *testing.T) {
 	var events []string
 	var logs bytes.Buffer // the supervisor's own account, shown when the test fails
 	all := update.AllDay
+	src := &update.SourceChannel{Source: repo.source(t), Platform: platform}
 	sup := update.NewSupervisor(update.SupervisorConfig{
 		Versions: versions, Runner: update.ExecRunner{Stdout: io.Discard, Stderr: io.Discard, Grace: 10 * time.Second},
 		Health: update.HTTPHealth("http://127.0.0.1:"+strconv.Itoa(port), &http.Client{Timeout: time.Second}),
-		Source: &update.SourceChannel{Source: repo.source(t), Platform: platform},
-		Hive:   "hv_e2e", Updater: v(t, "0.1.90"), Window: all, Mode: update.Automatic,
+		Policy: func() update.Policy {
+			return update.Policy{Mode: update.Automatic, Window: all, Source: src}
+		},
+		Hive: "hv_e2e", Updater: v(t, "0.1.90"),
 		Logger:     slog.New(slog.NewTextHandler(lockedWriter{&mu, &logs}, nil)),
 		CheckEvery: time.Hour, HealthTimeout: 60 * time.Second, Poll: 250 * time.Millisecond, Restart: time.Second,
 		Report: func(kind string, _ map[string]any) { mu.Lock(); events = append(events, kind); mu.Unlock() },

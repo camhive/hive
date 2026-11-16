@@ -34,16 +34,25 @@ type Channel interface {
 	Fetch(ctx context.Context, dst string) error
 }
 
+// Policy is how the owner wants updates (ADR-0018 §6, #82): the mode, the
+// window, and the channel's source (nil: no updates, a dev build or no
+// trusted root).
+type Policy struct {
+	Mode   Mode
+	Window Window
+	Source Channel
+}
+
 // SupervisorConfig wires a Supervisor.
 type SupervisorConfig struct {
-	Versions      *Versions
-	Runner        Runner
-	Health        HealthFunc
-	Source        Channel
-	Hive          string  // the Hive's id, for the rollout
-	Updater       Version // this updater's version
-	Window        Window
-	Mode          Mode
+	Versions *Versions
+	Runner   Runner
+	Health   HealthFunc
+	// Policy is asked at every check, so a changed setting applies at the
+	// next one without a restart.
+	Policy        func() Policy
+	Hive          string        // the Hive's id, for the rollout
+	Updater       Version       // this updater's version
 	CheckEvery    time.Duration // default 1 h
 	HealthTimeout time.Duration // default 5 min (ADR-0005)
 	Poll          time.Duration // health polling; default 5 s
@@ -98,6 +107,9 @@ func NewSupervisor(cfg SupervisorConfig) *Supervisor {
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
+	}
+	if cfg.Policy == nil {
+		cfg.Policy = func() Policy { return Policy{} }
 	}
 	return &Supervisor{cfg: cfg, exited: make(chan exit, 4), checks: make(chan checkRequest)}
 }
@@ -202,14 +214,15 @@ func (s *Supervisor) restart(ctx context.Context) {
 
 // check asks the channel and installs what the policy says to.
 func (s *Supervisor) check(ctx context.Context, asked bool) {
-	if s.cfg.Source == nil {
+	policy := s.cfg.Policy()
+	if policy.Source == nil {
 		return // no channel: a dev build or no trusted root
 	}
 	if now := s.cfg.Now(); now.Before(s.cfg.NotBefore) {
 		s.cfg.Logger.Warn("update check skipped: the clock reads earlier than this updater was built", "now", now, "built", s.cfg.NotBefore)
 		return
 	}
-	target, err := s.cfg.Source.Check(ctx)
+	target, err := policy.Source.Check(ctx)
 	if err != nil {
 		s.cfg.Logger.Info("update check", "err", err)
 		return
@@ -218,35 +231,50 @@ func (s *Supervisor) check(ctx context.Context, asked bool) {
 	if err != nil {
 		return
 	}
-	verdict := Decide(Situation{Hive: s.cfg.Hive, Running: cur, Updater: s.cfg.Updater, Failed: s.cfg.Versions.Failed(),
-		Window: s.cfg.Window, Mode: s.cfg.Mode, Asked: asked, Now: s.cfg.Now()}, target)
-	if asked && verdict == Wait {
-		verdict = Install // the owner asked: no need to wait for the window
-	}
+	verdict := s.decide(policy, cur, target, asked)
 	s.cfg.Logger.Info("update check", "running", cur, "offered", target.Version, "verdict", verdict)
 	switch verdict {
-	case UpToDate, Wait:
+	case UpToDate:
 	case Install:
-		s.install(ctx, cur, target)
-	case Available, UpdaterTooOld:
-		if s.told != target.Version.String() { // once per version, not hourly
-			s.told = target.Version.String()
-			s.cfg.Report("update."+map[Verdict]string{Available: "available", UpdaterTooOld: "needs_package"}[verdict],
-				map[string]any{"running": cur.String(), "offered": target.Version.String()})
-		}
+		s.install(ctx, policy.Source, cur, target)
+	case Available, Wait, UpdaterTooOld:
+		s.tell(verdict, cur, target.Version)
 	}
+}
+
+// decide applies the policy; when the owner asked, nobody waits for the
+// window.
+func (s *Supervisor) decide(policy Policy, cur Version, target Target, asked bool) Verdict {
+	verdict := Decide(Situation{Hive: s.cfg.Hive, Running: cur, Updater: s.cfg.Updater, Failed: s.cfg.Versions.Failed(),
+		Window: policy.Window, Mode: policy.Mode, Asked: asked, Now: s.cfg.Now()}, target)
+	if asked && verdict == Wait {
+		return Install
+	}
+	return verdict
+}
+
+// tell reports an update the owner should know about, once per version,
+// not hourly: available (manual mode, or waiting for the window in
+// automatic mode) or needing a newer updater from a package.
+func (s *Supervisor) tell(verdict Verdict, cur, offered Version) {
+	if s.told == offered.String() {
+		return
+	}
+	s.told = offered.String()
+	s.cfg.Report("update."+map[Verdict]string{Available: "available", Wait: "available", UpdaterTooOld: "needs_package"}[verdict],
+		map[string]any{"running": cur.String(), "offered": offered.String()})
 }
 
 // install downloads, switches, and keeps the new version only when it is
 // healthy in time; otherwise it rolls back and marks the version failed.
-func (s *Supervisor) install(ctx context.Context, from Version, t Target) {
+func (s *Supervisor) install(ctx context.Context, src Channel, from Version, t Target) {
 	tmp, err := os.MkdirTemp(s.cfg.Versions.dir, "download-") // fresh, never a path someone prepared
 	if err != nil {
 		s.cfg.Logger.Warn("update download", "err", err)
 		return
 	}
 	defer func() { _ = os.RemoveAll(tmp) }()
-	if err := s.cfg.Source.Fetch(ctx, tmp); err != nil {
+	if err := src.Fetch(ctx, tmp); err != nil {
 		s.cfg.Logger.Warn("update download", "version", t.Version, "err", err)
 		return
 	}

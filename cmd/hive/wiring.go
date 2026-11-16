@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/camhive/hive/internal/archive"
+	"github.com/camhive/hive/internal/archivekey"
 	"github.com/camhive/hive/internal/auth"
 	"github.com/camhive/hive/internal/diag"
 	"github.com/camhive/hive/internal/domain/camera"
@@ -30,6 +31,7 @@ import (
 	"github.com/camhive/hive/internal/ptz"
 	"github.com/camhive/hive/internal/retention"
 	"github.com/camhive/hive/internal/store"
+	"github.com/camhive/hive/internal/update/journal"
 	"github.com/camhive/hive/internal/video"
 )
 
@@ -46,6 +48,8 @@ type runtimeParts struct {
 	cameras *motion.Watcher // nil when the video engine is unavailable; the cameras' own motion events
 	store   *store.Store
 	archive string
+	vault   *archivekey.Vault // the archive key (ADR-0019)
+	exports *export.Manager   // nil when the video engine is unavailable
 	close   func()
 }
 
@@ -72,9 +76,12 @@ func assemble(ctx context.Context, cfg hiveconfig.Config, paths hiveconfig.Paths
 	licensing := hiveagent.NewLicensing(nil)
 	verifier := auth.NewVerifier(hiveID, keys, auth.WithLicenseValid(licensing.Usable))
 
-	parts := &runtimeParts{close: func() { _ = st.Close() }, store: st}
+	vault := openArchiveKey(paths, log.With("component", "archivekey"))
+	parts := &runtimeParts{close: func() { vault.Lock(); _ = st.Close() }, store: st, vault: vault} // Lock wipes the key
 	closeOpenEvents(ctx, st, log)
-	parts.motion = motion.NewHub(st.Events(), motion.Options{Logger: log.With("component", "motion")})
+	parts.motion = motion.NewHub(st.Events(), motion.Options{Logger: log.With("component", "motion"),
+		Observe: func(e store.Event) { parts.agent.PromptStart(e) }}) // motion starts reach the cloud only while fresh (ADR-0021)
+	cfg.SegmentMinutes = segmentMinutes(cfg.SegmentMinutes, vault.State())
 	eng, err := newEngine(cfg, paths, log, video.WithFrames(parts.motion.Frame))
 	if err != nil {
 		_ = st.Close()
@@ -88,13 +95,16 @@ func assemble(ctx context.Context, cfg hiveconfig.Config, paths hiveconfig.Paths
 	parts.agent.LoadLicense(ctx)
 	deps := hiveapp.Deps{Store: st, Verifier: verifier, Version: version, Notify: func() {}, Logger: log.With("component", "api"), Location: time.Local, PTZ: ptz.New(),
 		Licensed: licensing.Effective, Discovery: hiveapp.ONVIFDiscoverer{},
-		Local: auth.NewLocalSessions(hiveID, time.Now)} // the owner's emergency login (#57), LAN listener only
+		Local:   auth.NewLocalSessions(hiveID, time.Now),    // the owner's emergency login (#57), LAN listener only
+		Updates: updateControl(paths, journal.DefaultDir()), // update settings and "Update now" (#82)
+		Vault:   keyWithEngine{Vault: vault, log: log}, Emit: parts.agent.Emit}
 	if eng != nil {
+		deps.Vault = keyWithEngine{Vault: vault, eng: eng, log: log}
 		parts.ingest = ingest.New(st.Cameras(), eng, ingest.Options{Logger: log.With("component", "ingest")})
-		parts.index = archive.NewIndex(st, archive.WithLogger(log.With("component", "archive")))
+		parts.index = archive.NewIndex(st, archive.WithLogger(log.With("component", "archive")), archive.WithOpener(vault.OpenSegment))
 		parts.archive = cfg.ArchiveDir
-		deps.Playback = hiveapp.ArchiveFetch(archive.NewReader(cfg.ArchiveDir, archive.OpenPlain))
-		deps.Exports = export.NewManager(filepath.Join(paths.Data, "exports"), deps.Playback, st.Exports(),
+		deps.Playback = hiveapp.ArchiveFetch(archive.NewReader(cfg.ArchiveDir, vault.OpenSegment))
+		deps.Exports = export.NewManager(filepath.Join(paths.Data, "exports"), deps.Playback, st.Exports(), export.WithVault(vault),
 			export.WithKeep(export.Keep{MaxAge: time.Duration(cfg.ExportDays) * 24 * time.Hour, MaxBytes: int64(cfg.ExportMaxGB) << 30}),
 			export.WithOnDone(func(j export.Job) {
 				details, _ := json.Marshal(map[string]any{"camera": j.Request.Camera, "stream": j.Request.Stream, "start": j.Request.Start, "duration_s": int(j.Request.Duration.Seconds()), "status": j.Status, "bytes": j.Bytes, "error": j.Error})
@@ -105,16 +115,15 @@ func assemble(ctx context.Context, cfg hiveconfig.Config, paths hiveconfig.Paths
 		if err := deps.Exports.Recover(ctx); err != nil { // jobs cut off by the last stop
 			log.Error("export recovery", "err", err)
 		}
-		storageLow := events.NewCondition(st.Events(), "", hiveagent.EventStorageLow, events.WithLogger(log))
+		parts.exports = deps.Exports
+		storageLow := events.NewCondition(st.Events(), "", hiveagent.EventStorageLow, events.WithLogger(log), events.Observe(parts.agent.EmitStart))
 		parts.sweeper = retention.New(parts.index, st.Segments(),
 			retention.Policy{DefaultDays: cfg.RetentionDays, MinFreeBytes: int64(cfg.MinFreeGB) << 30,
 				MaxDays: func() int { return licensing.Effective().Int(entitlements.RetentionDaysMax) }},
 			retention.Options{ArchiveDir: cfg.ArchiveDir, Logger: log.With("component", "retention"), Exports: deps.Exports,
 				OnStorageLow: func(free int64) {
 					log.Error("storage low: archive disk below min_free_gb and nothing left to delete", "free_bytes", free)
-					data := map[string]any{"free_bytes": free, "min_free_gb": cfg.MinFreeGB}
-					parts.agent.Emit(hiveagent.EventStorageLow, data)
-					storageLow.Begin(context.Background(), time.Now(), data)
+					storageLow.Begin(context.Background(), time.Now(), map[string]any{"free_bytes": free, "min_free_gb": cfg.MinFreeGB})
 				},
 				OnStorageOK: func(int64) { storageLow.End(context.Background(), time.Now()) },
 			})
@@ -127,10 +136,13 @@ func assemble(ctx context.Context, cfg hiveconfig.Config, paths hiveconfig.Paths
 			Logger: log.With("component", "health"),
 			OnEvent: func(e health.Event) {
 				log.Info("camera event", "kind", e.Kind, "camera", e.Camera)
-				parts.agent.Emit(e.Kind, map[string]any{"camera": e.Camera, "data": e.Data})
-				if _, err := st.Events().Append(context.Background(), store.Event{Camera: e.Camera, Kind: e.Kind, At: e.At, Data: e.Data}); err != nil {
+				ev := store.Event{Camera: e.Camera, Kind: e.Kind, At: e.At, Data: e.Data}
+				id, err := st.Events().Append(context.Background(), ev)
+				if err != nil {
 					log.Error("store event", "err", err)
 				}
+				ev.ID = id // 0 when the write failed: the cloud then keys on camera and time
+				parts.agent.EmitEvent(ev)
 			},
 		})
 		deps.Health = parts.health

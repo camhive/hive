@@ -224,6 +224,7 @@ func (p *program) serve(ctx context.Context, app *hiveapp.App, parts *runtimePar
 			}
 		}()
 		go parts.index.Run(ctx, parts.archive, time.Minute)
+		go sealLoop(ctx, parts.vault, parts.index, parts.archive, parts.exports, log.With("component", "archivekey"))
 		go parts.sweeper.Run(ctx, 5*time.Minute)
 		go parts.health.Run(ctx)
 		go parts.locator.Run(ctx, time.Minute)

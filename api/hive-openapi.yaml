@@ -21,6 +21,20 @@ info:
     Changing or disabling the login, here or with `hive local-login` on the
     hive's console, ends every local session.
 
+    Archive encryption at rest (ADR-0019): off until the owner switches it on
+    with a passphrase (`POST /v0/archive/encryption`). From then on the hive
+    seals closed segments and stored exports to the archive key; after every
+    start of the hive the archive is **locked** until the owner unlocks it
+    (`POST /v0/archive/encryption/unlock`). While locked, playback, sound,
+    starting an export and downloading one answer `423 archive_locked`;
+    recording, live view, the calendar and the timeline go on. Every member
+    reads the state at `GET /v0/archive/encryption`. Enable, unlock (and a
+    wrong passphrase), lock, passphrase change and key-file download are
+    recorded in the action log (`archive.encryption.*`) and, except the
+    download, sent to the cloud without the passphrase. Five wrong
+    passphrases in 15 minutes refuse checks for 15 minutes
+    (`429 unlock_rate_limited` with `Retry-After`).
+
     Plan limits apply to remote requests only (#58). Requests that come
     through the cloud relay are remote: a token with `quality: sub` gets the
     sub stream for archive playback, exports and live offers whatever
@@ -52,8 +66,54 @@ components:
         code:
           type: string
           description: Stable machine-readable code.
-          enum: [token_missing, token_invalid, token_expired, clock_skew, wrong_hive, license_required, forbidden, not_found, invalid, bad_json, not_ready, engine, unsupported, camera, camera_auth, plan_limit, internal, lan_only, local_login_disabled, local_login_rate_limited, invalid_credentials, weak_password]
+          enum: [token_missing, token_invalid, token_expired, clock_skew, wrong_hive, license_required, forbidden, not_found, invalid, bad_json, not_ready, engine, unsupported, camera, camera_auth, plan_limit, internal, lan_only, local_login_disabled, local_login_rate_limited, invalid_credentials, weak_password, invalid_update_window, updates_unavailable, archive_locked, encryption_on, encryption_off, wrong_passphrase, unlock_rate_limited]
         message: { type: string }
+    HiveInfo:
+      type: object
+      required: [version, capabilities, archive_encryption]
+      properties:
+        version: { type: string, example: "0.1.6", description: "The running hive version" }
+        archive_encryption:
+          type: string
+          enum: [off, locked, unlocked]
+          description: "Archive encryption (ADR-0019), as GET /v0/archive/encryption answers it: locked means playback and exports wait for the owner"
+        capabilities:
+          type: array
+          items: { type: string }
+          example: [archive.delete, archive.encryption, camera.identity, local_login, motion, updates]
+          description: |
+            What this hive's software can do (ADR-0022), sorted. Names are never removed or
+            renamed; an incompatible change gets a new name. A hive that reports no list
+            (v0.1.6 or older) has the v0.1.6 baseline.
+    UpdateSettings:
+      type: object
+      required: [updates, update_window, update_channel]
+      description: "The owner's update choices (ADR-0018 §6), stored in hive.yaml; hive-updater reads them at every check and within 30 s of a change."
+      properties:
+        updates: { type: string, enum: [automatic, manual], description: "manual: install only on Update now" }
+        update_window: { type: string, example: "02:00-05:00", description: "HH:MM-HH:MM in the hive's local time, may cross midnight; two different times (else 400 invalid_update_window)" }
+        update_channel: { type: string, enum: [stable, beta] }
+    UpdateStatus:
+      allOf:
+        - $ref: "#/components/schemas/UpdateSettings"
+        - type: object
+          required: [running, supported]
+          properties:
+            running: { type: string, example: "0.1.6" }
+            supported: { type: boolean, description: "false: this build never updates itself" }
+            unsupported_reason: { type: string, enum: [dev_build, no_root, no_updater], description: "From what started this hive: dev_build: hive-updater is a local build; no_root: hive-updater has no trusted update root; no_updater: hive-updater did not start this hive (it runs in the foreground, or no updater is installed)" }
+            settings_need_restart: { type: boolean, description: "The running hive-updater reads hive.yaml only at start (older than v0.1.7): a changed setting applies after the service restarts" }
+            available: { type: string, example: "0.1.8", description: "The version waiting (update.available): in manual mode for Update now, in automatic mode for the update window; newer than what runs and not rolled back" }
+            needs_package: { type: string, example: "0.2.0", description: "A version that needs a newer hive-updater (update.needs_package): install the current package; Update now cannot install it" }
+            last:
+              type: object
+              required: [action, from, to, at]
+              description: The updater's last update or rollback, from the activity log
+              properties:
+                action: { type: string, enum: [update.applied, update.rolled_back] }
+                from: { type: string }
+                to: { type: string }
+                at: { type: string, format: date-time }
     Source:
       type: object
       required: [kind, address]
@@ -290,7 +350,27 @@ components:
         role: { type: string, enum: [owner] }
         cameras: { type: array, items: { type: string }, description: "always [*]" }
         local: { type: boolean, enum: [true] }
+    ArchiveEncryption:
+      type: object
+      required: [state, sealing]
+      properties:
+        sealing:
+          type: boolean
+          description: "New footage is being sealed. False while off; false while on means the hive cannot read the archive's public key (a damaged disk, a file removed by hand): footage stays in clear until the owner unlocks the archive, which writes the key again. Show it as a warning."
+        state:
+          type: string
+          enum: [off, locked, unlocked]
+          description: "off: footage is stored in clear. locked: new footage is sealed, nothing sealed can be played until the owner unlocks. unlocked: everything plays."
+    Passphrase:
+      type: object
+      required: [passphrase]
+      properties:
+        passphrase: { type: string, minLength: 10, maxLength: 256, writeOnly: true, description: "10-256 characters (the password policy); the current one when changing it" }
+        new_passphrase: { type: string, minLength: 10, maxLength: 256, writeOnly: true, description: "POST /v0/archive/encryption/passphrase only" }
   responses:
+    ArchiveLocked:
+      description: "`code: archive_locked` — the archive is encrypted and locked until its owner unlocks it (ADR-0019)"
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
     Unauthorized:
       description: Missing, invalid, expired or foreign token.
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
@@ -316,6 +396,46 @@ paths:
                   status: { type: string }
                   version: { type: string }
                   recording: { type: integer, description: "Cameras recording now; only to requests from this machine (the updater, ADR-0018)" }
+  /v0/hive:
+    get:
+      summary: The hive's version and capabilities (any Member)
+      responses:
+        "200":
+          description: OK
+          content: { application/json: { schema: { $ref: "#/components/schemas/HiveInfo" } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v0/hive/updates:
+    get:
+      summary: Update settings and status (owner, #82)
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/UpdateStatus" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { description: "internal: hive.yaml or the activity log could not be read or written", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "503": { description: "not_ready: the hive is still starting", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    put:
+      summary: Change the update settings (owner); action-logged as update.settings_changed
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/UpdateSettings" } } }
+      responses:
+        "200": { description: The stored settings and the status, content: { application/json: { schema: { $ref: "#/components/schemas/UpdateStatus" } } } }
+        "400": { description: "invalid_update_window, invalid (mode or channel) or bad_json", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { description: "internal: hive.yaml or the activity log could not be read or written", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "503": { description: "not_ready: the hive is still starting", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /v0/hive/updates/install:
+    post:
+      summary: Update now (owner); the same request as `hive update`, taken by hive-updater within 30 s
+      description: "Installs what is offered whatever the mode or window. The result (update.applied or update.rolled_back) reaches the activity log; the request is logged as update.requested."
+      responses:
+        "202": { description: Requested, content: { application/json: { schema: { type: object } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { description: "internal: hive.yaml or the activity log could not be read or written", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "503": { description: "not_ready: the hive is still starting", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "409": { description: "updates_unavailable: this build never updates itself", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
   /v0/cameras:
     get:
       summary: Cameras the token may view
@@ -408,6 +528,7 @@ paths:
             X-Camhive-Stream: { description: "The stream actually served (main or sub); differs from the request through the relay or for a camera without the requested stream", schema: { type: string, enum: [main, sub] } }
           content: { video/mp4: {} }
         "404": { $ref: "#/components/responses/NotFound" }
+        "423": { $ref: "#/components/responses/ArchiveLocked" }
         "502": { description: "`code: engine` — playback unavailable" }
   /v0/cameras/{id}/archive/audio:
     parameters:
@@ -426,6 +547,7 @@ paths:
         "400": { description: "`code: invalid` — bad span, or longer than 60 s" }
         "404": { description: "`code: no_audio` — no sound recorded (camera without microphone or recording sound switched off); or the camera is unknown", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
         "415": { description: "`code: audio_unsupported` — sound recorded in a format the hive does not convert yet (only G.711/LPCM)", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "423": { $ref: "#/components/responses/ArchiveLocked" }
         "502": { description: "`code: engine` — playback unavailable" }
   /v0/cameras/{id}/exports:
     parameters:
@@ -440,6 +562,7 @@ paths:
         "403": { description: "`code: forbidden` (not an operator) or `code: plan_limit` (longer than the token allows, through the relay only)", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { description: "`code: invalid`" }
+        "423": { $ref: "#/components/responses/ArchiveLocked" }
   /v0/exports:
     get:
       summary: The caller's exports, newest first
@@ -457,6 +580,88 @@ paths:
         "409": { description: "`code: export_running` — an export of that footage is still being made", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
         "422": { description: "`code: invalid` — no cameras, or the start is not before the end", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
         "503": { description: "`code: not_ready` — the archive is not available yet", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /v0/archive/encryption:
+    get:
+      summary: Whether the archive is encrypted and locked (every member)
+      responses:
+        "200": { description: "OK", content: { application/json: { schema: { $ref: "#/components/schemas/ArchiveEncryption" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      summary: Switch encryption on with a passphrase (owner signed in through Camhive; a local session gets 403); the archive is left unlocked
+      description: |
+        Irreversible in this version. Footage recorded from now on is sealed
+        when its segment closes (2-minute segments), and so are the segments
+        and exports already there, in the background. Without the passphrase
+        and the key file (`GET /v0/archive/encryption/key-file`) nobody can
+        play the sealed footage again. Recorded as `archive.encryption.enable`.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/Passphrase" } } }
+      responses:
+        "200": { description: "Enabled", content: { application/json: { schema: { $ref: "#/components/schemas/ArchiveEncryption" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { description: "`code: encryption_on`", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "422": { description: "`code: weak_password`", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /v0/archive/encryption/unlock:
+    post:
+      summary: Unlock the archive with the passphrase (owner, a local emergency session included); the key stays in the hive's memory until lock or restart
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/Passphrase" } } }
+      responses:
+        "200": { description: "Unlocked", content: { application/json: { schema: { $ref: "#/components/schemas/ArchiveEncryption" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "`code: forbidden` (not the owner) or `code: wrong_passphrase`", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "409": { description: "`code: encryption_off`", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "429":
+          description: "`code: unlock_rate_limited`; `Retry-After` says when to try again"
+          headers:
+            Retry-After: { schema: { type: integer }, description: seconds }
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  /v0/archive/encryption/lock:
+    post:
+      summary: Lock the archive again (owner, a local emergency session included); the key is wiped from memory
+      responses:
+        "200": { description: "Locked", content: { application/json: { schema: { $ref: "#/components/schemas/ArchiveEncryption" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { description: "`code: encryption_off`", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /v0/archive/encryption/passphrase:
+    post:
+      summary: Change the passphrase (owner signed in through Camhive; a local session gets 403); the key and the footage stay the same, an earlier key file keeps the old passphrase
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/Passphrase" } } }
+      responses:
+        "204": { description: "Changed; locked or unlocked as before" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "`code: forbidden` (not the owner) or `code: wrong_passphrase` (the current one)", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "409": { description: "`code: encryption_off`", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "422": { description: "`code: weak_password` (the new one)", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "429":
+          description: "`code: unlock_rate_limited`"
+          headers:
+            Retry-After: { schema: { type: integer }, description: seconds }
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  /v0/archive/encryption/key-file:
+    get:
+      summary: Download the key file, the owner's backup (owner signed in through Camhive; a local session gets 403)
+      description: |
+        The keyring as the hive stores it: an age v1 file encrypted with the
+        passphrase (scrypt), holding an age identity file with one
+        `AGE-SECRET-KEY-1…` line per key, newest last. Useless without the
+        passphrase; with it, `age -d` recovers the keys and they open the
+        `.mp4.age` segments without Camhive. Recorded as
+        `archive.encryption.key_file`.
+      responses:
+        "200":
+          description: "The key file"
+          headers: { Content-Disposition: { schema: { type: string }, description: "attachment; filename=\"camhive-archive-key-<hive id>.age\"" } }
+          content: { application/octet-stream: {} }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { description: "`code: encryption_off`", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
   /v0/exports/{id}:
     parameters:
       - { name: id, in: path, required: true, schema: { type: string } }
@@ -470,10 +675,12 @@ paths:
       - { name: id, in: path, required: true, schema: { type: string } }
     get:
       summary: Download the finished file
+      description: Plain MP4 with range requests. With encryption on the hive keeps the file sealed and decrypts it for the download.
       responses:
         "200": { description: "OK", content: { video/mp4: {} }, headers: { Content-Disposition: { schema: { type: string } } } }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { description: "`code: not_ready` — still running or failed" }
+        "423": { $ref: "#/components/responses/ArchiveLocked" }
   /v0/cameras/{id}/health:
     parameters:
       - { name: id, in: path, required: true, schema: { type: string } }

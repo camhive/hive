@@ -17,10 +17,16 @@ import (
 // Platform is this machine's bundle platform, e.g. linux_arm64.
 func Platform() string { return runtime.GOOS + "_" + runtime.GOARCH }
 
-// ExecRunner starts `<exe> run` with the updater's environment, output
-// going to the updater's own output (the service log).
+// LaunchedEnv tells the Hive that hive-updater started it and whether it
+// updates it (#82): "on", "dev_build" (a local updater build) or "no_root"
+// (no trusted update root). Updaters before v0.1.7 do not set it.
+const LaunchedEnv = "CAMHIVE_UPDATER"
+
+// ExecRunner starts `<exe> run` with the updater's environment (plus Env),
+// output going to the updater's own output (the service log).
 type ExecRunner struct {
 	Args   []string  // default: run
+	Env    []string  // added to the updater's environment (LaunchedEnv)
 	Stdout io.Writer // default os.Stdout
 	Stderr io.Writer // default os.Stderr
 	Grace  time.Duration
@@ -36,6 +42,7 @@ func (r ExecRunner) Start(_ context.Context, _ Version, exe string) (Process, er
 	}
 	cmd := exec.Command(exe, args...) //nolint:gosec,noctx // the verified bundle; stopped by Stop, not by a context
 	cmd.Stdout, cmd.Stderr = orDefault(r.Stdout, os.Stdout), orDefault(r.Stderr, os.Stderr)
+	cmd.Env = append(os.Environ(), r.Env...)
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}

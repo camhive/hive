@@ -111,7 +111,7 @@ directory and claim again. Recordings stay on disk.
 | `hive run` | Run in the foreground (for trying things out) |
 | `hive diag` | Write a diagnostic bundle, see [Troubleshooting](troubleshooting.md) |
 | `hive version` | Version, commit and build date |
-| `hive update` | Ask `hive-updater` to install an available update now (needs root / Administrator) |
+| `hive update` | Ask `hive-updater` to install an available update now (needs root / Administrator); the same as Update now in the app |
 
 With a custom data directory, prefix every command with
 `CAMHIVE_DATA_DIR=…`, or the command looks in the default location.
@@ -139,22 +139,49 @@ updater goes back to the old version on its own and never tries that one
 again. How it is secured: [Hive updates](../security/updates.md) in the
 developer documentation.
 
-Settings in `hive.yaml`:
+**In the app:** Hive → Settings → Updates (owner only) shows the running
+version, an update that is waiting, and the last update or rollback. There
+you choose automatic or manual updates, the update window and the
+channel, and **Update now** installs a waiting update at once, whatever
+the mode or window. With automatic updates a waiting version shows when it
+will install (in the window); a version that needs a newer `hive-updater`
+says to install the current package instead, since Update now cannot
+install it. The result (updated, or rolled back) appears in the hive's
+activity log. Update settings need a sign-in through Camhive; the local
+emergency sign-in cannot change them. The app writes your choices into `hive.yaml`; the
+hive picks them up at its next update check, within a minute of saving,
+without a restart. A hive whose updater is older than v0.1.7 reads `hive.yaml`
+only when its service starts: the app says so, and `sudo hive restart`
+(or installing the current package) applies the change. A feature that
+needs a newer hive shows which version brings it; the owner gets
+**Update now** there too.
+
+Settings in `hive.yaml` (the first three are also in the app):
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `updates` | `automatic` | `manual`: the hive only tells you an update is available; `hive update` installs it |
-| `update_window` | `02:00-05:00` | When automatic updates may install, local time; security fixes do not wait |
+| `updates` | `automatic` | `manual`: the hive only tells you an update is available; Update now in the app or `hive update` installs it. Security fixes wait too |
+| `update_window` | `02:00-05:00` | When automatic updates may install, the hive's local time, `HH:MM-HH:MM` with two different times; may cross midnight. Security fixes do not wait |
 | `update_channel` | `stable` | `beta` for earlier releases |
-| `update_url` | `https://updates.dev.camhive.app` | Where signed update information comes from; it is checked against keys built into the hive, so the server itself is not trusted |
+| `update_url` | `https://updates.dev.camhive.app` | Where signed update information comes from; it is checked against keys built into the hive, so the server itself is not trusted. Not changeable from the app |
+
+Edits to these settings in `hive.yaml` by hand apply the same way: at the
+next check, without a restart (from v0.1.7 on).
 
 The updater keeps its versions in `/var/lib/camhive-updater` (Windows:
 `C:\Program Files\Camhive\updater`), readable only by root /
 Administrators, never in the data directory. Installed updates and
 rollbacks appear in the activity log.
 
-**Status:** the updater ships from this version on but installs nothing
-yet: the update keys are being set up. Until then, upgrade by hand:
+**How you notice an update:** the hive checks the channel once an hour and
+installs within the window. The activity log of the hive shows
+`update.available` when a new version is found, `update.applied` when it
+runs, and `update.rolled_back` if the new version was not healthy; the
+service log prints `hive started ... version=` with the running version.
+`hive version` prints the version of the installed package, which the
+updater may have superseded (#109). Hives on
+v0.1.4 or older have no updater yet and need one manual install of the new
+package or archive:
 
 - **deb or rpm:** install the new package. The service, its data directory
   (`CAMHIVE_DATA_DIR`), identity, configuration and recordings are kept;

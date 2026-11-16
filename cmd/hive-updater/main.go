@@ -6,7 +6,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -60,7 +59,8 @@ type program struct {
 }
 
 func (p *program) Start(_ service.Service) error {
-	sup, err := assemble(p.log, hiveconfig.DefaultPaths(), journal.DefaultDir(), executableDir(), version.Current())
+	paths := dataPaths(hiveconfig.DefaultPaths(), os.Getenv("CAMHIVE_DATA_DIR"))
+	sup, err := assemble(p.log, paths, journal.DefaultDir(), executableDir(), version.Current())
 	if err != nil {
 		return err
 	}
@@ -68,7 +68,7 @@ func (p *program) Start(_ service.Service) error {
 	p.cancel, p.done = cancel, make(chan struct{})
 	go func() {
 		defer close(p.done)
-		go watchRequests(ctx, journal.DefaultDir(), sup, p.log)
+		go newWatcher(journal.DefaultDir(), paths, sup, p.log).run(ctx)
 		sup.Run(ctx)
 	}()
 	return nil
@@ -80,6 +80,15 @@ func (p *program) Stop(_ service.Service) error {
 		<-p.done
 	}
 	return nil
+}
+
+// dataPaths honours CAMHIVE_DATA_DIR, which the service sets when the data
+// lives elsewhere (a USB disk).
+func dataPaths(def hiveconfig.Paths, dir string) hiveconfig.Paths {
+	if dir == "" {
+		return def
+	}
+	return def.WithDataDir(dir)
 }
 
 func executableDir() string {
@@ -96,9 +105,6 @@ func executableDir() string {
 // assemble builds the supervisor: the private store seeded with the bundle
 // next to this executable, the hive's settings, the trusted root.
 func assemble(log *slog.Logger, paths hiveconfig.Paths, dir, bundleDir string, build version.Info) (*update.Supervisor, error) {
-	if d := os.Getenv("CAMHIVE_DATA_DIR"); d != "" {
-		paths = paths.WithDataDir(d)
-	}
 	cfg, _, err := hiveconfig.Load(paths)
 	if err != nil {
 		return nil, err
@@ -115,39 +121,61 @@ func assemble(log *slog.Logger, paths hiveconfig.Paths, dir, bundleDir string, b
 	if err := versions.Seed(own, bundleDir); err != nil {
 		return nil, fmt.Errorf("seed %s from %s: %w", own, bundleDir, err)
 	}
-	window, err := update.ParseWindow(cfg.UpdateWindow)
+	if err := journal.Announce(dir, own.String()); err != nil {
+		return nil, err
+	}
+	pol := newPolicies(paths, dir, release, log)
+	first, err := pol.from(cfg)
 	if err != nil {
 		return nil, err
 	}
+	pol.last = first
+	verdict := launchVerdict(release, first.Source != nil)
 	sc := update.SupervisorConfig{
-		Versions: versions, Runner: update.ExecRunner{}, Health: update.HTTPHealth("http://"+cfg.ListenAddr, nil),
-		Hive: hiveID(paths), Updater: own, Window: window, Mode: update.Mode(cfg.Updates), Logger: log,
+		Versions: versions, Runner: update.ExecRunner{Env: []string{update.LaunchedEnv + "=" + verdict}}, Health: update.HTTPHealth("http://"+cfg.ListenAddr, nil),
+		Hive: hiveID(paths), Updater: own, Policy: pol.current, Logger: log,
 		Report: func(kind string, data map[string]any) {
 			if err := journal.Append(dir, kind, data); err != nil {
 				log.Error("update journal", "err", err)
 			}
 		},
 	}
-	if built, err := time.Parse("2006-01-02", build.Date); err == nil {
-		sc.NotBefore = built
-	} else if t, err := time.Parse(time.RFC3339, build.Date); err == nil {
-		sc.NotBefore = t
+	sc.NotBefore = builtAt(build.Date)
+	logUpdates(log, cfg, verdict)
+	return update.NewSupervisor(sc), nil
+}
+
+// builtAt is the build date, or zero when the build has none.
+func builtAt(date string) time.Time {
+	if t, err := time.Parse("2006-01-02", date); err == nil {
+		return t
 	}
-	root, err := trustedRoot(cfg)
+	t, _ := time.Parse(time.RFC3339, date)
+	return t
+}
+
+// launchVerdict is whether this updater installs updates, as the hive it
+// starts learns it (update.LaunchedEnv).
+func launchVerdict(release, source bool) string {
 	switch {
-	case err != nil:
-		return nil, err
 	case !release:
+		return "dev_build"
+	case !source:
+		return "no_root"
+	}
+	return "on"
+}
+
+// logUpdates says at start whether this updater installs updates.
+func logUpdates(log *slog.Logger, cfg hiveconfig.Config, verdict string) {
+	switch verdict {
+	case "dev_build":
 		log.Info("development build: updates are off")
-	case root == nil:
+	case "no_root":
 		log.Warn("no update root in this build: updates are off")
 	default:
-		url := cfg.UpdateURL + "/" + cfg.UpdateChannel
-		log.Info("updates on", "url", url, "mode", cfg.Updates, "window", cfg.UpdateWindow)
-		sc.Source = &update.SourceChannel{Platform: update.Platform(), Source: update.Source{
-			MetadataURL: url, Root: root, CacheDir: filepath.Join(dir, "tuf")}}
+		log.Info("updates on", "url", cfg.UpdateURL+"/"+cfg.UpdateChannel, "mode", cfg.Updates, "window", cfg.UpdateWindow)
 	}
-	return update.NewSupervisor(sc), nil
 }
 
 // trustedRoot is update_root from hive.yaml when set, else the built-in one.
@@ -167,25 +195,72 @@ func hiveID(paths hiveconfig.Paths) string {
 	return st.Link.HiveID
 }
 
-// requestFile is written by `hive update`; the updater acts on it within a
-// minute. It lives in the private updater directory: only root can ask.
-const requestFile = "update-request"
+// checker is the part of the supervisor the watcher drives.
+type checker interface {
+	AskNow(ctx context.Context)
+	CheckNow(ctx context.Context)
+}
 
-func watchRequests(ctx context.Context, dir string, sup *update.Supervisor, log *slog.Logger) {
-	t := time.NewTicker(30 * time.Second)
+// watcher looks every 30 s for an owner's request to update now (`hive
+// update`, the app's "Update now") and for changed update settings in
+// hive.yaml (#82). It keeps its own view of the settings: the policy Run
+// reads is not shared with it.
+type watcher struct {
+	dir   string
+	paths hiveconfig.Paths
+	sup   checker
+	log   *slog.Logger
+	seen  watched
+	every time.Duration
+}
+
+// watched are the settings whose change calls for a check.
+type watched struct {
+	hiveconfig.UpdateSettings
+	url, root string
+}
+
+func newWatcher(dir string, paths hiveconfig.Paths, sup checker, log *slog.Logger) *watcher {
+	w := &watcher{dir: dir, paths: paths, sup: sup, log: log, every: 30 * time.Second}
+	w.seen, _ = w.settings()
+	return w
+}
+
+func (w *watcher) settings() (watched, bool) {
+	cfg, err := hiveconfig.Read(w.paths)
+	if err != nil {
+		return watched{}, false
+	}
+	return watched{UpdateSettings: cfg.UpdateSettings(), url: cfg.UpdateURL, root: cfg.UpdateRoot}, true
+}
+
+func (w *watcher) run(ctx context.Context) {
+	t := time.NewTicker(w.every)
 	defer t.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			w.tick(ctx)
 		}
-		p := filepath.Join(dir, requestFile)
-		if err := os.Remove(p); err == nil {
-			log.Info("update requested by the owner")
-			sup.AskNow(ctx)
-		} else if !errors.Is(err, os.ErrNotExist) {
-			log.Warn("update request", "err", err)
+	}
+}
+
+func (w *watcher) tick(ctx context.Context) {
+	asked, err := journal.TakeRequest(w.dir)
+	if err != nil {
+		w.log.Warn("update request", "err", err)
+	}
+	if asked {
+		w.log.Info("update requested by the owner")
+		w.sup.AskNow(ctx)
+	}
+	if now, ok := w.settings(); ok && now != w.seen {
+		w.seen = now
+		w.log.Info("update settings changed", "mode", now.Updates, "window", now.UpdateWindow, "channel", now.UpdateChannel)
+		if !asked { // an asked check already read them
+			w.sup.CheckNow(ctx)
 		}
 	}
 }

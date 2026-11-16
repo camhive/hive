@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, } from "./api";
 import { unwrap, CamhiveError } from "@camhive/api";
 import { cacheClear, cacheGet, cacheSet, isNetworkError } from "./cache";
+import { leavePushHere } from "./push";
 
 export type Me = { id: string; email: string; locale: string; totp_enabled: boolean; created_at: string };
 
@@ -33,6 +34,7 @@ export function useMe() {
 export function useSignOut() {
   const qc = useQueryClient();
   return async () => {
+    await leavePushHere(); // a shared browser must not keep getting this account's notifications
     await api.POST("/v1/auth/logout");
     cacheClear();
     await qc.invalidateQueries({ queryKey: ["me"] });

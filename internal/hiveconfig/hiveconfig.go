@@ -174,7 +174,7 @@ func (c Config) validateUpdates() error {
 		return fmt.Errorf("hiveconfig: update_channel %q is not stable or beta", c.UpdateChannel)
 	}
 	if !windowRE.MatchString(c.UpdateWindow) || c.UpdateWindow[:5] == c.UpdateWindow[6:] {
-		return fmt.Errorf("hiveconfig: update_window %q must look like 02:00-05:00", c.UpdateWindow)
+		return fmt.Errorf("%w (got %q)", ErrUpdateWindow, c.UpdateWindow)
 	}
 	if c.Updates != "automatic" && c.Updates != "manual" {
 		return fmt.Errorf("hiveconfig: updates %q is not automatic or manual", c.Updates)
@@ -215,13 +215,32 @@ func Load(p Paths) (cfg Config, firstRun bool, err error) {
 	case err != nil:
 		return Config{}, false, fmt.Errorf("hiveconfig: read %s: %w", p.Config, err)
 	}
+	cfg, err = parse(p, raw)
+	return cfg, false, err
+}
+
+// Read parses the config file and never creates anything: for hive-updater,
+// which runs as root and must not put a stub config or directories under
+// the mount point of a data disk that is not mounted yet. A missing file
+// is an error wrapping os.ErrNotExist.
+func Read(p Paths) (Config, error) {
+	raw, err := os.ReadFile(p.Config) //nolint:gosec // path from our own Paths
+	if err != nil {
+		return Config{}, fmt.Errorf("hiveconfig: read %s: %w", p.Config, err)
+	}
+	return parse(p, raw)
+}
+
+// parse reads raw over the defaults and validates the result.
+func parse(p Paths, raw []byte) (Config, error) {
+	cfg := defaults(p)
 	if err := yaml.Unmarshal(raw, &cfg); err != nil {
-		return Config{}, false, fmt.Errorf("hiveconfig: parse %s: %w", p.Config, err)
+		return Config{}, fmt.Errorf("hiveconfig: parse %s: %w", p.Config, err)
 	}
 	if err := cfg.Validate(); err != nil {
-		return Config{}, false, err
+		return Config{}, err
 	}
-	return cfg, false, nil
+	return cfg, nil
 }
 
 // LoadOrCreateKey returns the hive's Ed25519 identity key, generating and

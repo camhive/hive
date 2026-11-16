@@ -287,3 +287,56 @@ func TestGatewayHooksGateHelloAndReportPresenceAndEvents(t *testing.T) {
 		}
 	}
 }
+
+// OnOffline runs after the connection is unregistered: a hook that asks
+// Online sees a newer connection that superseded this one, and nothing
+// after the hive's last connection ended (review of #108 item 8).
+func TestOnOfflineSeesOnlyANewerConnection(t *testing.T) {
+	ca, _ := pki.NewCA("test CA", time.Hour)
+	srvTLS, _ := ca.ServerTLSConfig("gateway.test")
+	ln, err := tls.Listen("tcp", "127.0.0.1:0", srvTLS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var gw *tunnel.Gateway
+	seen := make(chan bool, 4)
+	gw = tunnel.NewGateway(tunnel.GatewayConfig{PingInterval: 200 * time.Millisecond, Hooks: tunnel.Hooks{
+		OnOffline: func(id pki.HiveID) { seen <- gw.Online(id) },
+	}})
+	go func() { _ = gw.Serve(ln) }()
+	t.Cleanup(func() { _ = gw.Close() })
+	f := &fixture{ca: ca, gateway: gw, addr: ln.Addr().String()}
+
+	agent := func(reconnect time.Duration) context.CancelFunc {
+		pub, priv, _ := ed25519.GenerateKey(nil)
+		cert, _ := ca.IssueDevice("hv_dup", pub, time.Hour)
+		cliTLS, _ := pki.ClientTLSConfig(ca.Certificate(), cert, priv, "gateway.test")
+		ag := tunnel.NewAgent(tunnel.AgentConfig{URL: "wss://" + f.addr + "/v1/hive", TLS: cliTLS, HiveID: "hv_dup", Version: "t",
+			ReconnectMin: reconnect, ReconnectMax: reconnect}, echoHandler)
+		ctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(cancel)
+		go ag.Run(ctx)
+		return cancel
+	}
+	stopOld := agent(time.Minute) // must not come back during the test
+	waitOnline(t, gw, "hv_dup")
+	stopNew := agent(time.Minute)
+	select {
+	case online := <-seen:
+		if !online {
+			t.Fatal("the superseded connection's OnOffline did not see the newer one")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no OnOffline for the superseded connection")
+	}
+	stopOld()
+	stopNew()
+	select {
+	case online := <-seen:
+		if online {
+			t.Fatal("OnOffline after the last connection still sees the hive online")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no OnOffline for the last connection")
+	}
+}

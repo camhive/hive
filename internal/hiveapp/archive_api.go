@@ -25,6 +25,24 @@ func ArchiveFetch(r *archive.Reader) export.Fetch {
 	}
 }
 
+// requireFootage is requireArchive for what reads footage: playback, sound
+// and new exports also wait while the archive is locked (ADR-0019 §3).
+func (a *api) requireFootage(w http.ResponseWriter) bool {
+	return a.requireArchive(w) && !a.archiveLocked(w)
+}
+
+// playbackFailed answers why the archive reader could not start a span:
+// locked (it was locked while the request was on its way) or unavailable.
+func playbackFailed(w http.ResponseWriter, err error) bool {
+	if err == nil {
+		return false
+	}
+	if !lockedError(w, err) {
+		writeError(w, http.StatusBadGateway, "engine", "playback unavailable")
+	}
+	return true
+}
+
 func (a *api) requireArchive(w http.ResponseWriter) bool {
 	if a.d.Index == nil || a.d.Playback == nil || a.d.Exports == nil {
 		writeError(w, http.StatusServiceUnavailable, "not_ready", "archive is not initialised")
@@ -193,7 +211,7 @@ func playSpan(w http.ResponseWriter, r *http.Request) (time.Time, time.Duration,
 
 // play answers a span of footage from the archive reader, after the scope check.
 func (a *api) play(w http.ResponseWriter, r *http.Request) {
-	if !a.requireArchive(w) {
+	if !a.requireFootage(w) {
 		return
 	}
 	id, ok := cameraScope(w, r, auth.ActionArchive)
@@ -209,8 +227,7 @@ func (a *api) play(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body, err := a.d.Playback(r.Context(), export.Request{Camera: id, Stream: stream, Start: start, Duration: span, Owner: claimsFrom(r).Account})
-	if err != nil {
-		writeError(w, http.StatusBadGateway, "engine", "playback unavailable")
+	if playbackFailed(w, err) {
 		return
 	}
 	defer func() { _ = body.Close() }()
@@ -218,7 +235,14 @@ func (a *api) play(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(servedStreamHeader, stream) // the player needs this stream's codec, not the one it asked for
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
-	_ = archive.CopyPlayable(w, body) // video only: browsers refuse the whole file over a track they cannot decode
+	// Video only: browsers refuse the whole file over a track they cannot
+	// decode. A read that fails once the answer has started (a sealed chunk
+	// changed on disk, a disk error) breaks the answer off, so the player
+	// sees an error instead of a shorter clip that looks whole.
+	if err := archive.CopyPlayable(w, body); err != nil && r.Context().Err() == nil {
+		a.d.Logger.Error("playback broken off", "camera", id, "start", start, "err", err)
+		panic(http.ErrAbortHandler)
+	}
 }
 
 // maxAudioSpan bounds one audio answer: it is built in memory (ADR-0015).
@@ -227,7 +251,7 @@ const maxAudioSpan = time.Minute
 // audio answers a span's recorded sound as WAV (ADR-0015); the player asks
 // for it a minute at a time when the viewer turns sound on.
 func (a *api) audio(w http.ResponseWriter, r *http.Request) {
-	if !a.requireArchive(w) {
+	if !a.requireFootage(w) {
 		return
 	}
 	id, ok := cameraScope(w, r, auth.ActionArchive)
@@ -247,8 +271,7 @@ func (a *api) audio(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body, err := a.d.Playback(r.Context(), export.Request{Camera: id, Stream: stream, Start: start, Duration: span, Owner: claimsFrom(r).Account})
-	if err != nil {
-		writeError(w, http.StatusBadGateway, "engine", "playback unavailable")
+	if playbackFailed(w, err) {
 		return
 	}
 	defer func() { _ = body.Close() }()
@@ -301,7 +324,7 @@ func toExportView(j export.Job) exportView {
 }
 
 func (a *api) createExport(w http.ResponseWriter, r *http.Request) {
-	if !a.requireArchive(w) {
+	if !a.requireFootage(w) {
 		return
 	}
 	id, ok := cameraScope(w, r, auth.ActionExport)
@@ -383,18 +406,22 @@ func (a *api) exportFile(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	path, err := a.d.Exports.FilePath(r.Context(), job.ID)
+	f, err := a.d.Exports.Open(r.Context(), job.ID)
 	if errors.Is(err, export.ErrNotReady) {
 		writeError(w, http.StatusConflict, "not_ready", "export is not finished")
+		return
+	}
+	if lockedError(w, err) {
 		return
 	}
 	if err != nil {
 		a.internal(w, err)
 		return
 	}
+	defer func() { _ = f.Close() }()
 	w.Header().Set("Content-Type", "video/mp4")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+job.FileName+`"`)
-	http.ServeFile(w, r, path)
+	http.ServeContent(w, r, "", job.DoneAt, io.NewSectionReader(f, 0, f.Size())) // plain MP4, decrypted for the owner when sealed
 }
 
 // archiveIndexer is the subset of archive.Index the API uses.

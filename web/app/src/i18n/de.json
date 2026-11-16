@@ -105,7 +105,16 @@
     "camera_mismatch": "An dieser Adresse antwortet ein anderes Gerät. Wenn Sie die Kamera ersetzt haben, bestätigen Sie es unten.",
     "lan_only": "Das geht nur über die Adresse des Hive in Ihrem Heimnetz, nicht über das Camhive-Relay.",
     "local_login_disabled": "Die lokale Anmeldung ist für diesen Hive nicht eingeschaltet. Schalten Sie sie in den Einstellungen des Hive ein, solange Camhive erreichbar ist, oder führen Sie „hive local-login set“ auf dem Hive aus.",
-    "local_login_rate_limited": "Zu viele fehlgeschlagene Anmeldungen. Versuchen Sie es später erneut."
+    "local_login_rate_limited": "Zu viele fehlgeschlagene Anmeldungen. Versuchen Sie es später erneut.",
+    "archive_locked": "Die Aufnahmen sind verschlüsselt und gesperrt. Der Eigentümer entsperrt sie nach jedem Neustart des Hive mit der Passphrase.",
+    "encryption_on": "Die Verschlüsselung ist für diesen Hive bereits eingeschaltet.",
+    "encryption_off": "Die Verschlüsselung ist für diesen Hive nicht eingeschaltet.",
+    "wrong_passphrase": "Falsche Passphrase.",
+    "unlock_rate_limited": "Zu viele falsche Passphrasen. Versuchen Sie es später erneut.",
+    "invalid_update_window": "Das Update-Fenster braucht zwei verschiedene Uhrzeiten, etwa 02:00 bis 05:00.",
+    "updates_unavailable": "Dieser Hive kann sich nicht selbst aktualisieren.",
+    "push_not_configured": "Push-Benachrichtigungen sind auf diesem Server nicht eingerichtet.",
+    "push_endpoint": "Der Push-Dienst dieses Browsers wird nicht unterstützt."
   },
   "account": {
     "title": "Konto",
@@ -444,9 +453,9 @@
         "full": "volle Qualität"
       },
       "notify.channels": {
-        "basic": "einfacher Push",
-        "rich": "Push + E-Mail",
-        "all": "Push, E-Mail, Webhooks"
+        "basic": "E-Mail + Push",
+        "rich": "E-Mail + Push",
+        "all": "E-Mail, Push, Webhooks (geplant)"
       },
       "analytics.level": {
         "motion": "Bewegung",
@@ -552,5 +561,97 @@
     "locked_one": "Zu viele fehlgeschlagene Anmeldungen. Versuchen Sie es in {{count}} Minute erneut.",
     "locked_other": "Zu viele fehlgeschlagene Anmeldungen. Versuchen Sie es in {{count}} Minuten erneut.",
     "unreachable": "Der Hive antwortet gerade nicht in Ihrem Netz. Prüfen Sie, ob dieses Gerät im selben Netz wie der Hive ist."
+  },
+  "capability": {
+    "needsUpdate": "Dafür braucht der Hive Version {{since}} oder neuer; dieser Hive läuft mit {{running}}.",
+    "unknownVersion": "einer unbekannten Version",
+    "ownerHelp": "Aktualisieren Sie den Hive: Mit automatischen Updates installiert er die neue Version in seinem Update-Fenster, oder installieren Sie sie auf dem Rechner des Hives.",
+    "download": "Hive herunterladen",
+    "askOwner": "Bitten Sie den Besitzer des Hives, ihn zu aktualisieren."
+  },
+  "updates": {
+    "title": "Updates",
+    "help": "Der Hive installiert signierte Updates selbst und kehrt von allein zur vorherigen Version zurück, wenn eine neue nicht gut läuft.",
+    "open": "Updates verwalten…",
+    "running": "Laufende Version",
+    "mode": "Updates installieren",
+    "automatic": "Automatisch, im Update-Fenster",
+    "manual": "Nur wenn ich auf „Jetzt aktualisieren“ klicke",
+    "channel": "Kanal",
+    "stable": "Stabil",
+    "beta": "Beta (frühere Versionen)",
+    "window": "Update-Fenster (Ortszeit des Hives)",
+    "from": "Von",
+    "to": "Bis",
+    "save": "Speichern",
+    "saved": "Gespeichert. Die nächste Update-Prüfung des Hives folgt diesen Einstellungen.",
+    "available": "Version {{version}} ist verfügbar.",
+    "noneWaiting": "Es wartet kein Update.",
+    "updateNow": "Jetzt aktualisieren",
+    "requested": "Angefordert: Der Hive installiert es innerhalb einer Minute und startet neu. Das Ergebnis erscheint im Aktivitätsprotokoll.",
+    "lastApplied": "Am {{date}} von {{from}} auf {{to}} aktualisiert.",
+    "lastRolledBack": "Version {{to}} lief nicht gut; der Hive ist am {{date}} zu {{from}} zurückgekehrt.",
+    "needRestart": "Der Updater dieses Hives ist älter als diese Einstellungen: Änderungen gelten nach einem Neustart des Hive-Dienstes (sudo hive restart). Einen neueren Updater bringt erst eine Paketinstallation.",
+    "unsupported": {
+      "dev_build": "Dies ist eine Entwicklerversion: Sie aktualisiert sich nie selbst.",
+      "no_root": "Diese Version hat keine Update-Schlüssel: Sie aktualisiert sich nie selbst.",
+      "no_updater": "Der Hive läuft nicht unter hive-updater und kann sich daher nicht selbst aktualisieren. Installieren Sie das Paket erneut oder führen Sie `hive install` aus."
+    },
+    "inWindow": "Version {{version}} wird im Update-Fenster installiert, {{from}} bis {{to}} Uhr.",
+    "needsPackage": "Version {{version}} braucht einen neueren hive-updater, als dieser Hive hat: Installieren Sie das aktuelle Paket auf dem Rechner des Hives. „Jetzt aktualisieren“ kann sie nicht installieren."
+  },
+  "notify": {
+    "title": "Benachrichtigungen",
+    "intro": "Was Sie erreicht, wenn an Ihren Hives etwas passiert. E-Mails gehen an {{email}}.",
+    "events": "Ereignisse",
+    "event": "Ereignis",
+    "channel": {
+      "email": "E-Mail",
+      "push": "Push"
+    },
+    "group": {
+      "offline": "Kamera oder Hive offline",
+      "storage": "Wenig Speicher",
+      "motion": "Bewegung"
+    },
+    "groupHelp": {
+      "offline": "Nach 3 Minuten bei einer Kamera, 5 bei einem Hive; und wenn sie wieder da sind.",
+      "storage": "Die Archivfestplatte hält den freien Platz nicht mehr; einmal, wenn das beginnt.",
+      "motion": "Wenn an einer Kamera Bewegung beginnt; höchstens einmal je Wartezeit der Kamera."
+    },
+    "perCamera": "Bewegung je Kamera: Öffnen Sie die Kamera auf der Seite ihres Hives und wählen Sie Benachrichtigungen.",
+    "quiet": "Ruhezeiten",
+    "quietHelp": "In diesem Zeitraum keine Bewegungsbenachrichtigungen. Offline- und Speicherhinweise kommen weiterhin.",
+    "from": "Von",
+    "until": "Bis",
+    "save": "Speichern",
+    "saved": "Gespeichert.",
+    "cameraButton": "Benachrichtigungen",
+    "cameraTitle": "Benachrichtigungen für diese Kamera",
+    "cameraMotion": "Bewegungsbenachrichtigungen für diese Kamera",
+    "cooldown": "Höchstens alle",
+    "minutes_one": "{{count}} Minute",
+    "minutes_other": "{{count}} Minuten",
+    "motionOffEverywhere": "Bewegungsbenachrichtigungen sind auf der Seite Benachrichtigungen ausgeschaltet."
+  },
+  "push": {
+    "title": "Push auf Ihren Geräten",
+    "notConfigured": "Push-Benachrichtigungen sind auf diesem Server noch nicht eingerichtet. E-Mail funktioniert weiterhin.",
+    "unsupported": "Dieser Browser kann keine Push-Benachrichtigungen empfangen.",
+    "installFirst": "Auf iPhone und iPad funktioniert Push nur in der installierten App: Tippen Sie auf Teilen, dann Zum Home-Bildschirm, und öffnen Sie Camhive von dort.",
+    "enable": "Push-Benachrichtigungen auf diesem Gerät erhalten",
+    "enabledHere": "Dieses Gerät erhält Push-Benachrichtigungen.",
+    "permissionRefused": "Benachrichtigungen sind für diese Seite blockiert. Erlauben Sie sie in den Website-Einstellungen des Browsers und versuchen Sie es erneut.",
+    "limit_one": "Ihr Tarif umfasst {{count}} Gerät.",
+    "limit_other": "Ihr Tarif umfasst {{count}} Geräte.",
+    "limitUnlimited": "Ihr Tarif umfasst beliebig viele Geräte.",
+    "sleeping": "über dem Limit Ihres Tarifs, erhält nichts, bis Sie upgraden oder ein anderes entfernen",
+    "lastUsed": "zuletzt benachrichtigt {{when}}",
+    "unnamed": "Gerät",
+    "remove": "Entfernen",
+    "removeNamed": "{{name}} entfernen",
+    "test": "Testbenachrichtigung senden",
+    "testSent_one": "An {{count}} Gerät gesendet.",
+    "testSent_other": "An {{count}} Geräte gesendet."
   }
 }

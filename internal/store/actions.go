@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 )
 
@@ -41,7 +42,21 @@ func (r *Actions) Append(ctx context.Context, a Action) error {
 
 // Recent returns the newest actions, newest first.
 func (r *Actions) Recent(ctx context.Context, limit int) ([]Action, error) {
-	rows, err := r.s.db.QueryContext(ctx, `SELECT id, at_utc, actor, action, target, details_json FROM action_log ORDER BY id DESC LIMIT ?`, limit)
+	return r.query(ctx, `SELECT id, at_utc, actor, action, target, details_json FROM action_log ORDER BY id DESC LIMIT ?`, limit)
+}
+
+// RecentOf returns the newest entries of the given kinds, newest first.
+func (r *Actions) RecentOf(ctx context.Context, kinds []string, limit int) ([]Action, error) {
+	args := make([]any, 0, len(kinds)+1)
+	for _, k := range kinds {
+		args = append(args, k)
+	}
+	marks := strings.TrimSuffix(strings.Repeat("?,", len(kinds)), ",")
+	return r.query(ctx, `SELECT id, at_utc, actor, action, target, details_json FROM action_log WHERE action IN (`+marks+`) ORDER BY id DESC LIMIT ?`, append(args, limit)...) //nolint:gosec // placeholders only
+}
+
+func (r *Actions) query(ctx context.Context, q string, args ...any) ([]Action, error) {
+	rows, err := r.s.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}

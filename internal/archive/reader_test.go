@@ -48,6 +48,36 @@ func TestReaderGivesTheSameBytesAsTheEnginePlaybackServer(t *testing.T) {
 	}
 }
 
+// seekAnswers start past the first fragment of a segment, where the reader
+// skips the fragments before the start (issue #100). The digests are of
+// what the reader gave before that, when it read every fragment from the
+// start of the segment: skipping must not change a byte. The camera's
+// groups of pictures are long, so most of them still resume at the
+// segment's first fragment; the 3 s span from 02.9 resumes past it with
+// both tracks.
+var seekAnswers = []struct {
+	start  string
+	length time.Duration
+	sha256 string
+}{
+	{"2026-11-15T23:22:02.2Z", time.Second, "26ba324167002d3659e76794450be1dfaef589ae421536928d7f682babb996b8"},
+	{"2026-11-15T23:22:02.9Z", 3 * time.Second, "980f3aa859d87f87becbc2c92eecae46dc2a33642d0c30607d189767e742930e"},
+	{"2026-11-15T23:22:04.9Z", 500 * time.Millisecond, "00a25031883dc0f220cc0cf8f660e8307ab266894c265ffbc9e3b82135ac91a7"},
+	{"2026-11-15T23:22:06.3Z", 10 * time.Second, "ee34df9a4cade58ca225e67324c56003d5472f718a6f96d66df06cb0e5e93bc6"},
+}
+
+func TestSeekingPastTheFirstFragmentGivesTheSameBytes(t *testing.T) {
+	r := archive.NewReader("testdata/recording", archive.OpenPlain)
+	for _, c := range seekAnswers {
+		start, _ := time.Parse(time.RFC3339Nano, c.start)
+		got := readSpan(t, r, start, c.length)
+		sum := sha256.Sum256(got)
+		if hex.EncodeToString(sum[:]) != c.sha256 {
+			t.Errorf("%s +%v: %d bytes, digest %x", c.start, c.length, len(got), sum)
+		}
+	}
+}
+
 func TestReaderFindsNoFootageAfterTheRecording(t *testing.T) {
 	r := archive.NewReader("testdata/recording", archive.OpenPlain)
 	start, _ := time.Parse(time.RFC3339, "2026-11-15T23:22:35Z")

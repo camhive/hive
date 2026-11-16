@@ -16,8 +16,11 @@ import { LiveTile } from "@/components/LiveTile";
 import { PtzPad } from "@/components/PtzPad";
 import { Timeline } from "@/components/Timeline";
 import { EventList } from "@/components/EventList";
+import { CameraAlerts } from "@/components/CameraAlerts";
+import { useCloudReachable } from "@/lib/cloud";
 import { Field } from "@/components/Field";
 import { CameraEditForm, ReplaceButton, useCameraActions } from "@/components/CameraManage";
+import { useHiveCapability } from "@/lib/capabilities";
 
 export type CameraDetailProps = {
   hive: Hive;
@@ -58,6 +61,8 @@ export function CameraDetail({ hive, grant, quality, client, camera, health, sig
   const [playError, setPlayError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [alerts, setAlerts] = useState(false);
+  const cloud = useCloudReachable();
   const video = useRef<HTMLVideoElement>(null);
   const player = useRef<ArchivePlayer | null>(null);
   const audioEl = useRef<HTMLAudioElement>(null);
@@ -67,6 +72,7 @@ export function CameraDetail({ hive, grant, quality, client, camera, health, sig
   const [rate, setRate] = useState(1);
   const owner = grant.role === "owner";
   const operator = owner || grant.role === "operator";
+  const canDelete = useHiveCapability(hive, "archive.delete"); // minor entry point: hidden on an old hive (ADR-0022)
   const actions = useCameraActions(camera, client, onClose);
 
   useEffect(() => () => { player.current?.stop(); sound.current?.stop(); }, []);
@@ -200,6 +206,7 @@ export function CameraDetail({ hive, grant, quality, client, camera, health, sig
           {owner && client && (
             <>
               <button type="button" className="btn btn-ghost btn-sm" aria-expanded={actions.editing} onClick={() => actions.setEditing((v) => !v)}>{t("cameras.editCamera")}</button>
+              {cloud && <button type="button" className="btn btn-ghost btn-sm" aria-expanded={alerts} onClick={() => setAlerts((v) => !v)}>{t("notify.cameraButton")}</button>}
               <button type="button" className="btn btn-ghost btn-sm" onClick={() => void actions.patch({ enabled: !camera.enabled })}>{camera.enabled ? t("cameras.turnOff") : t("cameras.turnOn")}</button>
               <button type="button" className="btn btn-ghost btn-sm !text-[var(--danger)]" onClick={() => void actions.remove()}>{t("cameras.remove")}</button>
             </>
@@ -212,6 +219,7 @@ export function CameraDetail({ hive, grant, quality, client, camera, health, sig
       {actions.error && <p role="alert" className="error text-sm">{actions.error}</p>}
       {actions.mismatch && <ReplaceButton onReplace={actions.replace} />}
       {actions.editing && <div className="card"><CameraEditForm camera={camera} onSubmit={actions.patch} /></div>}
+      {alerts && owner && cloud && <div className="card"><CameraAlerts hiveId={hive.id} cameraId={camera.id} /></div>}
 
       {live && (
         <LiveTile camera={camera} health={health} stream={streamFor(quality, "detail")} signal={signal} iceServers={grant.ice_servers} paused={paused} peer={peer}>
@@ -244,7 +252,7 @@ export function CameraDetail({ hive, grant, quality, client, camera, health, sig
             <option value="sub">sub</option>
           </select>
           {operator && client && <button type="button" className="btn btn-secondary btn-sm" onClick={() => setExporting((v) => !v)} disabled={!position}>{t("archive.exportFromHere")}</button>}
-          {owner && client && <button type="button" className="btn btn-ghost btn-sm" aria-expanded={deleting} onClick={() => setDeleting((v) => !v)}>{t("deletion.thisDay")}</button>}
+          {owner && client && canDelete.has && <button type="button" className="btn btn-ghost btn-sm" aria-expanded={deleting} onClick={() => setDeleting((v) => !v)}>{t("deletion.thisDay")}</button>}
           {!live && <button type="button" className="btn btn-sm" onClick={backToLive}><span className="dot" style={{ color: "var(--accent)" }} aria-hidden="true" />{t("live.backToLive")}</button>}
         </div>
       </div>
