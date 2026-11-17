@@ -30,11 +30,46 @@ The grant appears in the list with a *Revoke* button. The hive learns about
 grants from the cloud immediately and keeps a copy, so sharing keeps working
 on your network even when the cloud is unreachable.
 
+## Expiring grants: extend or make permanent
+
+A grant with an end date counts as **expiring** during its last three days.
+From then on:
+
+- you and the member each see one notice for it on the home page (it ends on
+  …), and the grant is marked *expiring* in the hive's *Sharing* list;
+- you and the member each get **one e-mail** about it, when the account can
+  receive e-mail notifications. It is not repeated, also not after a restart
+  of the cloud, and nothing is sent through the invitation link. A grant whose
+  end you set less than three days ahead (a weekend share, or an extension by
+  a day or two) gets no such e-mail: you just chose the date. It still shows
+  the notice in the app.
+
+In *Sharing* the grant has two actions: *Extend* (pick a new end date) and
+*Make permanent* (remove the end date). A new end must lie in the future and
+at most ten years ahead; for longer, make the grant permanent. Either one keeps the member watching
+without interruption: their session stays, and the hive gets the new grant at
+once. Changing anything else (role, an earlier end) interrupts the member's
+session on that hive once; the app then connects again with the new access.
+
+When the end date passes, the grant is **expired**: the hive stops honouring
+it at that moment, and the member loses access to those cameras. The grant is
+not deleted. It stays in your *Sharing* list as *ended* with its date, so
+*Renew* (a new end date) or *Make permanent* brings it back in one step;
+*Revoke* removes it. The notice on
+the home page says the grant has ended for three more days, then disappears
+(the grant itself stays listed for you). A new end date is a new expiry: you
+get one notice and one e-mail for it again when its last three days begin.
+
 ## What members see
 
 On their home page your hive appears under *Shared with you*. They get live video
 and recordings for the granted cameras, and PTZ and Export if they are operators.
-They cannot see Cameras, Sharing or Settings of your hive.
+They cannot add or change cameras or see your sharing, and the *Connection*
+tab shows them only how the app reaches the hive, without your sections
+(updates, local sign-in, encryption, deleting recordings, removing the hive).
+A grant of theirs that ends within three days, or ended less than three days
+ago, shows as a notice on their home page; to keep access they ask you to
+extend it.
 
 ## Limits
 

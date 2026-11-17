@@ -52,7 +52,7 @@ export function Activity() {
     <div className="space-y-4 max-w-none">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="page-title">{t("activity.title")}</h1>
-        <div className="flex items-center gap-3 text-sm">
+        <div className="flex min-w-0 flex-wrap items-center gap-3 text-sm">
           <label className="muted" htmlFor="hive-filter">{t("activity.scope")}</label>
           <select id="hive-filter" className="input input-sm !w-auto" value={hive} onChange={(e) => setHive(e.target.value)}>
             <option value="">{t("activity.account")}</option>

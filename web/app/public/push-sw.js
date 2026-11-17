@@ -15,7 +15,7 @@
       p = {};
     }
     var title = p.title || "Camhive";
-    var options = { body: p.body || "", tag: p.tag || undefined, icon: "/icons/icon-192.png", badge: "/icons/icon-192.png", data: { path: inApp(p.path) } };
+    var options = { body: p.body || "", tag: p.tag || undefined, icon: "/icons/icon-192.v2.png", badge: "/icons/icon-192.v2.png", data: { path: inApp(p.path) } };
     event.waitUntil(sw.registration.showNotification(title, options));
   });
 

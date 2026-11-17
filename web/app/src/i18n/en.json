@@ -114,7 +114,9 @@
     "invalid_update_window": "The update window needs two different times, like 02:00 to 05:00.",
     "updates_unavailable": "This hive cannot update itself.",
     "push_not_configured": "Push notifications are not set up on this server.",
-    "push_endpoint": "This browser's push service is not supported."
+    "push_endpoint": "This browser's push service is not supported.",
+    "grant_end_past": "The end must lie in the future.",
+    "grant_end_far": "The end may lie at most 10 years ahead. Make the share permanent instead."
   },
   "account": {
     "title": "Account",
@@ -195,6 +197,7 @@
     "httpPath": "Recordings path",
     "path": {
       "lan": "Direct on your network",
+      "address": "Direct on your network, by address",
       "relay": "Through the Camhive relay",
       "none": "Unreachable"
     },
@@ -203,6 +206,7 @@
     "reasonLabel": "Why",
     "reason": {
       "lan_ok": "The hive answered on its local name.",
+      "address_ok": "The local name did not answer; the hive answered at its local address.",
       "lan_failed": "The local name did not answer; using the relay.",
       "lan_unavailable": "The hive has not reported a local address yet.",
       "relay_unavailable": "No relay is configured for this hive."
@@ -343,6 +347,12 @@
     "rtspHint": "Without user and password; they go in the fields below.",
     "subStreamUrl": "Sub stream URL (optional)",
     "subStreamHint": "A second, smaller stream of the same camera for grids and remote viewing, e.g. …/ch1 or …/stream2. Without user and password.",
+    "retention": "Keep recordings",
+    "retentionDefault": "Hive default",
+    "retentionOwn": "Number of days",
+    "retentionDays": "Days",
+    "retentionHint": "Whole days from 0 to 3650; 0 keeps them until the disk needs the space. Your plan's longest retention still applies.",
+    "retentionInvalid": "Enter whole days from 0 to 3650.",
     "streamUrlInvalid": "Enter an address that starts with rtsp:// or rtsps://, without user and password.",
     "create": "Add camera",
     "invalid": "The hive refused the camera: {{message}}",
@@ -416,7 +426,19 @@
     "limitTitle": "Your plan has reached its sharing limit.",
     "limitTitleN_one": "Your plan allows {{count}} share.",
     "limitTitleN_other": "Your plan allows {{count}} shares.",
-    "limitHelp": "Revoke a grant you no longer need, or upgrade your plan."
+    "limitHelp": "Revoke a grant you no longer need, or upgrade your plan.",
+    "state": {
+      "expiring": "ends soon"
+    },
+    "extend": "Extend",
+    "makePermanent": "Make permanent",
+    "newEnd": "New end",
+    "saveEnd": "Save new end",
+    "ended": "ended {{at}}",
+    "renew": "Renew",
+    "extendFor": "Extend the share of {{camera}} with {{member}}",
+    "makePermanentFor": "Make the share of {{camera}} with {{member}} permanent",
+    "revokeFor": "Revoke the share of {{camera}} with {{member}}"
   },
   "invite": {
     "title": "You were invited",
@@ -431,7 +453,6 @@
     "promos": "Promo codes used",
     "upgradeSoon": "Paid plans arrive with card payments shortly after the beta; until then plans are assigned by us and promo codes work.",
     "compare": "Compare plans",
-    "feature": "",
     "yours": "yours",
     "free": "free",
     "perMonth": "{{price}} / month",
@@ -573,6 +594,22 @@
     "lockedUnknown": "Too many failed sign-ins. The hive blocks local sign-ins for up to 15 minutes; try again later.",
     "unreachable": "The hive does not answer on your network right now. Make sure this device is on the same network as the hive."
   },
+  "lanAddress": {
+    "title": "Open your hive by its address",
+    "intro": "Camhive cannot reach this hive, and its local name does not answer: without the internet the name cannot be looked up. Your browser can still reach the hive at its address on your network.",
+    "open": "Open the link below. Your browser warns that the connection is not private. Before you go on, check that the warning is exactly this one, for {{name}}:",
+    "chrome": "Chrome and Edge: the code NET::ERR_CERT_COMMON_NAME_INVALID, and under Advanced: “This server could not prove that it is {{host}}; its security certificate is from {{name}}.” Then choose “Proceed to {{host}} (unsafe)”.",
+    "firefox": "Firefox: the code SSL_ERROR_BAD_CERT_DOMAIN, and under Advanced: the certificate “is not valid for {{host}}” and is only valid for {{name}}. Then choose “Accept the Risk and Continue”.",
+    "safari": "Safari: Show Details → view the certificate. It must be issued to {{name}} by Let’s Encrypt (ISRG Root X1 or X2) and must not say “not trusted”. Then choose “visit this website”.",
+    "stop": "Any other warning (“not trusted”, “self-signed”, an unknown issuer or any other name) means stop: close that tab, something other than your hive answers at this address.",
+    "back": "When the hive's page says your browser can reach it, come back here and press Try again.",
+    "field": "Hive address",
+    "hint": "Your router's device list shows it, or `hive status` on the hive's computer.",
+    "link": "Open your hive at {{address}}",
+    "invalid": "Enter the hive's local IP address, for example 192.168.1.23.",
+    "retry": "Try again",
+    "stillNot": "The hive does not answer at this address yet."
+  },
   "capability": {
     "needsUpdate": "This needs hive version {{since}} or later; this hive runs {{running}}.",
     "unknownVersion": "an unknown version",
@@ -708,6 +745,21 @@
     "testSent_other": "Sent to {{count}} devices."
   },
   "hiveActivity": {
+    "groups": {
+      "cameras": "Cameras",
+      "recordings": "Recordings and exports",
+      "updates": "Updates",
+      "access": "Sign-ins and access",
+      "encryption": "Encryption"
+    },
+    "filter": {
+      "kinds": "Show only",
+      "search": "Search activity",
+      "cloud": "Show cloud sessions ({{count}})",
+      "none": "Nothing matches this filter.",
+      "loadMore": "Load more to search further back.",
+      "onlyCloud": "Only cloud sessions so far. Tick “Show cloud sessions” to see them."
+    },
     "intro": "What happened on this hive, newest first: camera changes, exports, deleted recordings, updates and sign-ins. The hive keeps this log itself.",
     "list": "Activity on this hive",
     "empty": "Nothing yet.",
@@ -754,6 +806,7 @@
       "update.applied": "Update installed",
       "update.rolled_back": "Update rolled back",
       "update.needs_package": "Update needs a package install",
+      "update.integrity_failed": "Update refused: its files changed after installing",
       "update.settings_changed": "Update settings changed",
       "local_login.enable": "Local sign-in set up",
       "local_login.disable": "Local sign-in turned off",
@@ -768,5 +821,20 @@
     "text": "Camhive then starts from the home screen or desktop in its own window.",
     "button": "Install Camhive",
     "iosHint": "Tap Share → Add to Home Screen, then open Camhive from the home screen. On iPhone and iPad this also lets Camhive show notifications."
+  },
+  "grantNotice": {
+    "title": "Sharing",
+    "allCameras": "all cameras",
+    "ownerExpiring": "Your share of {{camera}} on {{hive}} with {{peer}} ends on {{at}}.",
+    "ownerExpired": "Your share of {{camera}} on {{hive}} with {{peer}} ended on {{at}}.",
+    "memberExpiring": "Your access to {{camera}} on {{hive}}, shared by {{peer}}, ends on {{at}}. Ask them to extend it.",
+    "memberExpired": "Your access to {{camera}} on {{hive}}, shared by {{peer}}, ended on {{at}}.",
+    "extend": "Extend",
+    "renew": "Renew"
+  },
+  "appUpdate": {
+    "available": "A new version is available.",
+    "update": "Update",
+    "updating": "Updating…"
   }
 }

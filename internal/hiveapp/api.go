@@ -88,6 +88,7 @@ func NewAPI(d Deps) http.Handler {
 	}
 	api := &api{d: d, logins: newLoginLimiter(time.Now)}
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /{$}", landing)
 	mux.HandleFunc("GET /healthz", api.health)
 	mux.Handle("GET /v0/hive", api.auth(api.getHive))
 	mux.Handle("GET /v0/hive/updates", api.auth(api.getUpdates))

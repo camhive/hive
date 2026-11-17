@@ -19,3 +19,10 @@ export const refusedOptional = (raw: string): boolean => raw.trim() !== "" && !i
 
 /** The sub stream's URL as the form shows it ("" when the camera has none). */
 export const subStreamOf = (camera: HiveCamera): string => camera.streams?.sub?.URL ?? "";
+
+/** What the PATCH body carries for the edited sub stream: nothing when unchanged, "" removes it, "invalid" for a URL the hive would refuse. */
+export function subStreamChange(camera: HiveCamera, raw: string): { sub_stream?: string } | "invalid" {
+  const next = raw.trim();
+  if (next === subStreamOf(camera)) return {};
+  return refusedOptional(next) ? "invalid" : { sub_stream: next };
+}

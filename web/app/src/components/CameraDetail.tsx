@@ -212,7 +212,7 @@ export function CameraDetail({ hive, grant, quality, client, camera, health, sig
     <section className="space-y-3" aria-label={camera.name} data-testid="camera-detail">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-lg font-semibold truncate">{camera.name}{camera.group && <span className="muted font-normal text-sm"> · {camera.group}</span>}</h2>
-        <div className="flex items-center gap-1">
+        <div className="flex flex-wrap items-center gap-1">
           {owner && client && (
             <>
               <button type="button" className="btn btn-ghost btn-sm" aria-expanded={actions.editing} onClick={() => actions.setEditing((v) => !v)}>{t("cameras.editCamera")}</button>
@@ -236,41 +236,49 @@ export function CameraDetail({ hive, grant, quality, client, camera, health, sig
           {operator && client && <PtzPad client={client} cameraId={camera.id} />}
         </LiveTile>
       )}
-      <div className={live ? "hidden" : "bg-black rounded-lg aspect-video overflow-hidden relative"}>
-        <video ref={video} className="w-full h-full object-contain" controls playsInline data-testid="player" onTimeUpdate={onTimeUpdate} onEnded={onEnded}
-          onError={(e) => { if (e.currentTarget.getAttribute("src")) setPlayError(t("archive.playbackFailed")); }} />
-        <audio ref={audioEl} hidden />
-        {!position && !playError && <p className="pointer-events-none absolute inset-0 flex items-center justify-center p-4 text-center text-sm text-white/80">{t("archive.pickMoment")}</p>}
-        {position && <span className="absolute top-2 left-2 text-xs glass px-2 py-0.5 rounded" data-testid="position">{position.toLocaleString()}</span>}
+      {/* #126: the player, then its own controls; nothing lies over the video. */}
+      <div className={live ? "hidden" : "space-y-2"}>
+        <div className="bg-black rounded-lg aspect-video overflow-hidden">
+          <video ref={video} className="w-full h-full object-contain" controls playsInline data-testid="player" onTimeUpdate={onTimeUpdate} onEnded={onEnded}
+            onError={(e) => { if (e.currentTarget.getAttribute("src")) setPlayError(t("archive.playbackFailed")); }} />
+          <audio ref={audioEl} hidden />
+        </div>
+        <div className="flex flex-wrap items-center gap-2 text-sm" data-testid="player-controls">
+          <button type="button" className="btn btn-secondary btn-sm" aria-pressed={soundOn} disabled={locked} onClick={toggleSound}>{soundOn ? t("archive.soundOn") : t("archive.soundOff")}</button>
+          <label className="muted" htmlFor="speed">{t("archive.speed")}</label>
+          <select id="speed" className="input input-sm !w-auto" value={rate} onChange={(e) => changeRate(Number(e.target.value))}>
+            {[1, 2, 4, 8].map((r) => <option key={r} value={r}>{r}×</option>)}
+          </select>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={snapshot} disabled={!position}>{t("archive.snapshot")}</button>
+          {position && <span className="ml-auto tabular-nums font-medium" data-testid="position">{position.toLocaleString()}</span>}
+        </div>
       </div>
-      {playError && <p role="alert" className="error text-sm">{playError}</p>}
-      <ArchiveLockNotice hive={hive} client={client} owner={owner} onUnlocked={() => { if (!live && position) void seek(position); }} />
 
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        {!live ? (
-          <div className="flex flex-wrap items-center gap-2 text-sm">
-            <button type="button" className="btn btn-secondary btn-sm" aria-pressed={soundOn} disabled={locked} onClick={toggleSound}>{soundOn ? t("archive.soundOn") : t("archive.soundOff")}</button>
-            <label className="muted" htmlFor="speed">{t("archive.speed")}</label>
-            <select id="speed" className="input input-sm !w-auto" value={rate} onChange={(e) => changeRate(Number(e.target.value))}>
-              {[1, 2, 4, 8].map((r) => <option key={r} value={r}>{r}×</option>)}
-            </select>
-            <button type="button" className="btn btn-secondary btn-sm" onClick={snapshot} disabled={!position}>{t("archive.snapshot")}</button>
-          </div>
-        ) : <span />}
-        <div className="flex flex-wrap items-center gap-2 text-sm">
+      {/* The one place for notices: the locked archive, a playback failure, the hint before a moment is picked. */}
+      <div className="space-y-2 empty:hidden" data-testid="notices">
+        <ArchiveLockNotice hive={hive} client={client} owner={owner} onUnlocked={() => { if (!live && position) void seek(position); }} />
+        {playError && <p role="alert" className="callout error text-sm">{playError}</p>}
+        {!live && !position && !playError && !locked && <p className="callout muted text-sm">{t("archive.pickMoment")}</p>}
+      </div>
+
+      <Timeline day={day} ranges={ranges} events={marks} position={live ? (day === today ? new Date() : null) : position} onSeek={(at) => void seek(at)} activity={activity} focus={recordings} />
+      {calendar.data && (days.length === 0 ? <p className="muted text-sm">{t("archive.noFootage")}</p> : <DayStrip footage={days} day={day} today={today} onPick={pickDay} />)}
+
+      {/* The actions on what is shown, in one row; the stream applies to the timeline, playback and exports. */}
+      <div className="flex flex-wrap items-center gap-2 text-sm" data-testid="archive-actions">
+        {!live && <button type="button" className="btn btn-sm" onClick={backToLive}><span className="dot" style={{ color: "var(--accent)" }} aria-hidden="true" />{t("live.backToLive")}</button>}
+        {operator && client && <button type="button" className="btn btn-secondary btn-sm" onClick={() => setExporting((v) => !v)} disabled={!position || locked}>{t("archive.exportFromHere")}</button>}
+        {owner && client && canDelete.has && <button type="button" className="btn btn-ghost btn-sm" aria-expanded={deleting} onClick={() => setDeleting((v) => !v)}>{t("deletion.thisDay")}</button>}
+        <span className="ml-auto flex items-center gap-2">
           <label className="muted" htmlFor="stream">{t("archive.stream")}</label>
           <select id="stream" className="input input-sm !w-auto" value={stream} onChange={(e) => setStream(e.target.value as StreamName)}>
             <option value="main">main</option>
             <option value="sub">sub</option>
           </select>
-          {operator && client && <button type="button" className="btn btn-secondary btn-sm" onClick={() => setExporting((v) => !v)} disabled={!position || locked}>{t("archive.exportFromHere")}</button>}
-          {owner && client && canDelete.has && <button type="button" className="btn btn-ghost btn-sm" aria-expanded={deleting} onClick={() => setDeleting((v) => !v)}>{t("deletion.thisDay")}</button>}
-          {!live && <button type="button" className="btn btn-sm" onClick={backToLive}><span className="dot" style={{ color: "var(--accent)" }} aria-hidden="true" />{t("live.backToLive")}</button>}
-        </div>
+        </span>
       </div>
-      <Timeline day={day} ranges={ranges} events={marks} position={live ? (day === today ? new Date() : null) : position} onSeek={(at) => void seek(at)} activity={activity} focus={recordings} />
+      {/* After the actions: opened, the event list would push them far below the timeline. */}
       <EventList marks={marks} onSeek={(at) => void seek(at)} />
-      {calendar.data && (days.length === 0 ? <p className="muted text-sm">{t("archive.noFootage")}</p> : <DayStrip footage={days} day={day} today={today} onPick={pickDay} />)}
 
       {deleting && owner && client && (
         <div className="card" role="region" aria-label={t("deletion.title")}>
@@ -331,7 +339,7 @@ function ExportList({ client, hive, token, locked, onLocked }: { client: HiveCli
       <h3 className="eyebrow mb-1">{t("archive.exports")}</h3>
       <ul className="text-sm divide-y divide-[var(--border)]" aria-label={t("archive.exports")}>
         {jobs.data.map((j) => (
-          <li key={j.id} className="flex items-center justify-between gap-3 py-2" data-testid="export" data-status={j.status}>
+          <li key={j.id} className="list-row py-2" data-testid="export" data-status={j.status}>
             <span>{j.start ? new Date(j.start).toLocaleString() : ""} · {Math.round((j.duration_seconds ?? 0) / 60)} min · {j.stream}</span>
             <span className="flex items-center gap-2">
               <span className="muted">{t(`archive.status.${j.status ?? "running"}`)}{j.error ? `: ${j.error}` : ""}</span>

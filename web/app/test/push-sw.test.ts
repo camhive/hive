@@ -36,7 +36,7 @@ describe("push service worker", () => {
     await w.dispatch("push", { data: { json: () => payload } });
     expect(w.shown).toHaveLength(1);
     expect(w.shown[0]!.title).toBe("Motion on Front door");
-    expect(w.shown[0]!.options).toMatchObject({ body: "Home, 13:00", tag: "abc", icon: "/icons/icon-192.png", data: { path: payload.path } });
+    expect(w.shown[0]!.options).toMatchObject({ body: "Home, 13:00", tag: "abc", icon: "/icons/icon-192.v2.png", data: { path: payload.path } });
   });
 
   it("shows something even for an empty push", async () => {

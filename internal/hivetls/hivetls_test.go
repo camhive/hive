@@ -102,3 +102,66 @@ func TestLabelRoundTrip(t *testing.T) {
 		t.Fatal("foreign labels pass through")
 	}
 }
+
+// ADR-0023: a browser that opens the hive at its LAN address sends no SNI
+// (an IP literal is never a server name); the listener must still present
+// the hive's certificate for its LAN name, the one the user checks in the
+// warning, and the current one after the cloud handed over a new one.
+func TestListenerPresentsTheHiveCertificateToAnIPLiteralWithoutSNI(t *testing.T) {
+	dir := t.TempDir()
+	first, err := hivetls.LoadOrCreate(filepath.Join(dir, "a.crt"), filepath.Join(dir, "a.key"), testHive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	holder := hivetls.NewHolder(first)
+	ln, err := tls.Listen("tcp", "127.0.0.1:0", holder.ServerConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	sni := make(chan string, 4)
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			tc := c.(*tls.Conn)
+			_ = tc.Handshake()
+			sni <- tc.ConnectionState().ServerName
+			_ = tc.Close()
+		}
+	}()
+	presented := func() *tls.Conn {
+		t.Helper()
+		// No ServerName: crypto/tls, like a browser, sends no SNI for an IP literal.
+		c, err := tls.Dial("tcp", ln.Addr().String(), &tls.Config{InsecureSkipVerify: true}) //nolint:gosec // the test reads the presented certificate itself
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	c := presented()
+	leaf := c.ConnectionState().PeerCertificates[0]
+	_ = c.Close()
+	if got := <-sni; got != "" {
+		t.Fatalf("client sent SNI %q for an IP literal", got)
+	}
+	lanName := hivetls.Names(testHive)[0]
+	if hivetls.Fingerprint(tls.Certificate{Certificate: [][]byte{leaf.Raw}}) != hivetls.Fingerprint(first) || leaf.VerifyHostname(lanName) != nil || leaf.VerifyHostname("127.0.0.1") == nil {
+		t.Fatalf("presented %v, want the hive's certificate for %s only", leaf.DNSNames, lanName)
+	}
+
+	second, err := hivetls.LoadOrCreate(filepath.Join(dir, "b.crt"), filepath.Join(dir, "b.key"), testHive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	holder.Set(second)
+	c = presented()
+	leaf = c.ConnectionState().PeerCertificates[0]
+	_ = c.Close()
+	<-sni
+	if hivetls.Fingerprint(tls.Certificate{Certificate: [][]byte{leaf.Raw}}) != hivetls.Fingerprint(second) {
+		t.Fatal("after Set the listener must present the new certificate at the address too")
+	}
+}

@@ -10,7 +10,7 @@ import { useSessionAlive } from "@/lib/eviction";
 import { apiSignalling, hiveSignalling, type PeerFactory } from "@/lib/live";
 import { streamFor } from "@/lib/reconnect";
 import { dayKey } from "@/lib/archive";
-import { atHome } from "@/lib/transport";
+import { atHome, direct, openableByAddress, transport } from "@/lib/transport";
 import { useTransport } from "@/lib/useTransport";
 import { COLUMNS, LAYOUTS, readLayout, writeLayout, type Layout } from "@/lib/layout";
 import type { PlayerDeps } from "@/lib/archivePlayer";
@@ -20,6 +20,7 @@ import { HiveNav } from "@/components/HiveNav";
 import { CameraDetail } from "@/components/CameraDetail";
 import { AddCamera, CameraRow, groupSorted } from "@/components/CameraManage";
 import { LocalSessionBanner, LocalSignIn } from "@/components/LocalLogin";
+import { LanAddressStep } from "@/components/LanAddress";
 import { ArchiveLockNotice } from "@/components/ArchiveEncryption";
 
 /** `view: "recordings"` opens the camera at its timeline instead of live (#84). */
@@ -43,7 +44,7 @@ export function HivePage({ peer, playerDeps }: { peer?: PeerFactory; playerDeps?
   const cameras = useCameras(hive, client);
   const health = useCameraHealth(hive, client);
   const { alive } = useSessionAlive(hive?.id, local ? undefined : grant?.session_id);
-  const { decision } = useTransport(hive);
+  const { decision, probing, reprobe } = useTransport(hive);
   const home = atHome(local, decision);
   const [layout, setLayout] = useState<Layout>(() => readLayout());
   const [adding, setAdding] = useState(false);
@@ -54,8 +55,11 @@ export function HivePage({ peer, playerDeps }: { peer?: PeerFactory; playerDeps?
   if (!hive) return <p className="card">{t("errors.not_found")}</p>;
 
   const owner = grant?.role === "owner";
-  // #57: no way in through the cloud, the LAN name answers, and the hive is the account's own.
-  const offerLocal = canSignInLocally && !grant && decision?.path === "lan" && !!hives.data?.hives.some((h) => h.id === hive.id);
+  // #57: no way in through the cloud, the hive answers on the LAN, and the hive is the account's own.
+  const emergency = ((canSignInLocally && !grant) || (local && !localSession)) && !!hives.data?.hives.some((h) => h.id === hive.id);
+  const offerLocal = emergency && !grant && direct(decision);
+  // ADR-0023: neither the name nor a remembered address answers; the browser must be sent to the address first.
+  const offerAddress = emergency && !!decision && !direct(decision) && openableByAddress(hive);
   const quality = home ? "full" : grant?.quality; // the plan limits remote viewing only
   const evicted = alive === false;
   // Owners also see switched-off cameras, so they can switch them back on.
@@ -81,7 +85,8 @@ export function HivePage({ peer, playerDeps }: { peer?: PeerFactory; playerDeps?
 
       {local && !localSession && <p role="status" className="card muted" data-testid="local-mode">{t("live.localMode")}</p>}
       {localSession && <LocalSessionBanner hive={hive} />}
-      {offerLocal && <LocalSignIn hive={hive} />}
+      {offerLocal && decision && <LocalSignIn hive={hive} base={transport.baseFor(hive, decision)} />}
+      {offerAddress && <LanAddressStep hive={hive} probing={probing} reprobe={reprobe} />}
       {!open && <ArchiveLockNotice hive={hive} client={client} owner={owner} />}
       {!hive.online && !local && <p role="alert" className="card muted">{t("live.hiveOffline")}</p>}
       {evicted && <p role="alert" className="card error" data-testid="evicted">{t("live.evicted")}</p>}

@@ -10,9 +10,14 @@ export const MIN_REFRESH_MS = 5_000;
 /** Timers cannot exceed a signed 32-bit millisecond count; offline tokens (7 days) stay below this anyway. */
 export const MAX_REFRESH_MS = 24 * 3_600_000;
 
-/** Milliseconds until the token should be renewed; never sooner than MIN_REFRESH_MS. */
+/**
+ * Milliseconds until the token should be renewed: REFRESH_MARGIN_MS before
+ * expiry, or halfway through a token with less than twice that left (one
+ * the cloud cut at a grant's end, #85), never sooner than MIN_REFRESH_MS.
+ */
 export function msUntilRefresh(expiresAt: string, now = Date.now()): number {
-  return Math.min(MAX_REFRESH_MS, Math.max(MIN_REFRESH_MS, Date.parse(expiresAt) - now - REFRESH_MARGIN_MS));
+  const left = Date.parse(expiresAt) - now;
+  return Math.min(MAX_REFRESH_MS, Math.max(MIN_REFRESH_MS, left - Math.min(REFRESH_MARGIN_MS, left / 2)));
 }
 
 export async function issueAccess(hiveID: string, opts: { offline?: boolean; client?: string } = {}): Promise<AccessGrant> {

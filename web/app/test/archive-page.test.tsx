@@ -96,6 +96,9 @@ describe("archive on the hive page", () => {
     expect(within(timeline).getAllByTestId("activity-sound")).toHaveLength(1);
     expect(screen.getByTestId("activity-legend")).toHaveTextContent("activitysound level");
 
+    // #126: the hint stands in the notice slot until a moment is picked.
+    const hint = "Pick a moment on the timeline to play it.";
+    expect(within(screen.getByTestId("notices")).getByText(hint)).toBeInTheDocument();
     // Clicking at 08:30 (fraction 8.5/24) plays from that minute; the window stops at the segment end.
     vi.spyOn(timeline, "getBoundingClientRect").mockReturnValue({ left: 0, width: 240, top: 0, height: 32, right: 240, bottom: 32, x: 0, y: 0, toJSON: () => ({}) });
     fireEvent.click(timeline, { clientX: 85 });
@@ -105,6 +108,7 @@ describe("archive on the hive page", () => {
     expect(play.searchParams.get("duration")).toBe("600");
     expect(screen.getByTestId("position")).toHaveTextContent(new Date(at(8, 30)).toLocaleString());
     expect(screen.getByTestId("readout")).toHaveTextContent("08:30:00");
+    expect(screen.queryByText(hint)).toBeNull();
 
     // The ruler labels the day every two hours and the playhead shows its time;
     // zooming to 1 h re-centres the window on the playhead and the ruler to 10-minute steps.

@@ -295,6 +295,7 @@ describe("a locked archive on the hive page", () => {
     const detail = await screen.findByTestId("camera-detail", {}, { timeout: 5000 });
     const notice = await within(detail).findByTestId("archive-locked");
     expect(screen.getAllByTestId("archive-locked")).toHaveLength(1); // not again at the top of the hive page
+    expect(within(detail).getByTestId("notices").children).toHaveLength(1); // the lock only: no "pick a moment" under it (#126)
     expect(within(detail).getByRole("button", { name: "Export from here" })).toBeDisabled();
     expect(within(detail).getByRole("button", { name: "Sound off" })).toBeDisabled();
     expect(await within(detail).findByRole("button", { name: "Download" })).toBeDisabled();

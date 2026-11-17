@@ -29,28 +29,23 @@ export function Plan() {
         </section>
       )}
       {tiers.data && (
-        <section className="card overflow-x-auto" aria-label={t("plan.compare")}>
-          <table className="w-full text-sm" data-testid="tiers">
-            <thead>
-              <tr>
-                <th className="text-left py-2 muted font-normal">{t("plan.feature")}</th>
-                {tiers.data.map((p) => (
-                  <th key={p.id} className="text-left py-2" aria-current={p.id === currentId ? "true" : undefined}>
-                    {p.name}{p.id === currentId && <span className="ml-1 text-xs muted">({t("plan.yours")})</span>}
-                    <PlanPrice monthCents={p.price_month_cents} yearCents={p.price_year_cents} currency={p.currency} testId={`price-${p.id}`} />
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {SHOWN_ENTITLEMENTS.map((key) => (
-                <tr key={key} className="border-t" style={{ borderColor: "var(--border)" }}>
-                  <td className="py-2 muted">{t(`plan.keys.${key}`)}</td>
-                  {tiers.data!.map((p) => <td key={p.id} className="py-2" data-key={key} data-plan={p.id}>{formatValue(key, p.entitlements[key], t)}</td>)}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <section aria-label={t("plan.compare")}>
+          <ul className="grid grid-cols-1 gap-4 md:grid-cols-3" data-testid="tiers">
+            {tiers.data.map((p) => (
+              <li key={p.id} className="card" aria-current={p.id === currentId ? "true" : undefined}>
+                <h2 className="text-lg font-semibold">{p.name}{p.id === currentId && <span className="ml-1 text-xs font-normal muted">({t("plan.yours")})</span>}</h2>
+                <PlanPrice monthCents={p.price_month_cents} yearCents={p.price_year_cents} currency={p.currency} testId={`price-${p.id}`} />
+                <dl className="kv text-sm mt-4">
+                  {SHOWN_ENTITLEMENTS.map((key) => (
+                    <div key={key} className="py-2 border-t" style={{ borderColor: "var(--border)" }}>
+                      <dt className="muted">{t(`plan.keys.${key}`)}</dt>
+                      <dd data-key={key} data-plan={p.id}>{formatValue(key, p.entitlements[key], t)}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </li>
+            ))}
+          </ul>
           <p className="text-xs muted mt-3">{t("plan.alwaysFree")}</p>
         </section>
       )}

@@ -121,7 +121,8 @@
     font-size: .875rem;
     font-weight: 500;
     line-height: 1.25rem;
-    white-space: nowrap;
+    text-align: center;
+    max-width: 100%; /* a label longer than the screen wraps instead of widening the page */
     cursor: pointer;
     color: var(--bg);
     background: var(--fg);
@@ -172,6 +173,7 @@
   /* Inputs */
   .input {
     width: 100%;
+    max-width: 100%; /* also for selects sized by their longest option (!w-auto) */
     box-sizing: border-box;
     min-height: 2.5rem;
     border: 1px solid var(--border-strong);
@@ -195,6 +197,22 @@
     cursor: pointer;
   }
   .input-sm { min-height: 2rem; padding-top: .25rem; padding-bottom: .25rem; font-size: .8125rem; }
+
+  /*
+   * Key/value list (<dl class="kv">, each pair in a <div>): label and value
+   * side by side while they fit, the value on its own line when they do not;
+   * a long value (a URL, an id) wraps inside its row.
+   */
+  .kv > div { display: flex; flex-wrap: wrap; justify-content: space-between; column-gap: 1rem; row-gap: .125rem; }
+  .kv dd { margin-left: auto; min-width: 0; text-align: right; overflow-wrap: anywhere; }
+
+  /*
+   * A list row: its text (an e-mail, a name) and the actions after it. The
+   * text wraps, the actions keep their size and move below it when needed.
+   */
+  .list-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; column-gap: .75rem; row-gap: .25rem; }
+  .list-row > :first-child { min-width: 0; overflow-wrap: anywhere; }
+  .list-row > :last-child:not(:first-child) { margin-left: auto; }
 
   /* Status: quiet coloured text with a dot */
   .badge {
@@ -238,6 +256,7 @@
 
   /* Header nav link */
   .nav-link {
+    white-space: nowrap;
     padding: .375rem .625rem;
     border-radius: .375rem;
     font-size: .875rem;
@@ -248,6 +267,16 @@
   }
   .nav-link:hover { color: var(--fg); }
   .nav-link[aria-current="page"] { color: var(--fg); }
+
+  /*
+   * Touch screens: every small control is still a 44 px target (#126).
+   * Not on controls laid over video (.glass, the PTZ pad): grown, they
+   * would cover the picture.
+   */
+  @media (pointer: coarse) {
+    .btn-sm:not(.glass *), .btn-xs:not(.glass *), .input-sm:not(.glass, .glass *),
+    .seg > button, .seg-sm > button { min-height: 2.75rem; min-width: 2.75rem; }
+  }
 
   /* Controls laid over video */
   .glass { background: rgba(20, 20, 18, .7); color: #fff; border: 0; }

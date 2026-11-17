@@ -27,12 +27,12 @@ export function DayStrip({ footage, day, today, onPick }: Props) {
         const selected = d.key === day;
         const pickable = d.footage || d.key === today;
         return (
-          <div key={d.key} className="flex flex-col items-center shrink-0 w-10">
+          <div key={d.key} className="flex flex-col items-center shrink-0 w-10 pointer-coarse:w-12">
             <span className="text-[10px] leading-4 muted whitespace-nowrap h-4">{d.monthStart ? d.date.toLocaleDateString(lang, { month: "short" }) : ""}</span>
             <span className="text-[10px] leading-4 muted">{d.date.toLocaleDateString(lang, { weekday: "short" })}</span>
             <button ref={selected ? chosen : undefined} type="button" aria-pressed={selected} disabled={!pickable} onClick={() => onPick(d.key)}
               aria-label={d.date.toLocaleDateString(lang, { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
-              className="w-8 h-8 rounded-full text-sm tabular-nums font-medium disabled:cursor-default"
+              className="w-8 h-8 pointer-coarse:w-11 pointer-coarse:h-11 rounded-full text-sm tabular-nums font-medium disabled:cursor-default"
               style={selected ? { background: "var(--accent)", color: "#1a1300" } : d.footage ? { background: "var(--accent-soft)", color: "var(--accent-text)" } : { color: "var(--muted)", opacity: pickable ? 1 : 0.5, border: d.key === today ? "1px solid var(--border)" : undefined }}>
               {d.date.getDate()}
             </button>

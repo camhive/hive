@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"net"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/kardianos/service"
 
+	"github.com/camhive/hive/internal/hiveagent"
 	"github.com/camhive/hive/internal/hiveapp"
 	"github.com/camhive/hive/internal/hiveconfig"
 	"github.com/camhive/hive/internal/store"
@@ -187,5 +189,33 @@ func TestStandaloneDispatchesVersionWithoutTheService(t *testing.T) {
 	raw, _ := os.ReadFile(out.Name())
 	if got := string(raw); !strings.HasPrefix(got, "camhive-hive ") || !strings.Contains(got, "(this binary)\n") || !strings.Contains(got, "usage: hive local-login") {
 		t.Fatalf("output %q", got)
+	}
+}
+
+// ADR-0023: when the hive's address changed during an outage, the owner
+// reads the new one on the hive's computer and types it into the app.
+func TestLANLinesNameEveryAddressWithTheTLSPort(t *testing.T) {
+	got := lanLines([]string{"192.168.1.23", "fd00::5"}, "0.0.0.0:16443")
+	want := []string{"lan: https://192.168.1.23:16443", "lan: https://[fd00::5]:16443"}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("lanLines = %q", got)
+	}
+	if got := lanLines([]string{"192.168.1.23"}, ""); got != nil {
+		t.Fatalf("no TLS listener, no LAN lines: %q", got)
+	}
+}
+
+func TestStatusPrintsTheHivesLANAddresses(t *testing.T) {
+	paths := runningHive(t, "0.1.6 (a73f337, 2026-11-15)")
+	var out bytes.Buffer
+	runStatus(running, version.Info{Version: "0.1.6"}, paths, &out, io.Discard)
+	addrs := hiveagent.LANAddrs()
+	for _, a := range addrs {
+		if want := "lan: https://" + net.JoinHostPort(a, "16443") + "\n"; !strings.Contains(out.String(), want) {
+			t.Errorf("missing %q in\n%s", want, out.String())
+		}
+	}
+	if len(addrs) == 0 && strings.Contains(out.String(), "lan: ") {
+		t.Errorf("no private address, yet a LAN line:\n%s", out.String())
 	}
 }

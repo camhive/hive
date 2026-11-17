@@ -6,12 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/kardianos/service"
 
+	"github.com/camhive/hive/internal/hiveagent"
 	"github.com/camhive/hive/internal/hiveapp"
 	"github.com/camhive/hive/internal/hiveconfig"
 	"github.com/camhive/hive/internal/update"
@@ -39,10 +41,10 @@ func runStatus(status func() (service.Status, error), self version.Info, paths h
 
 // reportHive prints what the running hive says about itself.
 func reportHive(ctx context.Context, w, stderr io.Writer, self version.Info, paths hiveconfig.Paths) {
-	addr := hiveAddr(paths, stderr)
-	h, err := askHive(ctx, addr)
+	cfg := hiveConfig(paths, stderr)
+	h, err := askHive(ctx, cfg.ListenAddr)
 	if err != nil {
-		fmt.Fprintln(w, "hive: not answering on", addr)
+		fmt.Fprintln(w, "hive: not answering on", cfg.ListenAddr)
 		return
 	}
 	fmt.Fprintln(w, "hive:", h.Version)
@@ -50,6 +52,24 @@ func reportHive(ctx context.Context, w, stderr io.Writer, self version.Info, pat
 		printUpdates(w, *u)
 	}
 	printOlder(w, self, h.Version)
+	for _, l := range lanLines(hiveagent.LANAddrs(), cfg.TLSListenAddr) {
+		fmt.Fprintln(w, l)
+	}
+}
+
+// lanLines are the addresses a browser on the LAN opens the hive at
+// (ADR-0023), one per private address, with the TLS listener's port; none
+// without a TLS listener.
+func lanLines(addrs []string, tlsListen string) []string {
+	_, port, err := net.SplitHostPort(tlsListen)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, a := range addrs {
+		out = append(out, "lan: https://"+net.JoinHostPort(a, port))
+	}
+	return out
 }
 
 // reportVersion prints this binary's version, which may be older than
@@ -83,14 +103,20 @@ func printOlder(w io.Writer, self version.Info, running string) {
 }
 
 // hiveAddr is the hive's loopback API address from hive.yaml, or the
-// default for a user who cannot read it (it is 0600); stderr says so.
+// default for a user who cannot read it.
 func hiveAddr(paths hiveconfig.Paths, stderr io.Writer) string {
+	return hiveConfig(paths, stderr).ListenAddr
+}
+
+// hiveConfig is hive.yaml, or the default listeners for a user who cannot
+// read it (it is 0600); stderr says so.
+func hiveConfig(paths hiveconfig.Paths, stderr io.Writer) hiveconfig.Config {
 	cfg, err := hiveconfig.Read(paths)
 	if err != nil {
 		fmt.Fprintln(stderr, "hive.yaml not readable, tried the default", hiveconfig.DefaultListenAddr, "(run as root / Administrator to use its listen_addr)")
-		return hiveconfig.DefaultListenAddr
+		return hiveconfig.Config{ListenAddr: hiveconfig.DefaultListenAddr, TLSListenAddr: hiveconfig.DefaultTLSListenAddr}
 	}
-	return cfg.ListenAddr
+	return cfg
 }
 
 // askHive asks the hive at addr for its /healthz. addr is listen_addr,

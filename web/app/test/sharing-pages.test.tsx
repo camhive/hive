@@ -13,11 +13,14 @@ beforeEach(() => { resetCloudForTest(); localStorage.clear(); });
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const hive = { id: "hv_1", name: "Home", status: "active", online: true, claimed_at: "2026-11-09T00:00:00Z", lan: { host: "hv_1.h.camhive.app", port: 16017, addrs: ["192.168.1.20"] }, relay_host: "hv_1.relay.camhive.app" };
 
-function stub(opts: { signedIn?: boolean; memberLimit?: boolean; shareLimit?: boolean } = {}) {
+type GrantRow = { id: string; member_id: string; member_email: string; camera_id: string; role: string; created_at: string; state: string; expires_at?: string };
+const inDays = (d: number) => new Date(Date.now() + d * 86_400_000).toISOString();
+
+function stub(opts: { signedIn?: boolean; memberLimit?: boolean; shareLimit?: boolean; grants?: GrantRow[]; notices?: unknown[]; grantError?: string } = {}) {
   const state = {
     members: [{ id: "m_1", email: "friend@example.de", status: "active", since: "2026-11-01T00:00:00Z" }],
     invitations: [{ id: "inv_1", email: "pending@example.de", expires_at: "2026-11-17T00:00:00Z" }],
-    grants: [{ id: "g_1", member_id: "m_1", member_email: "friend@example.de", camera_id: "cam_1", role: "viewer", created_at: "2026-11-02T00:00:00Z" }],
+    grants: opts.grants ?? [{ id: "g_1", member_id: "m_1", member_email: "friend@example.de", camera_id: "cam_1", role: "viewer", created_at: "2026-11-02T00:00:00Z", state: "active" }] as GrantRow[],
     calls: [] as string[],
     bodies: [] as unknown[],
     accepted: "",
@@ -59,9 +62,11 @@ function stub(opts: { signedIn?: boolean; memberLimit?: boolean; shareLimit?: bo
         const b = (await req.json()) as { member_id: string; camera_id: string; role: string; expires_at?: string };
         state.bodies.push(b);
         if (opts.shareLimit) return json(402, { error: { code: "plan_limit", message: "" } });
-        state.grants.push({ id: "g_2", member_id: b.member_id, member_email: "friend@example.de", camera_id: b.camera_id, role: b.role, created_at: "" });
+        if (opts.grantError) return json(400, { error: { code: opts.grantError, message: "" } });
+        state.grants.push({ id: "g_2", member_id: b.member_id, member_email: "friend@example.de", camera_id: b.camera_id, role: b.role, created_at: "", state: "active" });
         return json(200, { id: "g_2", member_id: b.member_id, camera_id: b.camera_id, role: b.role });
       }
+      case "GET /v1/me/grant-notices": return json(200, { notices: opts.notices ?? [] });
       case "DELETE /v1/hives/hv_1/grants/g_1": state.grants.splice(0, 1); return new Response(null, { status: 204 });
       default: return json(404, { error: { code: "not_found", message: "" } });
     }
@@ -130,7 +135,7 @@ describe("hive sharing page", () => {
     await waitFor(() => expect(state.bodies.at(-1)).toEqual({ member_id: "m_1", camera_id: "cam_2", role: "operator" }));
     await waitFor(() => expect(screen.getAllByTestId("grant")).toHaveLength(2));
     expect(screen.getAllByTestId("grant")[1]).toHaveTextContent("Garden · operator");
-    await user.click(within(screen.getAllByTestId("grant")[0]!).getByRole("button", { name: "Revoke" }));
+    await user.click(within(screen.getAllByTestId("grant")[0]!).getByRole("button", { name: "Revoke the share of Door with friend@example.de" }));
     await waitFor(() => expect(state.calls).toContain("DELETE /v1/hives/hv_1/grants/g_1"));
   });
 
@@ -162,5 +167,82 @@ describe("invitation page", () => {
     const second = mount("/invite?token=stale");
     await second.user.click(await screen.findByRole("button", { name: "Accept invitation" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("The invitation is invalid or expired.");
+  });
+});
+
+describe("expiring and expired grants (#85)", () => {
+  const expiring: GrantRow = { id: "g_1", member_id: "m_1", member_email: "friend@example.de", camera_id: "cam_1", role: "viewer", created_at: "", state: "expiring", expires_at: inDays(2) };
+  const expired: GrantRow = { id: "g_3", member_id: "m_1", member_email: "friend@example.de", camera_id: "cam_2", role: "operator", created_at: "", state: "expired", expires_at: inDays(-1) };
+  const permanent: GrantRow = { id: "g_4", member_id: "m_1", member_email: "friend@example.de", camera_id: "*", role: "viewer", created_at: "", state: "active" };
+
+  it("marks expiring and expired grants for the owner, who extends one to a new date and makes the expired one permanent", async () => {
+    const state = stub({ grants: [expiring, expired, permanent] });
+    const { user } = mount("/hives/hv_1/sharing");
+    await waitFor(() => expect(screen.getAllByTestId("grant")).toHaveLength(3));
+    const [soon, gone, open] = screen.getAllByTestId("grant") as [HTMLElement, HTMLElement, HTMLElement];
+    expect(soon).toHaveTextContent("ends soon");
+    expect(gone).toHaveTextContent(/· ended /);
+    expect(gone).not.toHaveTextContent(/until|ends soon/);
+    expect(open).not.toHaveTextContent(/ends soon|ended/);
+    expect(within(open).queryByRole("button", { name: /permanent/ })).toBeNull();
+    expect(await within(gone).findByRole("button", { name: "Extend the share of Garden with friend@example.de" })).toHaveTextContent("Renew");
+
+    const toggle = await within(soon).findByRole("button", { name: "Extend the share of Door with friend@example.de" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(within(soon).getByLabelText("New end").getAttribute("min")).toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d$/);
+    await user.type(within(soon).getByLabelText("New end"), "2026-12-24T18:00");
+    await user.click(within(soon).getByRole("button", { name: "Save new end" }));
+    await waitFor(() => expect(state.bodies.at(-1)).toEqual({ member_id: "m_1", camera_id: "cam_1", role: "viewer", expires_at: new Date("2026-12-24T18:00").toISOString() }));
+
+    await user.click(within(gone).getByRole("button", { name: "Make the share of Garden with friend@example.de permanent" }));
+    await waitFor(() => expect(state.bodies.at(-1)).toEqual({ member_id: "m_1", camera_id: "cam_2", role: "operator" }));
+    expect(state.calls.filter((c) => c === "PUT /v1/hives/hv_1/grants")).toHaveLength(2);
+  });
+
+  it("explains an end the cloud refuses", async () => {
+    stub({ grants: [expiring], grantError: "grant_end_past" });
+    const { user } = mount("/hives/hv_1/sharing");
+    const row = await screen.findByTestId("grant");
+    await user.click(await within(row).findByRole("button", { name: "Extend the share of Door with friend@example.de" }));
+    await user.type(within(row).getByLabelText("New end"), "2026-12-24T18:00");
+    await user.click(within(row).getByRole("button", { name: "Save new end" }));
+    expect(await within(row).findByRole("alert")).toHaveTextContent("The end must lie in the future.");
+  });
+
+  const notice = (side: "owner" | "member", st: "expiring" | "expired", over: Record<string, string> = {}) => ({
+    grant_id: `g_${side}_${st}`, side, hive_id: "hv_1", hive_name: "Home", camera_id: "cam_1", camera_name: "Door", role: "viewer",
+    peer: side === "owner" ? "friend@example.de" : "anna@example.de", expires_at: st === "expiring" ? inDays(2) : inDays(-1), state: st, ...over,
+  });
+
+  it("shows the owner one notice per expiring or expired grant, leading to the hive's sharing page", async () => {
+    stub({ notices: [notice("owner", "expiring"), notice("owner", "expired", { camera_id: "*", camera_name: "" })] });
+    const { user, router } = mount("/");
+    await waitFor(() => expect(screen.getAllByTestId("grant-notice")).toHaveLength(2));
+    const [soon, gone] = screen.getAllByTestId("grant-notice") as [HTMLElement, HTMLElement];
+    expect(soon).toHaveTextContent("Your share of Door on Home with friend@example.de ends on");
+    expect(gone).toHaveTextContent("Your share of all cameras on Home with friend@example.de ended on");
+    await user.click(within(soon).getByRole("link", { name: "Extend" }));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/hives/hv_1/sharing"));
+  });
+
+  it("shows the member their expiring and expired access, with no way to extend it themselves", async () => {
+    stub({ notices: [notice("member", "expiring"), notice("member", "expired")] });
+    mount("/");
+    await waitFor(() => expect(screen.getAllByTestId("grant-notice")).toHaveLength(2));
+    const [soon, gone] = screen.getAllByTestId("grant-notice") as [HTMLElement, HTMLElement];
+    expect(soon).toHaveTextContent("Your access to Door on Home, shared by anna@example.de, ends on");
+    expect(soon).toHaveTextContent("Ask them to extend it.");
+    expect(gone).toHaveTextContent("Your access to Door on Home, shared by anna@example.de, ended on");
+    expect(screen.queryByRole("link", { name: "Extend" })).toBeNull();
+  });
+
+  it("shows no notices when nothing ends soon", async () => {
+    stub();
+    mount("/");
+    expect(await screen.findByTestId("me")).toBeInTheDocument();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByTestId("grant-notice")).toBeNull();
   });
 });

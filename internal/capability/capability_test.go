@@ -35,10 +35,10 @@ func TestEveryCapabilityMapsToDocumentedEndpoints(t *testing.T) {
 
 // Names are never removed or renamed (ADR-0022). A ratchet: every name the
 // list has had stays, including names whose feature ships in the next
-// release (local_login and motion with v0.1.6). Add a name here when it
-// joins the list.
+// release (local_login and motion with v0.1.6, camera.retention with
+// v0.1.9). Add a name here when it joins the list.
 func TestShippedNamesStay(t *testing.T) {
-	shipped := []string{"archive.delete", "archive.encryption", "camera.identity", "local_login", "motion", "updates"}
+	shipped := []string{"archive.delete", "archive.encryption", "camera.identity", "camera.retention", "camera.sub_stream", "local_login", "motion", "updates"}
 	names := capability.Names()
 	for _, n := range shipped {
 		if !slices.Contains(names, n) {
@@ -52,4 +52,19 @@ func TestNamesAreUniqueAndSorted(t *testing.T) {
 	if !slices.IsSorted(names) || len(slices.Compact(slices.Clone(names))) != len(names) {
 		t.Errorf("names must be unique and sorted: %v", names)
 	}
+}
+
+// The app offers a camera's own retention only to hives that announce it
+// (#124): retention_days is omitted for a camera on the hive-wide value, so
+// the camera list cannot tell such a hive from one without the feature.
+func TestPerCameraRetentionIsAnnounced(t *testing.T) {
+	for _, c := range capability.All() {
+		if c.Name == "camera.retention" {
+			if !slices.Equal(c.Endpoints, []string{"PATCH /v0/cameras/{id}"}) {
+				t.Fatalf("camera.retention endpoints = %v", c.Endpoints)
+			}
+			return
+		}
+	}
+	t.Fatalf("camera.retention is not in %v", capability.Names())
 }

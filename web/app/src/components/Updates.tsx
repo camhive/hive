@@ -126,7 +126,7 @@ function UpdateState({ status, onInstall }: { status: UpdateStatus; onInstall: (
   const last = status.last;
   return (
     <div className="space-y-2">
-      <dl><div className="flex justify-between gap-4"><dt className="muted">{t("updates.running")}</dt><dd className="font-medium">{status.running}</dd></div></dl>
+      <dl className="kv"><div><dt className="muted">{t("updates.running")}</dt><dd className="font-medium">{status.running}</dd></div></dl>
       {!status.supported && <p className="callout">{t(`updates.unsupported.${status.unsupported_reason ?? "no_updater"}`)}</p>}
       {status.settings_need_restart && <p className="callout">{t("updates.needRestart")}</p>}
       {last && (

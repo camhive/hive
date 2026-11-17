@@ -52,7 +52,7 @@ export function Members() {
         {members.data?.invitations.length === 0 && <p className="muted text-sm">{t("members.noPending")}</p>}
         <ul className="text-sm divide-y divide-[var(--border)]">
           {members.data?.invitations.map((i) => (
-            <li key={i.id} className="flex items-center justify-between gap-3 py-2.5" data-testid="invitation">
+            <li key={i.id} className="list-row py-2.5" data-testid="invitation">
               <span>{i.email} <span className="muted">· {t("members.expires", { at: new Date(i.expires_at).toLocaleDateString() })}</span></span>
               <button type="button" className="link" onClick={() => void actions.cancelInvitation(i.id)}>{t("members.cancel")}</button>
             </li>
@@ -65,7 +65,7 @@ export function Members() {
         {members.data?.members.length === 0 && <p className="muted text-sm">{t("members.noMembers")}</p>}
         <ul className="text-sm divide-y divide-[var(--border)]">
           {members.data?.members.map((m) => (
-            <li key={m.id} className="flex items-center justify-between gap-3 py-2.5" data-testid="member">
+            <li key={m.id} className="list-row py-2.5" data-testid="member">
               <span>{m.email} <span className="muted">· {t("members.since", { at: new Date(m.since).toLocaleDateString() })}</span></span>
               <button type="button" className="link link-danger" onClick={() => { if (window.confirm(t("members.confirmRemove", { email: m.email }))) void actions.removeMember(m.id); }}>{t("members.remove")}</button>
             </li>

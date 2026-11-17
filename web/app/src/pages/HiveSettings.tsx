@@ -56,13 +56,13 @@ export function HiveSettings() {
       <section className="card max-w-3xl" aria-labelledby="path-title" data-testid="transport">
         <h2 id="path-title" className="text-lg font-semibold mb-1">{t("transport.title")}</h2>
         <p className="muted mb-3 text-sm">{t("transport.liveNote")}</p>
-        <dl className="text-sm space-y-2">
-          <div className="flex justify-between gap-4"><dt className="muted">{t("transport.httpPath")}</dt><dd className="font-medium" data-testid="path">{t(pathKey)}</dd></div>
-          {decision && <div className="flex justify-between gap-4"><dt className="muted">{t("transport.reasonLabel")}</dt><dd>{t(`transport.reason.${decision.reason}`)}</dd></div>}
-          <div className="flex justify-between gap-4"><dt className="muted">{t("transport.lanName")}</dt><dd className="text-right break-all">{lanBase(hive) ?? t("transport.none")}</dd></div>
-          {!!hive.lan?.addrs?.length && <div className="flex justify-between gap-4"><dt className="muted">{t("transport.lanAddrs")}</dt><dd className="text-right">{hive.lan.addrs.join(", ")}</dd></div>}
-          {hive.lan?.cert_issuer && <div className="flex justify-between gap-4"><dt className="muted">{t("transport.cert")}</dt><dd>{t(`transport.issuer.${hive.lan.cert_issuer}`, { defaultValue: hive.lan.cert_issuer })}</dd></div>}
-          <div className="flex justify-between gap-4"><dt className="muted">{t("transport.relay")}</dt><dd className="text-right break-all">{relayBase(hive) ?? t("transport.none")}</dd></div>
+        <dl className="kv text-sm space-y-2">
+          <div><dt className="muted">{t("transport.httpPath")}</dt><dd className="font-medium" data-testid="path">{t(pathKey)}</dd></div>
+          {decision && <div><dt className="muted">{t("transport.reasonLabel")}</dt><dd>{t(`transport.reason.${decision.reason}`)}</dd></div>}
+          <div><dt className="muted">{t("transport.lanName")}</dt><dd>{lanBase(hive) ?? t("transport.none")}</dd></div>
+          {!!hive.lan?.addrs?.length && <div><dt className="muted">{t("transport.lanAddrs")}</dt><dd>{hive.lan.addrs.join(", ")}</dd></div>}
+          {hive.lan?.cert_issuer && <div><dt className="muted">{t("transport.cert")}</dt><dd>{t(`transport.issuer.${hive.lan.cert_issuer}`, { defaultValue: hive.lan.cert_issuer })}</dd></div>}
+          <div><dt className="muted">{t("transport.relay")}</dt><dd>{relayBase(hive) ?? t("transport.none")}</dd></div>
         </dl>
         {rebindHintApplies(hive, decision) && (
           <div className="callout mt-4 text-sm" data-testid="rebind-hint">

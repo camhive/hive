@@ -4,6 +4,7 @@ import { applyTheme, readTheme, type Theme } from "@/lib/theme";
 import { useMe, useSignOut } from "@/lib/session";
 import { useCloudReachable } from "@/lib/cloud";
 import { Logo } from "@/components/Logo";
+import { UpdateBanner } from "@/components/UpdateBanner";
 
 export function Shell() {
   const { t, i18n } = useTranslation();
@@ -23,7 +24,7 @@ export function Shell() {
               <Link to="/account" className="nav-link" activeProps={{ "aria-current": "page" }}>{t("nav.account")}</Link>
             </nav>
           )}
-          <div className="ml-auto flex items-center gap-2 text-sm">
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-2 text-sm">
             <select aria-label={t("home.locale")} className="input input-sm !w-auto" value={i18n.resolvedLanguage} onChange={(e) => void i18n.changeLanguage(e.target.value)}>
               <option value="en">EN</option>
               <option value="de">DE</option>
@@ -44,6 +45,7 @@ export function Shell() {
           </div>
         </div>
       </header>
+      <UpdateBanner />
       {!reachable && (
         <p role="status" className="px-4 py-2.5 text-sm text-center font-medium" style={{ background: "var(--accent-soft)", color: "var(--accent-text)", borderBottom: "1px solid var(--border)" }} data-testid="cloud-down">
           {t("app.cloudDown")}

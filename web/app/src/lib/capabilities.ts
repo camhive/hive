@@ -11,6 +11,7 @@ export const SINCE = {
   "archive.delete": "0.1.3",
   "archive.encryption": "0.1.7",
   "camera.identity": "0.1.4",
+  "camera.retention": "0.1.9",
   "camera.sub_stream": "0.1.8",
   "local_login": "0.1.6",
   "motion": "0.1.6",

@@ -1,12 +1,12 @@
 // Local emergency login (#57, ADR-0004): when the cloud is unreachable and
-// no offline grant is left, the owner signs in on the hive's LAN name with
+// no offline grant is left, the owner signs in on the LAN, at the hive's LAN
+// name or, without DNS, at its LAN address (ADR-0023), with
 // the local username and password set while online. The hive answers with
 // an owner token it issued itself, valid for an hour and only on the LAN.
 // The session lives in sessionStorage: it ends with the tab.
 import { useEffect, useSyncExternalStore } from "react";
 import { CamhiveError, type AccessGrant, type hiveComponents } from "@camhive/api";
 import type { Hive } from "./hives";
-import { lanBase } from "./transport";
 import { retryAfterSeconds } from "./retryAfter";
 
 export type LocalSession = hiveComponents["schemas"]["LocalSession"];
@@ -66,9 +66,8 @@ export class LocalLoginLocked extends CamhiveError {
   }
 }
 
-/** Signs in on the hive's LAN name; never through the relay, which refuses it anyway. */
-export async function signInLocally(hive: Pick<Hive, "lan">, username: string, password: string, f: typeof fetch = (i, init) => globalThis.fetch(i, init)): Promise<LocalSession> {
-  const base = lanBase(hive);
+/** Signs in at `base`, the hive's direct LAN base the transport decided (name or address); never through the relay, which refuses it anyway. */
+export async function signInLocally(base: string | null, username: string, password: string, f: typeof fetch = (i, init) => globalThis.fetch(i, init)): Promise<LocalSession> {
   if (!base) throw new CamhiveError(403, { code: "lan_only" });
   const res = await f(`${base}/v0/local-login/sessions`, {
     method: "POST", mode: "cors", cache: "no-store",

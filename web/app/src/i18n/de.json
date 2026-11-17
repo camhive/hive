@@ -114,7 +114,9 @@
     "invalid_update_window": "Das Update-Fenster braucht zwei verschiedene Uhrzeiten, etwa 02:00 bis 05:00.",
     "updates_unavailable": "Dieser Hive kann sich nicht selbst aktualisieren.",
     "push_not_configured": "Push-Benachrichtigungen sind auf diesem Server nicht eingerichtet.",
-    "push_endpoint": "Der Push-Dienst dieses Browsers wird nicht unterstützt."
+    "push_endpoint": "Der Push-Dienst dieses Browsers wird nicht unterstützt.",
+    "grant_end_past": "Das Ende muss in der Zukunft liegen.",
+    "grant_end_far": "Das Ende darf höchstens 10 Jahre in der Zukunft liegen. Machen Sie die Freigabe stattdessen unbefristet."
   },
   "account": {
     "title": "Konto",
@@ -195,6 +197,7 @@
     "httpPath": "Pfad für Aufnahmen",
     "path": {
       "lan": "Direkt in Ihrem Netz",
+      "address": "Direkt in Ihrem Netz, über die Adresse",
       "relay": "Über das Camhive-Relay",
       "none": "Nicht erreichbar"
     },
@@ -203,6 +206,7 @@
     "reasonLabel": "Grund",
     "reason": {
       "lan_ok": "Der Hive hat unter seinem lokalen Namen geantwortet.",
+      "address_ok": "Der lokale Name hat nicht geantwortet; der Hive hat unter seiner lokalen Adresse geantwortet.",
       "lan_failed": "Der lokale Name hat nicht geantwortet; Relay wird genutzt.",
       "lan_unavailable": "Der Hive hat noch keine lokale Adresse gemeldet.",
       "relay_unavailable": "Für diesen Hive ist kein Relay konfiguriert."
@@ -343,6 +347,12 @@
     "rtspHint": "Ohne Benutzer und Passwort; die kommen in die Felder darunter.",
     "subStreamUrl": "Substream-URL (optional)",
     "subStreamHint": "Ein zweiter, kleinerer Stream derselben Kamera für Raster und Fernzugriff, z. B. …/ch1 oder …/stream2. Ohne Benutzer und Passwort.",
+    "retention": "Aufnahmen behalten",
+    "retentionDefault": "Hive-Standard",
+    "retentionOwn": "Anzahl Tage",
+    "retentionDays": "Tage",
+    "retentionHint": "Ganze Tage von 0 bis 3650; bei 0 bleiben sie, bis die Festplatte den Platz braucht. Die längste Aufbewahrung Ihres Plans gilt weiterhin.",
+    "retentionInvalid": "Bitte ganze Tage von 0 bis 3650 eingeben.",
     "streamUrlInvalid": "Geben Sie eine Adresse ein, die mit rtsp:// oder rtsps:// beginnt, ohne Benutzer und Passwort.",
     "create": "Kamera hinzufügen",
     "invalid": "Der Hive hat die Kamera abgelehnt: {{message}}",
@@ -416,7 +426,19 @@
     "limitTitle": "Ihr Tarif hat sein Freigabelimit erreicht.",
     "limitTitleN_one": "Ihr Tarif erlaubt {{count}} Freigabe.",
     "limitTitleN_other": "Ihr Tarif erlaubt {{count}} Freigaben.",
-    "limitHelp": "Entziehen Sie eine nicht mehr benötigte Freigabe oder wechseln Sie den Tarif."
+    "limitHelp": "Entziehen Sie eine nicht mehr benötigte Freigabe oder wechseln Sie den Tarif.",
+    "state": {
+      "expiring": "endet bald"
+    },
+    "extend": "Verlängern",
+    "makePermanent": "Unbefristet machen",
+    "newEnd": "Neues Ende",
+    "saveEnd": "Neues Ende speichern",
+    "ended": "beendet {{at}}",
+    "renew": "Erneuern",
+    "extendFor": "Freigabe von {{camera}} für {{member}} verlängern",
+    "makePermanentFor": "Freigabe von {{camera}} für {{member}} unbefristet machen",
+    "revokeFor": "Freigabe von {{camera}} für {{member}} entziehen"
   },
   "invite": {
     "title": "Sie wurden eingeladen",
@@ -431,7 +453,6 @@
     "promos": "Eingelöste Promo-Codes",
     "upgradeSoon": "Bezahlte Tarife kommen mit Kartenzahlung kurz nach der Beta; bis dahin vergeben wir Tarife selbst, Promo-Codes funktionieren.",
     "compare": "Tarife vergleichen",
-    "feature": "",
     "yours": "Ihrer",
     "free": "kostenlos",
     "perMonth": "{{price}} / Monat",
@@ -573,6 +594,22 @@
     "lockedUnknown": "Zu viele fehlgeschlagene Anmeldungen. Der Hive sperrt lokale Anmeldungen für bis zu 15 Minuten; versuchen Sie es später erneut.",
     "unreachable": "Der Hive antwortet gerade nicht in Ihrem Netz. Prüfen Sie, ob dieses Gerät im selben Netz wie der Hive ist."
   },
+  "lanAddress": {
+    "title": "Hive über seine Adresse öffnen",
+    "intro": "Camhive erreicht diesen Hive nicht, und sein lokaler Name antwortet nicht: Ohne Internet lässt sich der Name nicht auflösen. Ihr Browser erreicht den Hive aber über seine Adresse in Ihrem Netz.",
+    "open": "Öffnen Sie den Link unten. Ihr Browser warnt, dass die Verbindung nicht privat ist. Prüfen Sie vor dem Fortfahren, dass es genau diese Warnung ist, für {{name}}:",
+    "chrome": "Chrome und Edge: der Code NET::ERR_CERT_COMMON_NAME_INVALID, und unter „Erweitert“ steht, dass der Server nicht beweisen konnte, {{host}} zu sein, und dass sein Sicherheitszertifikat von {{name}} stammt. Wählen Sie dann „Weiter zu {{host}} (unsicher)“.",
+    "firefox": "Firefox: der Code SSL_ERROR_BAD_CERT_DOMAIN, und unter „Erweitert“ steht, dass das Zertifikat nicht für {{host}} gilt, sondern nur für {{name}}. Wählen Sie dann „Risiko akzeptieren und fortfahren“.",
+    "safari": "Safari: „Details einblenden“ → Zertifikat ansehen. Es muss für {{name}} von Let’s Encrypt (ISRG Root X1 oder X2) ausgestellt sein und darf nicht „nicht vertrauenswürdig“ melden. Wählen Sie dann „diese Website besuchen“.",
+    "stop": "Jede andere Warnung („nicht vertrauenswürdig“, „selbstsigniert“, ein unbekannter Aussteller oder ein anderer Name) heißt: aufhören. Schließen Sie diesen Tab; unter dieser Adresse antwortet dann nicht Ihr Hive.",
+    "back": "Wenn die Seite des Hives meldet, dass Ihr Browser ihn erreicht, kehren Sie hierher zurück und tippen Sie auf Erneut versuchen.",
+    "field": "Adresse des Hives",
+    "hint": "Sie steht in der Geräteliste Ihres Routers oder in der Ausgabe von `hive status` auf dem Computer des Hives.",
+    "link": "Hive unter {{address}} öffnen",
+    "invalid": "Geben Sie die lokale IP-Adresse des Hives ein, zum Beispiel 192.168.1.23.",
+    "retry": "Erneut versuchen",
+    "stillNot": "Unter dieser Adresse antwortet der Hive noch nicht."
+  },
   "capability": {
     "needsUpdate": "Dafür braucht der Hive Version {{since}} oder neuer; dieser Hive läuft mit {{running}}.",
     "unknownVersion": "einer unbekannten Version",
@@ -708,6 +745,21 @@
     "testSent_other": "An {{count}} Geräte gesendet."
   },
   "hiveActivity": {
+    "groups": {
+      "cameras": "Kameras",
+      "recordings": "Aufnahmen und Exporte",
+      "updates": "Updates",
+      "access": "Anmeldungen und Zugriff",
+      "encryption": "Verschlüsselung"
+    },
+    "filter": {
+      "kinds": "Nur anzeigen",
+      "search": "Aktivität durchsuchen",
+      "cloud": "Cloud-Sitzungen anzeigen ({{count}})",
+      "none": "Nichts passt zu diesem Filter.",
+      "loadMore": "Mit „Mehr laden“ weiter zurück suchen.",
+      "onlyCloud": "Bisher nur Cloud-Sitzungen. Setzen Sie das Häkchen bei „Cloud-Sitzungen anzeigen“, um sie zu sehen."
+    },
     "intro": "Was auf diesem Hive geschah, das Neueste zuerst: Kamera-Änderungen, Exporte, gelöschte Aufnahmen, Updates und Anmeldungen. Der Hive führt dieses Protokoll selbst.",
     "list": "Aktivität auf diesem Hive",
     "empty": "Noch nichts.",
@@ -754,6 +806,7 @@
       "update.applied": "Update installiert",
       "update.rolled_back": "Update zurückgenommen",
       "update.needs_package": "Update braucht eine Paketinstallation",
+      "update.integrity_failed": "Update abgelehnt: seine Dateien wurden nach der Installation verändert",
       "update.settings_changed": "Update-Einstellungen geändert",
       "local_login.enable": "Lokale Anmeldung eingerichtet",
       "local_login.disable": "Lokale Anmeldung ausgeschaltet",
@@ -768,5 +821,20 @@
     "text": "Camhive startet dann vom Home-Bildschirm oder Desktop in einem eigenen Fenster.",
     "button": "Camhive installieren",
     "iosHint": "Tippen Sie auf Teilen → Zum Home-Bildschirm und öffnen Sie Camhive dann vom Home-Bildschirm. Auf iPhone und iPad kann Camhive erst dann Benachrichtigungen zeigen."
+  },
+  "grantNotice": {
+    "title": "Freigaben",
+    "allCameras": "alle Kameras",
+    "ownerExpiring": "Ihre Freigabe von {{camera}} auf {{hive}} für {{peer}} endet am {{at}}.",
+    "ownerExpired": "Ihre Freigabe von {{camera}} auf {{hive}} für {{peer}} ist am {{at}} abgelaufen.",
+    "memberExpiring": "Ihr Zugriff auf {{camera}} auf {{hive}}, freigegeben von {{peer}}, endet am {{at}}. Bitten Sie um eine Verlängerung.",
+    "memberExpired": "Ihr Zugriff auf {{camera}} auf {{hive}}, freigegeben von {{peer}}, ist am {{at}} abgelaufen.",
+    "extend": "Verlängern",
+    "renew": "Erneuern"
+  },
+  "appUpdate": {
+    "available": "Eine neue Version ist verfügbar.",
+    "update": "Aktualisieren",
+    "updating": "Wird aktualisiert…"
   }
 }

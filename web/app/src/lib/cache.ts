@@ -3,9 +3,14 @@
 // the LAN paths can be used with a stored offline token.
 const PREFIX = "camhive.cache.";
 
+/** The storage key of a cached value; everything under it goes with cacheClear() on sign-out. */
+export function cacheKey(key: string): string {
+  return PREFIX + key;
+}
+
 export function cacheGet<T>(key: string): T | null {
   try {
-    const raw = localStorage.getItem(PREFIX + key);
+    const raw = localStorage.getItem(cacheKey(key));
     return raw ? (JSON.parse(raw) as T) : null;
   } catch {
     return null;
@@ -14,7 +19,7 @@ export function cacheGet<T>(key: string): T | null {
 
 export function cacheSet(key: string, value: unknown): void {
   try {
-    localStorage.setItem(PREFIX + key, JSON.stringify(value));
+    localStorage.setItem(cacheKey(key), JSON.stringify(value));
   } catch {
     /* storage blocked: the fallback is a convenience */
   }

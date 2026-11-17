@@ -4,6 +4,55 @@
  */
 
 export interface paths {
+    "/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Landing page after opening the hive at its LAN address
+         * @description ADR-0023: in an emergency the app sends the user to `https://<lan-address>:<port>/` in a new tab; after they proceed through the browser's certificate warning (a name mismatch for the hive's LAN name) this page tells them to return to the app. Static HTML in English or German by the first language of `Accept-Language`; it carries nothing about the hive (no version, id or name, no links) and needs no token. Only on the LAN listener: through the relay and on the loopback listener the root answers `404 not_found`.
+         *
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The page */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/html": string;
+                    };
+                };
+                /** @description Not on the LAN listener */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/healthz": {
         parameters: {
             query?: never;
@@ -2529,7 +2578,7 @@ export interface components {
              * @example rtsp://192.168.1.50:554/ch1
              */
             sub_stream?: string;
-            /** @description Owner only. Keep this camera's footage this many days (0 = until space runs out); null puts it back on the hive-wide retention_days. The sweep applies it within five minutes; the plan's archive.retention_days_max caps it. */
+            /** @description Owner only. Keep this camera's footage this many days (0 = until space runs out); null puts it back on the hive-wide retention_days. The sweep applies it within five minutes; the plan's archive.retention_days_max caps it. Announced as capability camera.retention (from v0.1.9; v0.1.8 takes it without announcing it). */
             retention_days?: number | null;
             credentials?: components["schemas"]["Credentials"];
         };

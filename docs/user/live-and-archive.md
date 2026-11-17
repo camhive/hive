@@ -149,7 +149,7 @@ The owner can remove footage from the hive's disk at once, for example when
 someone who was filmed asks for it to be erased (GDPR Art. 17). Members,
 operators included, cannot. It works on the home network without the cloud.
 
-- **Hive → Settings → Delete recordings** picks the cameras (or *all
+- **Hive → Connection → Delete recordings** picks the cameras (or *all
   cameras*, which also covers footage of cameras removed since) and what to
   delete: *everything*, *a time range*, or footage *older than* a number of
   days. *Also delete exports of this footage* removes exports that overlap

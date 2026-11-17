@@ -16,8 +16,8 @@ export function localError(t: ReturnType<typeof useTranslation>["t"], err: unkno
   return err instanceof CamhiveError && err.code === "invalid_credentials" ? t("localLogin.wrong") : errorMessage(t, err);
 }
 
-/** Sign-in with the hive's local credentials, offered when the cloud cannot reach the hive but its LAN name answers (#57). */
-export function LocalSignIn({ hive }: { hive: Hive }) {
+/** Sign-in with the hive's local credentials at `base`, offered when the cloud cannot reach the hive but it answers on the LAN, by name or by address (#57, ADR-0023). */
+export function LocalSignIn({ hive, base }: { hive: Hive; base: string | null }) {
   const { t } = useTranslation();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -28,7 +28,7 @@ export function LocalSignIn({ hive }: { hive: Hive }) {
     setError(null);
     setBusy(true);
     try {
-      writeLocal(hive.id, await signInLocally(hive, username, password));
+      writeLocal(hive.id, await signInLocally(base, username, password));
     } catch (err) {
       setError(localError(t, err));
     } finally {

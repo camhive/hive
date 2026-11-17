@@ -185,7 +185,7 @@ function SessionsCard() {
       <h2 className="text-lg font-semibold mb-3">{t("account.sessions")}</h2>
       <ul>
         {(sessions.data ?? []).map((s) => (
-          <li key={s.id} className="flex items-center justify-between gap-3 text-sm py-2.5 border-t first:border-t-0" style={{ borderColor: "var(--border)" }}>
+          <li key={s.id} className="list-row text-sm py-2.5 border-t first:border-t-0" style={{ borderColor: "var(--border)" }}>
             <span>
               {s.user_agent || "—"} {s.current && <em className="muted">({t("account.thisDevice")})</em>}
               <br />

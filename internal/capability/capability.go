@@ -13,7 +13,7 @@ type Capability struct {
 
 // The list, sorted by name.
 //
-// camera.identity and motion are field-level features (ADR-0022 §1): their
+// camera.identity, camera.retention and motion are field-level features (ADR-0022 §1): their
 // endpoints are older than they are, and the capability says the fields
 // are there (a camera's identity and network; motion events with an end).
 // The endpoint test only proves those endpoints exist.
@@ -24,6 +24,7 @@ var all = []Capability{
 		"POST /v0/archive/encryption/lock", "POST /v0/archive/encryption/passphrase", "GET /v0/archive/encryption/key-file",
 	}},
 	{Name: "camera.identity", Endpoints: []string{"GET /v0/cameras/{id}", "PATCH /v0/cameras/{id}"}},                        // ADR-0017
+	{Name: "camera.retention", Endpoints: []string{"PATCH /v0/cameras/{id}"}},                                               // #61, #124
 	{Name: "camera.sub_stream", Endpoints: []string{"PATCH /v0/cameras/{id}"}},                                              // #63
 	{Name: "local_login", Endpoints: []string{"PUT /v0/local-login", "POST /v0/local-login/sessions"}},                      // #57
 	{Name: "motion", Endpoints: []string{"GET /v0/cameras/{id}/events"}},                                                    // ADR-0020

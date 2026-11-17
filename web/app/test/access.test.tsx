@@ -5,10 +5,13 @@ import type { ReactNode } from "react";
 import { msUntilRefresh, useAccess, REFRESH_MARGIN_MS, MIN_REFRESH_MS, MAX_REFRESH_MS } from "../src/lib/access";
 
 describe("access tokens", () => {
-  it("schedules renewal a minute before expiry, never sooner than the floor", () => {
+  it("schedules renewal a minute before expiry, or halfway through a shorter token, never sooner than the floor", () => {
     const now = Date.parse("2026-11-10T00:00:00Z");
     expect(msUntilRefresh("2026-11-10T00:15:00Z", now)).toBe(15 * 60_000 - REFRESH_MARGIN_MS);
-    expect(msUntilRefresh("2026-11-10T00:00:30Z", now)).toBe(MIN_REFRESH_MS);
+    // A token cut at a grant's end (#85): halfway, not every 5 s until the end.
+    expect(msUntilRefresh("2026-11-10T00:01:05Z", now)).toBe(32_500);
+    expect(msUntilRefresh("2026-11-10T00:00:30Z", now)).toBe(15_000);
+    expect(msUntilRefresh("2026-11-10T00:00:08Z", now)).toBe(MIN_REFRESH_MS);
     expect(msUntilRefresh("2026-11-09T00:00:00Z", now)).toBe(MIN_REFRESH_MS);
     expect(msUntilRefresh("2099-01-01T00:00:00Z", now)).toBe(MAX_REFRESH_MS);
   });

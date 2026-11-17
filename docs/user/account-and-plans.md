@@ -125,9 +125,22 @@ itself; other people's accounts show as their account id), when, and on which ca
 the last 1000 entries. Only the hive's owner sees this tab; it needs the
 hive to be reachable, at home or through the relay.
 
+Above the list, a filter narrows what is shown: the buttons *Cameras*,
+*Recordings and exports*, *Updates*, *Sign-ins and access* and *Encryption*
+show only those kinds (pick several to combine them, none to see all), and
+*Search activity* matches the text of the kind, the camera and who did it.
+*Sign-ins and access* also holds the cloud ending a session and diagnostics
+sent from the hive. Live views and what the cloud sends the hive (licence,
+certificate, relay settings, sharing, remote connections) are written all day
+long, so they are hidden until you tick *Show cloud sessions*; the number in
+brackets says how many of the loaded entries that also match the search text
+are hidden. The filter works on the entries already
+loaded: *Load more* keeps it and searches further back. It is part of the
+page's address, so a reload or a shared link opens with the same filter.
+
 ## Removing a hive
 
-Hive → *Settings* → *Remove hive*. The hive is revoked in the cloud, stops
+Hive → *Connection* → *Remove this hive* → **Remove hive**. The hive is revoked in the cloud, stops
 being reachable remotely and frees its slot in your plan. Recordings stay on
 the device. To use the computer again, delete `cloud.json` from its data
 directory and run `hive claim`.

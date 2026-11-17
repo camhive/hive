@@ -4,6 +4,7 @@ import { useMe } from "@/lib/session";
 import { useHives, type Hive } from "@/lib/hives";
 import { LogoMark } from "@/components/Logo";
 import { HiveStatus } from "@/components/HiveStatus";
+import { GrantNotices } from "@/components/GrantNotices";
 
 export function Home() {
   const me = useMe();
@@ -64,6 +65,7 @@ function Hives({ email }: { email: string }) {
         </div>
         <Link to="/hives/add" className="btn">{t("hives.add")}</Link>
       </div>
+      <GrantNotices />
       {hives.isPending && <p className="muted">…</p>}
       {hives.isError && <p role="alert" className="card error">{t("errors.network")}</p>}
       {hives.data && owned.length === 0 && shared.length === 0 && (
@@ -85,7 +87,7 @@ function Hives({ email }: { email: string }) {
 function HiveList({ hives }: { hives: Hive[] }) {
   const { t } = useTranslation();
   return (
-    <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-label={t("hives.title")}>
+    <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-label={t("hives.title")}>
       {hives.map((h) => (
         <li key={h.id} className="card card-hover !p-5" data-testid="hive">
           <div className="flex items-start justify-between gap-3">

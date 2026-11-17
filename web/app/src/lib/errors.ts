@@ -7,7 +7,7 @@ const known = new Set([
   "bad_json", "invalid", "weak_password", "invalid_credentials", "locked", "email_unverified", "account_disabled",
   "bad_code", "unauthenticated", "mfa_required", "totp_state", "csrf", "not_found", "rate_limited",
   "already_claimed", "unknown_code", "hive_offline", "hive_state", "owner_only", "member_state", "plan_limit",
-  "push_not_configured", "push_endpoint",
+  "push_not_configured", "push_endpoint", "grant_end_past", "grant_end_far",
   "bad_invitation", "wrong_account", "promo_invalid", "promo_redeemed", "hive_unreachable", "hive_not_ready", "internal",
   // hive local API
   "token_missing", "token_invalid", "token_expired", "clock_skew", "wrong_hive", "license_required", "forbidden",

@@ -5,6 +5,7 @@ import { unwrap, type components } from "@camhive/api";
 import { api } from "./api";
 
 export type Grant = components["schemas"]["Grant"];
+export type GrantNotice = components["schemas"]["GrantNotice"];
 export type Member = { id: string; email: string; status: string; since: string };
 export type Invitation = { id: string; email: string; expires_at: string };
 
@@ -23,10 +24,24 @@ export function useGrants(hiveID: string | undefined, enabled = true) {
   });
 }
 
+/** Grants of the signed-in account that end within 3 days or ended less than 3 days ago, as owner and as member (#85). */
+export function useGrantNotices(enabled = true) {
+  return useQuery({
+    queryKey: ["grant-notices"],
+    queryFn: async () => unwrap(await api.GET("/v1/me/grant-notices")).notices,
+    enabled,
+  });
+}
+
 /** Mutations that keep the member and grant lists fresh. */
 export function useSharingActions() {
   const qc = useQueryClient();
-  const refresh = () => Promise.all([qc.invalidateQueries({ queryKey: ["members"] }), qc.invalidateQueries({ queryKey: ["grants"] }), qc.invalidateQueries({ queryKey: ["hives"] })]);
+  const refresh = () => Promise.all([qc.invalidateQueries({ queryKey: ["members"] }), qc.invalidateQueries({ queryKey: ["grants"] }), qc.invalidateQueries({ queryKey: ["hives"] }), qc.invalidateQueries({ queryKey: ["grant-notices"] })]);
+  async function setGrant(hiveID: string, g: { member_id: string; camera_id: string; role: "viewer" | "operator"; expires_at?: string }) {
+    const r = unwrap(await api.PUT("/v1/hives/{id}/grants", { params: { path: { id: hiveID } }, body: g }));
+    await refresh();
+    return r;
+  }
   return {
     async invite(email: string) {
       const r = unwrap(await api.POST("/v1/members/invitations", { body: { email } }));
@@ -46,10 +61,10 @@ export function useSharingActions() {
       await refresh();
       return r;
     },
-    async setGrant(hiveID: string, g: { member_id: string; camera_id: string; role: "viewer" | "operator"; expires_at?: string }) {
-      const r = unwrap(await api.PUT("/v1/hives/{id}/grants", { params: { path: { id: hiveID } }, body: g }));
-      await refresh();
-      return r;
+    setGrant,
+    /** Extends a grant to a new end, or makes it permanent (null); the member keeps access without a gap (#85). */
+    extendGrant(hiveID: string, g: Grant, expiresAt: string | null) {
+      return setGrant(hiveID, { member_id: g.member_id, camera_id: g.camera_id, role: g.role, ...(expiresAt ? { expires_at: expiresAt } : {}) });
     },
     async deleteGrant(hiveID: string, gid: string) {
       unwrap(await api.DELETE("/v1/hives/{id}/grants/{gid}", { params: { path: { id: hiveID, gid } } }));

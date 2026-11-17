@@ -3,9 +3,16 @@ package hiveapp_test
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math/big"
 	"net"
 	"net/http"
 	"os"
@@ -22,12 +29,16 @@ import (
 	"github.com/camhive/hive/internal/testports"
 )
 
-// #57, the emergency path end to end: a claimed hive serves its real
-// listeners (loopback, LAN TLS, relay) with no cloud anywhere. The owner had
-// enabled the local login while online; now the cloud is gone and the
-// offline grant has expired. The owner signs in on the LAN listener and
-// reads cameras and archive; the same token and the sign-in itself are
-// refused through the relay, and repeated wrong passwords lock the source.
+// #57 and ADR-0023, the emergency path end to end: a claimed hive serves its
+// real listeners (loopback, LAN TLS, relay) with no cloud and no DNS
+// anywhere. The owner had enabled the local login while online; now the
+// cloud is gone and the offline grant has expired. The browser opens the
+// hive at its LAN address: the hive's certificate for its LAN name fails
+// only on the name there (the warning the user checks), and once accepted
+// for that name the landing page, the local sign-in, cameras, live
+// signalling and the archive work. The same token and the sign-in itself
+// are refused through the relay, and repeated wrong passwords lock the
+// source.
 func TestEmergencyLocalLoginWithTheCloudGone(t *testing.T) {
 	ctx := context.Background()
 	st, err := store.Open(ctx, filepath.Join(t.TempDir(), "hive.db"), make([]byte, 32))
@@ -49,23 +60,39 @@ func TestEmergencyLocalLoginWithTheCloudGone(t *testing.T) {
 		Store: st, Index: idx, Playback: (&fakePlayback{}).fetch, Exports: export.NewManager(t.TempDir(), nil, st.Exports()), Version: "test", Location: time.UTC,
 		Verifier: auth.NewVerifier("hv_1", auth.Keys{"k1": cloud.PublicKey()}), // licence never valid: offline grants are refused
 		Local:    auth.NewLocalSessions("hv_1", time.Now),
+		Engine:   newWHEPEngine(t),
 	})
 	lanIP := privateAddress(t) // a client on the LAN, not loopback
+	const lanName = "hv-1.h.camhive.test"
+	roots, lanCert := publiclyIssued(t, lanName)
 	ports := testports.Get(t, 2)
 	relay, err := hiveapp.NewRelayListener(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	app := hiveapp.New(hiveapp.Config{ListenAddr: fmt.Sprintf("127.0.0.1:%d", ports[0]), TLSListenAddr: net.JoinHostPort(lanIP, fmt.Sprint(ports[1])),
-		TLS: &tls.Config{Certificates: []tls.Certificate{selfSigned(t)}, MinVersion: tls.VersionTLS12}, Relay: relay, Handler: h})
+		TLS: &tls.Config{Certificates: []tls.Certificate{lanCert}, MinVersion: tls.VersionTLS12}, Relay: relay, Handler: h})
 	runCtx, cancel := context.WithCancel(ctx)
 	done := make(chan error, 1)
 	go func() { done <- app.Run(runCtx) }()
 	t.Cleanup(func() { cancel(); <-done })
 
-	lan := hiveClient{base: "https://" + net.JoinHostPort(lanIP, fmt.Sprint(ports[1])), c: tlsClient(nil)}
+	address := net.JoinHostPort(lanIP, fmt.Sprint(ports[1]))
+	lan := hiveClient{base: "https://" + address, c: browserAtAddress(roots, lanName)}
 	viaRelay := hiveClient{base: "https://hive", c: tlsClient(func(ctx context.Context, _, _ string) (net.Conn, error) { return relay.Dial(ctx) })}
 	lan.waitUp(t)
+
+	// What the browser's warning says at the address: the issuer is trusted,
+	// only the name differs, and the name is the hive's LAN name.
+	var mismatch x509.HostnameError
+	if _, err := tls.Dial("tcp", address, &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}); !errors.As(err, &mismatch) || mismatch.Certificate.DNSNames[0] != lanName {
+		t.Fatalf("certificate at the address: want a name mismatch for %s, got %v", lanName, err)
+	}
+	if res, err := lan.c.Get(lan.base + "/"); err != nil || res.StatusCode != 200 {
+		t.Fatalf("landing page at the address: %v %v", res, err)
+	} else {
+		_ = res.Body.Close()
+	}
 
 	// Online, earlier: the owner enabled the local login with a cloud token.
 	now := time.Now()
@@ -88,6 +115,9 @@ func TestEmergencyLocalLoginWithTheCloudGone(t *testing.T) {
 	}
 	if s, b := lan.call(t, "GET", "/v0/cameras", tok, nil); s != 200 || b["list"].([]any)[0].(map[string]any)["id"] != string(cam.ID) {
 		t.Fatalf("cameras: %d %v", s, b)
+	}
+	if s, b := lan.call(t, "POST", "/v0/cameras/"+string(cam.ID)+"/live/offer", tok, map[string]string{"sdp": "v=0 offer", "stream": "main"}); s != 201 || b["sdp"] != "v=0 answer" {
+		t.Fatalf("live signalling: %d %v", s, b)
 	}
 	if s, b := lan.call(t, "GET", "/v0/cameras/"+string(cam.ID)+"/archive/calendar?stream=main", tok, nil); s != 200 || len(b["list"].([]any)) != 1 {
 		t.Fatalf("archive calendar: %d %v", s, b)
@@ -129,6 +159,43 @@ func privateAddress(t *testing.T) string {
 	}
 	t.Skipf("no private IPv4 address on this machine (%v)", err)
 	return ""
+}
+
+// publiclyIssued stands in for Let's Encrypt: a root the browser trusts and
+// the hive's certificate for its LAN name, issued by it.
+func publiclyIssued(t *testing.T, name string) (*x509.CertPool, tls.Certificate) {
+	t.Helper()
+	now := time.Now()
+	caKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	caTmpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "Test Root"}, IsCA: true, BasicConstraintsValid: true,
+		KeyUsage: x509.KeyUsageCertSign, NotBefore: now.Add(-time.Hour), NotAfter: now.Add(time.Hour)}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTmpl, caTmpl, &caKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ca, _ := x509.ParseCertificate(caDER)
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: name}, DNSNames: []string{name},
+		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, NotBefore: now.Add(-time.Hour), NotAfter: now.Add(time.Hour)}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, ca, &key.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roots := x509.NewCertPool()
+	roots.AddCert(ca)
+	return roots, tls.Certificate{Certificate: [][]byte{der, caDER}, PrivateKey: key}
+}
+
+// browserAtAddress is a browser on the LAN with no working DNS that has
+// accepted the hive's certificate at its address after checking the warning
+// names the hive: it trusts the roots and the LAN name, never a resolver.
+func browserAtAddress(roots *x509.CertPool, lanName string) *http.Client {
+	noDNS := &net.Resolver{PreferGo: true, Dial: func(context.Context, string, string) (net.Conn, error) {
+		return nil, errors.New("no DNS in an emergency")
+	}}
+	dialer := &net.Dialer{Resolver: noDNS, Timeout: 5 * time.Second}
+	tr := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, ServerName: lanName, MinVersion: tls.VersionTLS12}, DialContext: dialer.DialContext}
+	return &http.Client{Transport: tr, Timeout: 10 * time.Second}
 }
 
 type hiveClient struct {

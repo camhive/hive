@@ -46,7 +46,7 @@ On the home page the hive shows a grey dot.
 Live and Archive take different roads (see [Connection](connection.md)). If
 Live works and Archive says the hive did not answer:
 
-- Hive → *Settings*: is the certificate still *self-signed*? Browsers refuse it
+- Hive → *Connection*: is the certificate still *self-signed*? Browsers refuse it
   on the relay road. Wait for the Let's Encrypt one; it is requested on every
   reconnect and every ten minutes.
 - Path "Unreachable" with local addresses listed: your router blocks the local

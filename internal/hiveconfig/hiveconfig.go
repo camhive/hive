@@ -147,8 +147,12 @@ type Config struct {
 // hive.yaml says otherwise.
 const DefaultListenAddr = "127.0.0.1:16016"
 
+// DefaultTLSListenAddr is where the hive serves its API over TLS on the LAN
+// (ADR-0012) unless hive.yaml says otherwise.
+const DefaultTLSListenAddr = "0.0.0.0:16443"
+
 func defaults(p Paths) Config {
-	return Config{ListenAddr: DefaultListenAddr, TLSListenAddr: "0.0.0.0:16443", ArchiveDir: p.Archive, LogLevel: "info", SegmentMinutes: 10, RetentionDays: 30, MinFreeGB: 10, ExportDays: 7, ExportMaxGB: 10,
+	return Config{ListenAddr: DefaultListenAddr, TLSListenAddr: DefaultTLSListenAddr, ArchiveDir: p.Archive, LogLevel: "info", SegmentMinutes: 10, RetentionDays: 30, MinFreeGB: 10, ExportDays: 7, ExportMaxGB: 10,
 		EngineAPIPort: 9997, EngineWebRTCPort: 8889, EngineWebRTCUDPPort: 8890,
 		UpdateURL: "https://updates.dev.camhive.app", UpdateChannel: "stable", UpdateWindow: "02:00-05:00", Updates: "automatic"}
 }

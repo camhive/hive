@@ -846,8 +846,31 @@ export interface paths {
         };
         /** Grants on the owner's hive */
         get: operations["getHivesByIdGrants"];
-        /** Create or replace a grant (member × camera); revokes the member's live sessions and pushes grants.set to the hive */
+        /**
+         * Create or replace a grant (member × camera) and push grants.set to the hive
+         * @description Replacing a grant with a later `expires_at`, or none (permanent), keeps its role and is an extension:
+         *     the member's live sessions stay, so access goes on without a gap. This also renews an expired grant.
+         *     Any other change revokes the member's live sessions on the hive; the next token carries the new scope.
+         *
+         */
         put: operations["putHivesByIdGrants"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/grant-notices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Grants of the signed-in account that end within 3 days or ended less than 3 days ago, as owner and as member, soonest first */
+        get: operations["getMeGrantNotices"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -1005,13 +1028,46 @@ export interface components {
             role: "viewer" | "operator";
             /** Format: date-time */
             created_at: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description absent: permanent
+             */
             expires_at?: string;
+            state: components["schemas"]["GrantState"];
+        };
+        /**
+         * @description `expiring`: the grant ends within 3 days. `expired`: it ended; it stays listed for the owner
+         *     to renew, and the hive no longer honours it.
+         *
+         * @enum {string}
+         */
+        GrantState: "active" | "expiring" | "expired";
+        /** @description One grant the signed-in account should hear about, from 3 days before to 3 days after its end (#85). */
+        GrantNotice: {
+            grant_id: string;
+            /**
+             * @description owner: the grant is on your hive; member: it was given to you
+             * @enum {string}
+             */
+            side: "owner" | "member";
+            hive_id: string;
+            hive_name: string;
+            /** @description camera id, or * for every camera of the hive */
+            camera_id: string;
+            /** @description empty when unknown or for * */
+            camera_name: string;
+            /** @enum {string} */
+            role: "viewer" | "operator";
+            /** @description the other side's e-mail: the member's for the owner, the owner's for the member */
+            peer: string;
+            /** Format: date-time */
+            expires_at: string;
+            state: components["schemas"]["GrantState"];
         };
         Error: {
             error: {
                 /** @enum {string} */
-                code: "bad_json" | "invalid" | "weak_password" | "invalid_credentials" | "locked" | "email_unverified" | "account_disabled" | "bad_code" | "unauthenticated" | "mfa_required" | "totp_state" | "csrf" | "not_found" | "rate_limited" | "bad_key" | "already_claimed" | "unknown_code" | "renewal_refused" | "hive_offline" | "owner_only" | "member_state" | "hive_state" | "plan_limit" | "bad_invitation" | "wrong_account" | "promo_invalid" | "promo_redeemed" | "hive_unreachable" | "hive_not_ready" | "hive_error" | "push_not_configured" | "push_endpoint" | "internal";
+                code: "bad_json" | "invalid" | "weak_password" | "invalid_credentials" | "locked" | "email_unverified" | "account_disabled" | "bad_code" | "unauthenticated" | "mfa_required" | "totp_state" | "csrf" | "not_found" | "rate_limited" | "bad_key" | "already_claimed" | "unknown_code" | "renewal_refused" | "hive_offline" | "owner_only" | "member_state" | "hive_state" | "plan_limit" | "bad_invitation" | "wrong_account" | "promo_invalid" | "promo_redeemed" | "hive_unreachable" | "hive_not_ready" | "hive_error" | "push_not_configured" | "push_endpoint" | "grant_end_past" | "grant_end_far" | "internal";
                 message: string;
             };
         };
@@ -2603,12 +2659,47 @@ export interface operations {
                         camera_id: string;
                         /** @enum {string} */
                         role: "viewer" | "operator";
+                        /**
+                         * Format: date-time
+                         * @description absent: permanent
+                         */
+                        expires_at?: string;
                     };
                 };
             };
-            400: components["responses"]["Error"];
+            /** @description `invalid`; `grant_end_past` (expires_at not in the future); `grant_end_far` (more than 10 years ahead: make it permanent) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+        };
+    };
+    getMeGrantNotices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description notices */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        notices: components["schemas"]["GrantNotice"][];
+                    };
+                };
+            };
         };
     };
     deleteHivesByIdGrantsByGid: {

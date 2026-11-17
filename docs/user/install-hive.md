@@ -98,14 +98,15 @@ sudo hive restart
 ```
 
 A hive can be claimed once. To move it to another account, remove it in the
-app (Hive → Settings → Remove hive), delete `cloud.json` from the data
-directory and claim again. Recordings stay on disk.
+app (Hive → *Connection* → *Remove this hive* → **Remove hive**), delete
+`cloud.json` from the data directory and claim again. Recordings stay on
+disk.
 
 ## Service commands
 
 | Command | Effect |
 |---|---|
-| `hive status` | `running`, `stopped` or `unknown`, then what the running hive reports: its version, the last update or rollback, the version on offer, and whether this command is older than the hive. Exits 0 whether or not a hive answers, 1 only when the service state cannot be read; scripts read the first line |
+| `hive status` | `running`, `stopped` or `unknown`, then what the running hive reports: its version, the last update or rollback, the version on offer, whether this command is older than the hive, and one `lan: https://<address>:<port>` line per local address (for opening the hive [without internet](connection.md#without-internet-opening-the-hive-by-its-address)). Exits 0 whether or not a hive answers, 1 only when the service state cannot be read; scripts read the first line |
 | `hive start` / `stop` / `restart` | Control the service |
 | `hive install` / `uninstall` | Register or remove the service; footage is kept. The service runs `hive-updater`, which runs the hive (see Upgrading) |
 | `hive run` | Run in the foreground (for trying things out) |
@@ -141,7 +142,7 @@ updater goes back to the old version on its own and never tries that one
 again. How it is secured: [Hive updates](../security/updates.md) in the
 developer documentation.
 
-**In the app:** Hive → Settings → Updates (owner only) shows the running
+**In the app:** Hive → *Connection* → *Updates* (owner only) shows the running
 version, an update that is waiting, and the last update or rollback. There
 you choose automatic or manual updates, the update window and the
 channel, and **Update now** installs a waiting update at once, whatever
@@ -191,6 +192,7 @@ hive: 0.1.6 (a73f337, 2026-11-15)
 last update: 0.1.5 -> 0.1.6, applied 2026-11-16 03:12 +01:00
 update on offer: 0.1.7
 this command: 0.1.5 (0af03ce), older than the running hive; hive-updater runs its own copy
+lan: https://192.168.1.23:16443
 
 $ hive version
 camhive-hive 0.1.5 (0af03ce) (this binary)

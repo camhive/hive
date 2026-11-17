@@ -124,21 +124,31 @@ preset to go there. RTSP-only cameras cannot be moved.
 
 ## Recording settings
 
-Recording is configured in `hive.yaml` on the hive, not in the app yet:
-segment length (10 minutes), retention in days (30) and the free-space floor
-(10 GB) below which the oldest footage is removed first. See the
+Recording is configured in `hive.yaml` on the hive: segment length (10
+minutes), retention in days (30) and the free-space floor (10 GB) below which
+the oldest footage is removed first. See the
 [configuration reference](../operations/config-reference.md#hive-hiveyaml).
+A camera's own retention is set in the app (below).
 
 ### Keeping one camera's footage longer or shorter
 
 A camera can keep its footage for its own number of days instead of the
 hive-wide value: a driveway camera for 90 days, an indoor camera for 3.
-The app has no field for it yet; the hive's API takes it
-(`PATCH /v0/cameras/{id}` with `retention_days`, owner only):
 
-- a number from 0 to 3650 keeps that camera's footage that many days;
-  0 keeps it until the disk needs the space;
-- `null` puts the camera back on the hive-wide value.
+**In the app** (owner only): open the camera → *Edit camera* → **Keep
+recordings**:
+
+- *Hive default*: the camera follows the hive-wide value (new cameras start
+  here);
+- *Number of days*, then **Days**: whole days from 0 to 3650 keep that
+  camera's footage that many days; 0 keeps it until the disk needs the space.
+
+Choosing *Hive default* again puts the camera back on the hive-wide value.
+The field shows on hives that announce it (from v0.1.9); on older hives the
+form has no such field.
+
+**Through the hive's API**: `PATCH /v0/cameras/{id}` with `retention_days`
+(owner only), a number from 0 to 3650, or `null` for the hive-wide value.
 
 The change applies at the next retention sweep, within five minutes, without
 a restart, and the action log records it. Your plan's longest retention caps

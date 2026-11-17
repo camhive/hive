@@ -13,6 +13,7 @@ import { HivePage, type HiveSearch } from "@/pages/Hive";
 import { Members } from "@/pages/Members";
 import { HiveSharing } from "@/pages/HiveSharing";
 import { HiveActivity } from "@/pages/HiveActivity";
+import { activitySearch } from "@/lib/hiveActivity";
 import { Invite } from "@/pages/Invite";
 import { Plan } from "@/pages/Plan";
 import { Activity } from "@/pages/Activity";
@@ -73,7 +74,7 @@ const planPage = createRoute({ getParentRoute: () => root, path: "/plan", compon
 const activityPage = createRoute({ getParentRoute: () => root, path: "/activity", component: Activity });
 const notificationsPage = createRoute({ getParentRoute: () => root, path: "/notifications", component: Notifications });
 const hiveSharing = createRoute({ getParentRoute: () => root, path: "/hives/$id/sharing", component: HiveSharing });
-const hiveActivity = createRoute({ getParentRoute: () => root, path: "/hives/$id/activity", component: HiveActivity });
+const hiveActivity = createRoute({ getParentRoute: () => root, path: "/hives/$id/activity", component: HiveActivity, validateSearch: activitySearch });
 const invite = createRoute({
   getParentRoute: () => root,
   path: "/invite",

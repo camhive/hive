@@ -13,9 +13,14 @@ export default defineConfig({
     react(),
     tailwindcss(),
     // PWA (#56): app shell only. Video, hive and cloud API answers are never cached.
+    // prompt: a new version waits until the user taps Update (#70, src/lib/swUpdate.ts),
+    // so no reload cuts a playing stream.
+    // Icon files carry a version in their names (icon-192.v2.png): when the logo
+    // changes, bump it here, in index.html and in public/push-sw.js. Android picks
+    // up a new name; iOS keeps the old icon until the app is added again.
     VitePWA({
-      registerType: "autoUpdate",
-      includeAssets: ["icons/icon.svg", "robots.txt"],
+      registerType: "prompt",
+      includeAssets: ["icons/icon.v2.svg", "robots.txt"],
       manifest: {
         name: "Camhive",
         short_name: "Camhive",
@@ -26,9 +31,9 @@ export default defineConfig({
         start_url: "/",
         scope: "/",
         icons: [
-          { src: "icons/icon-192.png", sizes: "192x192", type: "image/png" },
-          { src: "icons/icon-512.png", sizes: "512x512", type: "image/png" },
-          { src: "icons/maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+          { src: "icons/icon-192.v2.png", sizes: "192x192", type: "image/png" },
+          { src: "icons/icon-512.v2.png", sizes: "512x512", type: "image/png" },
+          { src: "icons/maskable-512.v2.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
         ],
       },
       workbox: {

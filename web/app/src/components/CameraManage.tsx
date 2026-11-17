@@ -5,7 +5,8 @@ import { CamhiveError, unwrapHive, type HiveCamera, type HiveClient, type hiveCo
 import { errorMessage } from "@/lib/errors";
 import { Field } from "@/components/Field";
 import { useHiveCapability, type HiveInfo } from "@/lib/capabilities";
-import { refusedOptional, subStreamOf } from "@/lib/streams";
+import { refusedOptional, subStreamChange, subStreamOf } from "@/lib/streams";
+import { MAX_RETENTION_DAYS, retentionChange, retentionOf, type Retention } from "@/lib/retention";
 
 type Discovered = hiveComponents["schemas"]["Discovered"];
 type Probe = hiveComponents["schemas"]["ProbeResult"];
@@ -97,6 +98,10 @@ export function CameraEditForm({ hive, camera, onSubmit }: { hive: HiveInfo; cam
   const subEditable = useHiveCapability(hive, "camera.sub_stream").has && camera.source.kind === "rtsp";
   const [sub, setSub] = useState(subStreamOf(camera));
   const [invalid, setInvalid] = useState(false);
+  // #124: the camera's own retention, on hives that announce it.
+  const retentionEditable = useHiveCapability(hive, "camera.retention").has;
+  const [retention, setRetention] = useState<Retention>(retentionOf(camera));
+  const [retentionInvalid, setRetentionInvalid] = useState(false);
   const [name, setName] = useState(camera.name);
   const [group, setGroup] = useState(camera.group ?? "");
   const [creds, setCreds] = useState<Creds>({ username: camera.credentials?.username ?? "", password: "" });
@@ -104,13 +109,14 @@ export function CameraEditForm({ hive, camera, onSubmit }: { hive: HiveInfo; cam
   const [host, setHost] = useState(hostOf(camera.source.address));
   function submit(e: FormEvent) {
     e.preventDefault();
-    const subChanged = subEditable && sub.trim() !== subStreamOf(camera);
-    setInvalid(subChanged && refusedOptional(sub));
-    if (subChanged && refusedOptional(sub)) return;
-    const p: hiveComponents["schemas"]["CameraPatch"] = { name, group, record_audio: recordAudio };
+    const subbed = subEditable ? subStreamChange(camera, sub) : {};
+    const kept = retentionEditable ? retentionChange(camera, retention) : {};
+    setInvalid(subbed === "invalid");
+    setRetentionInvalid(kept === "invalid");
+    if (subbed === "invalid" || kept === "invalid") return;
+    const p: hiveComponents["schemas"]["CameraPatch"] = { name, group, record_audio: recordAudio, ...subbed, ...kept };
     if (creds.password) p.credentials = creds;
     if (host.trim() && host.trim() !== hostOf(camera.source.address)) p.host = host.trim();
-    if (subChanged) p.sub_stream = sub.trim();
     void onSubmit(p);
   }
   return (
@@ -122,6 +128,7 @@ export function CameraEditForm({ hive, camera, onSubmit }: { hive: HiveInfo; cam
       <Field label={t("cameras.host")} name={`host-${camera.id}`} autoComplete="off" spellCheck={false} value={host} onChange={(e) => setHost(e.target.value)} />
       <CameraIdentity camera={camera} />
       {subEditable && <div className="sm:col-span-2"><SubStreamField name={`sub-${camera.id}`} value={sub} onChange={setSub} invalid={invalid} /></div>}
+      {retentionEditable && <RetentionField name={`retention-${camera.id}`} value={retention} onChange={setRetention} invalid={retentionInvalid} />}
       <label className="sm:col-span-2 flex items-start gap-2 text-sm mb-3">
         <input type="checkbox" className="mt-1" checked={recordAudio} onChange={(e) => setRecordAudio(e.target.checked)} aria-describedby={`audio-hint-${camera.id}`} />
         <span>{t("cameras.recordAudio")}<span id={`audio-hint-${camera.id}`} className="block muted text-xs">{t("cameras.recordAudioHint")}</span></span>
@@ -303,6 +310,30 @@ function SubStreamField({ name, value, onChange, invalid }: { name: string; valu
         aria-describedby={invalid ? `${name}-hint ${name}-error` : `${name}-hint`} value={value} onChange={(e) => onChange(e.target.value)} />
       {invalid && <p id={`${name}-error`} role="alert" className="error text-sm -mt-3 mb-3">{t("cameras.streamUrlInvalid")}</p>}
     </>
+  );
+}
+
+/** Keep recordings: the hive-wide value or the camera's own days (#124); the PATCH carries null for the default. */
+function RetentionField({ name, value, onChange, invalid }: { name: string; value: Retention; onChange: (r: Retention) => void; invalid: boolean }) {
+  const { t } = useTranslation();
+  const days = `${name}-days`;
+  return (
+    <div className="sm:col-span-2 grid gap-x-4 sm:grid-cols-2">
+      <div className="mb-4">
+        <label className="block mb-1 text-sm font-medium" htmlFor={name}>{t("cameras.retention")}</label>
+        <select id={name} className="input" value={value.kind} onChange={(e) => onChange({ ...value, kind: e.target.value === "days" ? "days" : "default" })}>
+          <option value="default">{t("cameras.retentionDefault")}</option>
+          <option value="days">{t("cameras.retentionOwn")}</option>
+        </select>
+      </div>
+      {value.kind === "days" && (
+        <div>
+          <Field label={t("cameras.retentionDays")} name={days} type="number" inputMode="numeric" min={0} max={MAX_RETENTION_DAYS} step={1} hint={t("cameras.retentionHint")} aria-invalid={invalid}
+            aria-describedby={invalid ? `${days}-hint ${days}-error` : `${days}-hint`} value={value.days} onChange={(e) => onChange({ ...value, days: e.target.value })} />
+          {invalid && <p id={`${days}-error`} role="alert" className="error text-sm -mt-3 mb-3">{t("cameras.retentionInvalid")}</p>}
+        </div>
+      )}
+    </div>
   );
 }
 

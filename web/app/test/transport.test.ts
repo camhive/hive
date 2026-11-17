@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { Transport, TransportError, atHome, lanBase, probeLAN, rebindHintApplies, relayBase, type Decision } from "../src/lib/transport";
+import { Transport, TransportError, atHome, lanBase, openableByAddress, parseLanAddress, probeLAN, rebindHintApplies, relayBase, type Decision } from "../src/lib/transport";
 import type { Hive } from "../src/lib/hives";
+import { cacheClear } from "../src/lib/cache";
 
 const hive: Hive = {
   id: "hv_1", name: "Home", status: "active", online: true, claimed_at: "2026-11-09T00:00:00Z",
@@ -165,12 +166,96 @@ describe("Transport.fetch", () => {
 
 describe("atHome", () => {
   it("is true on the LAN path or in local mode, false through the relay or with no decision yet", () => {
-    const d = (path: Decision["path"]): Decision => ({ path, reason: "lan_ok", at: 0 });
+    const d = (path: "lan" | "relay" | "none"): Decision => ({ path, reason: "lan_ok", at: 0 });
     expect(atHome(false, d("lan"))).toBe(true);
+    expect(atHome(false, { path: "address", reason: "address_ok", at: 0, address: "192.168.1.20:16017" })).toBe(true);
     expect(atHome(false, d("relay"))).toBe(false);
     expect(atHome(false, d("none"))).toBe(false);
     expect(atHome(false, null)).toBe(false);
     expect(atHome(true, null)).toBe(true);
     expect(atHome(true, d("relay"))).toBe(true);
+  });
+});
+
+describe("the emergency path by address (ADR-0023)", () => {
+  const answering = (...hosts: string[]) => vi.fn((input: RequestInfo | URL) => (hosts.includes(new URL(String(input)).host) ? ok() : refuse()));
+
+  it("uses the remembered LAN address when the name does not resolve, and keeps local tokens there", async () => {
+    const fetch = answering("192.168.1.20:16017");
+    const t = new Transport({ fetch, now: () => 7 });
+    const d = await t.select(hive);
+    expect(d).toEqual({ path: "address", reason: "address_ok", at: 7, address: "192.168.1.20:16017" });
+    expect(t.baseFor(hive, d)).toBe("https://192.168.1.20:16017");
+    expect(atHome(false, d)).toBe(true);
+    await t.fetch(hive, "/v0/cameras", { token: "v4.local.loc-tok" });
+    expect(fetch).toHaveBeenLastCalledWith("https://192.168.1.20:16017/v0/cameras", expect.objectContaining({ mode: "cors" }));
+  });
+
+  it("never probes an address while the name answers", async () => {
+    const fetch = answering("hv_1.h.camhive.app:16017", "192.168.1.20:16017");
+    const t = new Transport({ fetch, now: () => 1 });
+    expect(await t.select(hive)).toEqual({ path: "lan", reason: "lan_ok", at: 1 });
+    expect(fetch.mock.calls.map((c) => String(c[0]))).toEqual(["https://hv_1.h.camhive.app:16017/healthz"]);
+  });
+
+  it("gives up on an address that hangs after the same short timeout", async () => {
+    const hang = (input: RequestInfo | URL, init?: RequestInit) => new URL(String(input)).host === "192.168.1.20:16017"
+      ? new Promise<Response>((_r, rej) => init?.signal?.addEventListener("abort", () => rej(new DOMException("aborted", "AbortError"))))
+      : refuse();
+    const t = new Transport({ fetch: hang, timeoutMs: 50, now: () => 1 });
+    const t0 = Date.now();
+    expect(await t.select(hive)).toEqual({ path: "relay", reason: "lan_failed", at: 1 });
+    expect(Date.now() - t0).toBeLessThan(1000);
+  });
+
+  it("tries addresses only for a publicly issued certificate: any other warning at an address could be forged", async () => {
+    for (const cert_issuer of ["self-signed", "camhive", "", undefined] as const) {
+      const fetch = answering("192.168.1.20:16017");
+      const t = new Transport({ fetch, now: () => 1 });
+      const h = { ...hive, lan: { ...hive.lan!, cert_issuer: cert_issuer as "letsencrypt" | undefined } };
+      expect(openableByAddress(h), String(cert_issuer)).toBe(false);
+      expect(await t.select(h), String(cert_issuer)).toEqual({ path: "relay", reason: "lan_failed", at: 1 });
+      expect(fetch.mock.calls.map((c) => String(c[0]))).not.toContain("https://192.168.1.20:16017/healthz");
+    }
+    expect(openableByAddress(hive)).toBe(true);
+  });
+
+  it("tries an address the owner typed first, and keeps it across reloads", async () => {
+    const keep = memStorage();
+    const fetch = answering("192.168.1.31:16017", "192.168.1.20:16017");
+    const t = new Transport({ fetch, keep, now: () => 1 });
+    expect(t.setAddress(hive, "not an address")).toBeNull();
+    expect(t.setAddress(hive, "192.168.1.31")).toBe("192.168.1.31:16017");
+    expect(await t.select(hive)).toMatchObject({ path: "address", address: "192.168.1.31:16017" });
+    expect(new Transport({ keep }).addresses(hive)).toEqual(["192.168.1.31:16017", "192.168.1.20:16017"]);
+  });
+
+  it("forgets a typed address on sign-out, with the rest of the account's cached data", () => {
+    const t = new Transport({ keep: localStorage });
+    expect(t.setAddress(hive, "192.168.1.31")).toBe("192.168.1.31:16017");
+    expect(new Transport({ keep: localStorage }).addresses(hive)[0]).toBe("192.168.1.31:16017");
+    cacheClear();
+    expect(new Transport({ keep: localStorage }).addresses(hive)).toEqual(["192.168.1.20:16017"]);
+  });
+
+  it("accepts only private address literals, as typed or as `hive status` prints them", () => {
+    expect(parseLanAddress("192.168.1.23", 16443)).toBe("192.168.1.23:16443");
+    expect(parseLanAddress("169.254.10.20", 16443)).toBe("169.254.10.20:16443"); // IPv4 link-local
+    expect(parseLanAddress(" https://192.168.1.23:16017/ ", 16443)).toBe("192.168.1.23:16017");
+    expect(parseLanAddress("10.0.0.7:1", 16443)).toBe("10.0.0.7:1");
+    expect(parseLanAddress("172.16.4.2", 16443)).toBe("172.16.4.2:16443");
+    expect(parseLanAddress("fd00::5", 16443)).toBe("[fd00::5]:16443");
+    expect(parseLanAddress("lan: https://[fd00::5]:16017", 16443)).toBe("[fd00::5]:16017");
+    const refused = [
+      "", "8.8.8.8", "172.32.0.1", "100.64.0.1", "2001:db8::1", // public or not private
+      "127.0.0.1", "::1", "[::1]:16443", "0.0.0.0", "::", // loopback and unspecified
+      "fe80::1", "[fe80::1]:16443", // IPv6 link-local: a browser cannot open it without a zone
+      "hive.local", "hv-1.h.camhive.app", "localhost", // names need DNS or mDNS
+      "010.1.2.3", "172.016.0.1", "192.168.001.010", "0x0a.1.2.3", // a leading zero is octal to the URL parser: 010.1.2.3 opens 8.1.2.3
+      "192.168.1", "192.168.1.300", "192.168.1.23:0", "192.168.1.23:70000", "http://192.168.1.23", "192.168.1.23/x", "user@192.168.1.23",
+    ];
+    for (const bad of refused) {
+      expect(parseLanAddress(bad, 16443), bad).toBeNull();
+    }
   });
 });

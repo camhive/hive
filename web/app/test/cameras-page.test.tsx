@@ -13,7 +13,7 @@ beforeEach(() => { resetCloudForTest(); localStorage.clear(); });
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const hive = { id: "hv_1", name: "Home", status: "active", online: true, claimed_at: "2026-11-09T00:00:00Z", lan: { host: "hv_1.h.camhive.app", port: 16017, addrs: ["192.168.1.20"] }, relay_host: "hv_1.relay.camhive.app" };
 type Cam = { id: string; name: string; group: string; enabled: boolean; source: { kind: string; address: string }; streams: Record<string, { URL: string; Codec?: string; Width?: number; Height?: number }>; created_at: string; updated_at: string; credentials?: { username: string };
-  identity?: Record<string, string>; network?: string };
+  identity?: Record<string, string>; network?: string; retention_days?: number };
 
 function stub(role: "owner" | "viewer", hiveExtra: Record<string, unknown> = {}) {
   const cams: Cam[] = [{ id: "cam_1", name: "Door", group: "Outside", enabled: true, source: { kind: "rtsp", address: "rtsp://10.0.0.9/s" }, streams: { main: { URL: "rtsp://10.0.0.9/s", Codec: "H264", Width: 1920, Height: 1080 } }, created_at: "", updated_at: "", credentials: { username: "admin" } }];
@@ -48,12 +48,15 @@ function stub(role: "owner" | "viewer", hiveExtra: Record<string, unknown> = {})
           return json(201, c);
         }
         case "PATCH /v0/cameras/cam_1": {
-          const { host, replace_identity, sub_stream, ...b } = body as { enabled?: boolean; name?: string; group?: string; host?: string; replace_identity?: boolean; sub_stream?: string };
+          const { host, replace_identity, sub_stream, retention_days, ...b } = body as { enabled?: boolean; name?: string; group?: string; host?: string; replace_identity?: boolean; sub_stream?: string; retention_days?: number | null };
           // ADR-0017: another device answers at 10.0.0.50.
           if (host === "10.0.0.50" && !replace_identity) return json(409, { code: "camera_mismatch", message: "" });
           if (host) cams[0]!.source.address = `rtsp://${host}/s`;
           if (sub_stream) cams[0]!.streams.sub = { URL: sub_stream };
           if (sub_stream === "") delete cams[0]!.streams.sub;
+          if (typeof retention_days === "number" && (!Number.isInteger(retention_days) || retention_days < 0 || retention_days > 3650)) return json(422, { code: "invalid", message: "" });
+          if (typeof retention_days === "number") cams[0]!.retention_days = retention_days;
+          if (retention_days === null) delete cams[0]!.retention_days; // the hive omits it on the hive-wide value
           Object.assign(cams[0]!, b);
           return json(200, cams[0]);
         }
@@ -243,6 +246,86 @@ describe("camera management on the hive page", () => {
     await user.click(within(edit).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(bodies["PATCH /v0/cameras/cam_1"]![2]).toEqual({ name: "Door", group: "Outside", record_audio: false, sub_stream: "" }));
   }, 20_000);
+
+  it("sets a camera's own retention: hive default, days, zero, and back to the default (#124)", async () => {
+    const { cams, bodies } = stub("owner", { version: "0.1.9", capabilities: ["camera.retention"] });
+    const patches = () => bodies["PATCH /v0/cameras/cam_1"] ?? [];
+    const user = mount();
+    await user.click(await screen.findByRole("button", { name: "List" }));
+    const door = await screen.findByTestId("camera");
+    const open = async () => {
+      await user.click(within(door).getByRole("button", { name: "Edit" }));
+      return within(door).getByRole("form", { name: "Edit Door" });
+    };
+    const save = async (edit: HTMLElement, n: number) => {
+      await user.click(within(edit).getByRole("button", { name: "Save" }));
+      await waitFor(() => expect(patches()).toHaveLength(n));
+      return patches()[n - 1];
+    };
+
+    // Default: the hive-wide value, nothing sent.
+    let edit = await open();
+    expect(within(edit).getByLabelText("Keep recordings")).toHaveDisplayValue("Hive default");
+    expect(within(edit).queryByLabelText("Days")).toBeNull();
+    expect(await save(edit, 1)).not.toHaveProperty("retention_days");
+
+    // Days.
+    edit = await open();
+    await user.selectOptions(within(edit).getByLabelText("Keep recordings"), "Number of days");
+    await user.type(within(edit).getByLabelText("Days"), "90");
+    expect(await save(edit, 2)).toMatchObject({ retention_days: 90 });
+    await waitFor(() => expect(cams[0]!.retention_days).toBe(90));
+
+    // Unchanged days are not sent; out of range is refused before the hive.
+    edit = await open();
+    expect(within(edit).getByLabelText("Keep recordings")).toHaveDisplayValue("Number of days");
+    expect(within(edit).getByLabelText("Days")).toHaveValue(90);
+    expect(await save(edit, 3)).not.toHaveProperty("retention_days");
+    edit = await open();
+    const daysInput = within(edit).getByLabelText("Days");
+    expect(daysInput).toHaveAttribute("min", "0");
+    expect(daysInput).toHaveAttribute("max", "3650");
+    expect(daysInput).toHaveAttribute("step", "1");
+    // Flipping to the default and back keeps the days typed so far.
+    await user.clear(daysInput);
+    await user.type(daysInput, "45");
+    await user.selectOptions(within(edit).getByLabelText("Keep recordings"), "Hive default");
+    await user.selectOptions(within(edit).getByLabelText("Keep recordings"), "Number of days");
+    expect(within(edit).getByLabelText("Days")).toHaveValue(45);
+    await user.clear(within(edit).getByLabelText("Days"));
+    await user.type(within(edit).getByLabelText("Days"), "3651");
+    await user.click(within(edit).getByRole("button", { name: "Save" }));
+    expect((within(edit).getByLabelText("Days") as HTMLInputElement).validity.rangeOverflow).toBe(true); // the browser stops it
+    expect(patches()).toHaveLength(3);
+    await user.clear(within(edit).getByLabelText("Days"));
+    await user.click(within(edit).getByRole("button", { name: "Save" }));
+    expect(await within(edit).findByRole("alert")).toHaveTextContent("0 to 3650"); // no days at all: the app says so
+    expect(patches()).toHaveLength(3);
+
+    // Zero: until space runs out.
+    await user.clear(within(edit).getByLabelText("Days"));
+    await user.type(within(edit).getByLabelText("Days"), "0");
+    expect(within(edit).getByLabelText("Days")).toHaveAccessibleDescription(/0 keeps them until the disk needs the space/);
+    expect(await save(edit, 4)).toMatchObject({ retention_days: 0 });
+    await waitFor(() => expect(cams[0]!.retention_days).toBe(0));
+
+    // Reset to the hive default sends null.
+    edit = await open();
+    expect(within(edit).getByLabelText("Days")).toHaveValue(0);
+    await user.selectOptions(within(edit).getByLabelText("Keep recordings"), "Hive default");
+    expect(await save(edit, 5)).toMatchObject({ retention_days: null });
+    await waitFor(() => expect(cams[0]!).not.toHaveProperty("retention_days"));
+  }, 20_000);
+
+  it("offers no retention field on a hive that does not announce it", async () => {
+    stub("owner", { version: "0.1.8", capabilities: ["camera.sub_stream"] });
+    const user = mount();
+    await user.click(await screen.findByRole("button", { name: "List" }));
+    const door = await screen.findByTestId("camera");
+    await user.click(within(door).getByRole("button", { name: "Edit" }));
+    expect(within(door).getByRole("form", { name: "Edit Door" })).toBeInTheDocument();
+    expect(within(door).queryByLabelText("Keep recordings")).toBeNull();
+  });
 
   it("offers no sub stream edit on a hive that cannot take it, nor for ONVIF cameras", async () => {
     const { cams } = stub("owner", { version: "0.1.7", capabilities: ["archive.delete", "camera.identity"] }); // v0.1.7 shipped without it

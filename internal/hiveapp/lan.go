@@ -24,11 +24,17 @@ func LANConn(ctx context.Context, _ net.Conn) context.Context {
 	return context.WithValue(ctx, lanKey{}, true)
 }
 
+// onLANListener reports whether the request came to the LAN listener and
+// not through the relay, whoever the peer is.
+func onLANListener(r *http.Request) bool {
+	marked, _ := r.Context().Value(lanKey{}).(bool)
+	return marked && !Relayed(r.Context())
+}
+
 // onLAN reports whether the request came to the LAN listener from another
 // machine inside a local network.
 func onLAN(r *http.Request) bool {
-	marked, _ := r.Context().Value(lanKey{}).(bool)
-	if !marked || Relayed(r.Context()) {
+	if !onLANListener(r) {
 		return false
 	}
 	ip := net.ParseIP(remoteHost(r))
