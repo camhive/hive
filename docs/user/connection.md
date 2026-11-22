@@ -1,5 +1,7 @@
 # How the app reaches your hive
 
+*[Deutsch](de/connection.md)*
+
 The web app has two kinds of traffic to a hive, and they take different roads.
 
 | Traffic | Road |

@@ -34,7 +34,10 @@ type Supervised interface {
 type Options struct {
 	Interval       time.Duration // periodic reconcile; default 30s
 	RestartBackoff time.Duration // wait before restarting a dead engine; default 2s
-	Logger         *slog.Logger
+	// OnStart hears every (re)start of the engine: camera care (#163) does
+	// not count the gap and the streams coming up as trouble.
+	OnStart func(at time.Time)
+	Logger  *slog.Logger
 }
 
 // Ingest is the reconciler.
@@ -64,6 +67,9 @@ func New(store CameraLister, engine video.Engine, opts Options) *Ingest {
 	}
 	if opts.Logger == nil {
 		opts.Logger = slog.New(slog.DiscardHandler)
+	}
+	if opts.OnStart == nil {
+		opts.OnStart = func(time.Time) {}
 	}
 	return &Ingest{store: store, engine: engine, opts: opts, log: opts.Logger, actual: map[sourceKey]video.Source{}, kick: make(chan struct{}, 1)}
 }
@@ -195,6 +201,7 @@ func (i *Ingest) startEngine(ctx context.Context) error {
 	if err := i.engine.Start(ctx); err != nil {
 		return fmt.Errorf("ingest: start engine: %w", err)
 	}
+	i.opts.OnStart(time.Now())
 	i.mu.Lock()
 	i.actual = map[sourceKey]video.Source{}
 	i.mu.Unlock()

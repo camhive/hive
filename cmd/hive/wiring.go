@@ -13,10 +13,14 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/kardianos/service"
+
 	"github.com/camhive/hive/internal/archive"
 	"github.com/camhive/hive/internal/archivekey"
 	"github.com/camhive/hive/internal/auth"
+	"github.com/camhive/hive/internal/datamove"
 	"github.com/camhive/hive/internal/diag"
+	"github.com/camhive/hive/internal/diskhealth"
 	"github.com/camhive/hive/internal/domain/camera"
 	"github.com/camhive/hive/internal/entitlements"
 	"github.com/camhive/hive/internal/events"
@@ -42,13 +46,16 @@ type runtimeParts struct {
 	ingest  *ingest.Ingest   // nil when the video engine is unavailable
 	index   *archive.Index   // nil when the video engine is unavailable
 	sweeper *retention.Sweeper
+	disk    *diskhealth.Monitor // nil when the video engine is unavailable; the archive disk's health (#155)
 	health  *health.Monitor
+	care    *health.Care    // camera care (#163); nil when the video engine is unavailable
 	locator *locate.Locator // nil when the video engine is unavailable
 	motion  *motion.Hub     // turns frame sizes and camera events into motion Events
 	cameras *motion.Watcher // nil when the video engine is unavailable; the cameras' own motion events
 	store   *store.Store
 	archive string
 	vault   *archivekey.Vault // the archive key (ADR-0019)
+	deps    hiveapp.Deps      // what the API serves; the automatic lock runs over it
 	exports *export.Manager   // nil when the video engine is unavailable
 	close   func()
 }
@@ -80,15 +87,18 @@ func assemble(ctx context.Context, cfg hiveconfig.Config, paths hiveconfig.Paths
 	parts := &runtimeParts{close: func() { vault.Lock(); _ = st.Close() }, store: st, vault: vault} // Lock wipes the key
 	closeOpenEvents(ctx, st, log)
 	parts.motion = motion.NewHub(st.Events(), motion.Options{Logger: log.With("component", "motion"),
-		Observe: func(e store.Event) { parts.agent.PromptStart(e) }}) // motion starts reach the cloud only while fresh (ADR-0021)
+		Observe: func(e store.Event) { parts.agent.PromptStart(e) }, // motion starts reach the cloud only while fresh (ADR-0021)
+		OnCalm:  func(c motion.Calming) { recordCalm(st, log, c) }}) // #157
 	cfg.SegmentMinutes = segmentMinutes(cfg.SegmentMinutes, vault.State())
-	eng, err := newEngine(cfg, paths, log, video.WithFrames(parts.motion.Frame))
+	eng, err := engineUnlessMoving(cfg, paths, log, video.WithFrames(parts.motion.Frame))
 	if err != nil {
 		_ = st.Close()
 		return nil, err
 	}
+	autolock := openAutolock(ctx, st, vault, log.With("component", "archivekey")) // #147
 	parts.agent = hiveagent.New(hiveagent.Deps{Store: st, Verifier: verifier, License: licensing, Version: version, Logger: log.With("component", "agent"),
-		Free: func() (int64, error) { return retention.FreeSpace(cfg.ArchiveDir) },
+		AtHome: autolock.AtHome, // #157: motion while someone is at home is sent quiet
+		Free:   func() (int64, error) { return retention.FreeSpace(cfg.ArchiveDir) },
 		Diag: func(ctx context.Context) (string, []string, error) {
 			return diag.Build(ctx, diag.Inputs{Paths: paths, Store: st, Version: version, Free: retention.FreeSpace})
 		}})
@@ -97,11 +107,20 @@ func assemble(ctx context.Context, cfg hiveconfig.Config, paths hiveconfig.Paths
 		Licensed: licensing.Effective, Discovery: hiveapp.ONVIFDiscoverer{},
 		Local:   auth.NewLocalSessions(hiveID, time.Now),    // the owner's emergency login (#57), LAN listener only
 		Updates: updateControl(paths, journal.DefaultDir()), // update settings and "Update now" (#82)
-		Vault:   keyWithEngine{Vault: vault, log: log}, Emit: parts.agent.Emit}
+		Vault:   keyWithEngine{Vault: vault, log: log}, Emit: parts.agent.Emit,
+		Autolock: autolock, Motion: parts.motion}
 	if eng != nil {
 		deps.Vault = keyWithEngine{Vault: vault, eng: eng, log: log}
-		parts.ingest = ingest.New(st.Cameras(), eng, ingest.Options{Logger: log.With("component", "ingest")})
-		parts.index = archive.NewIndex(st, archive.WithLogger(log.With("component", "archive")), archive.WithOpener(vault.OpenSegment))
+		// Segments only get shorter at run time (encryption, ADR-0019), which
+		// leaves care's late-segment check more tolerant, never alarmed.
+		episodes := newDegradedEpisodes(st.Events(), parts.agent.EmitEvent, log.With("component", "care"))
+		parts.care = health.NewCare(health.CareSources{Cameras: st.Cameras(), Segments: st.Segments(), Events: st.Events(), Clock: cameraClock},
+			health.CareOptions{Location: time.Local, Segment: time.Duration(cfg.SegmentMinutes) * time.Minute, Logger: log.With("component", "care"),
+				OnDegraded: episodes.begin, OnRecovered: episodes.end})
+		deps.Care = parts.care
+		parts.ingest = ingest.New(st.Cameras(), eng, ingest.Options{Logger: log.With("component", "ingest"), OnStart: parts.care.EngineStarted})
+		parts.index = archive.NewIndex(st, archive.WithLogger(log.With("component", "archive")), archive.WithOpener(vault.OpenSegment),
+			archive.WithFailed(func(err error) { parts.disk.RecordWrite(err) })) // parts.disk is made below, before Run
 		parts.archive = cfg.ArchiveDir
 		deps.Playback = hiveapp.ArchiveFetch(archive.NewReader(cfg.ArchiveDir, vault.OpenSegment))
 		deps.Exports = export.NewManager(filepath.Join(paths.Data, "exports"), deps.Playback, st.Exports(), export.WithVault(vault),
@@ -123,17 +142,23 @@ func assemble(ctx context.Context, cfg hiveconfig.Config, paths hiveconfig.Paths
 			retention.Options{ArchiveDir: cfg.ArchiveDir, Logger: log.With("component", "retention"), Exports: deps.Exports,
 				OnStorageLow: func(free int64) {
 					log.Error("storage low: archive disk below min_free_gb and nothing left to delete", "free_bytes", free)
-					storageLow.Begin(context.Background(), time.Now(), map[string]any{"free_bytes": free, "min_free_gb": cfg.MinFreeGB})
+					storageLow.Begin(context.Background(), time.Now(), map[string]any{"free_bytes": free, "min_free_gb": parts.sweeper.Limits().MinFreeBytes >> 30})
 				},
 				OnStorageOK: func(int64) { storageLow.End(context.Background(), time.Now()) },
 			})
 		deps.Deletions = parts.sweeper
+		parts.disk = diskhealth.New(diskhealth.Options{ArchiveDir: cfg.ArchiveDir, EngineLog: filepath.Join(paths.Data, "engine", "mediamtx.log"),
+			Failing: diskEpisode(st, parts.agent, hiveagent.EventDiskFailing, log), Failed: diskEpisode(st, parts.agent, hiveagent.EventDiskFailed, log),
+			Logger: log.With("component", "diskhealth")})
+		// The overview and the owner's retention and floor (#150): hive.yaml and the running sweeper.
+		deps.Storage = &hiveapp.StorageControl{Paths: paths, ArchiveDir: cfg.ArchiveDir, Rules: parts.sweeper, ExportMaxBytes: int64(cfg.ExportMaxGB) << 30, Health: parts.disk.Report}
 		parts.cameras = motion.NewWatcher(st.Cameras(), parts.motion, motion.WatchOptions{Logger: log.With("component", "motion")})
 		deps.Notify = func() { parts.ingest.Notify(); parts.cameras.Notify() }
 		deps.Index = parts.index
 		deps.Engine = eng
 		parts.health = health.New(st.Cameras(), eng, health.Options{
-			Logger: log.With("component", "health"),
+			Logger:   log.With("component", "health"),
+			OnSample: parts.care.Observe,
 			OnEvent: func(e health.Event) {
 				log.Info("camera event", "kind", e.Kind, "camera", e.Camera)
 				ev := store.Event{Camera: e.Camera, Kind: e.Kind, At: e.At, Data: e.Data}
@@ -151,8 +176,40 @@ func assemble(ctx context.Context, cfg hiveconfig.Config, paths hiveconfig.Paths
 		parts.agent.SetHealth(parts.health)
 		parts.agent.SetEngine(eng)
 	}
+	deps.Move = &hiveapp.MoveInfo{Paths: paths, ArchiveDir: cfg.ArchiveDir, Supported: hasSystemd() && !service.Interactive(), Moving: datamove.Moving(paths.Data)}
 	parts.handler = hiveapp.NewAPI(deps)
+	parts.deps = deps
 	return parts, nil
+}
+
+// recordCalm writes auto-calm to the action log (#157): the hive calmed a
+// camera with the episodes of the last hour, or stepped it back.
+func recordCalm(st *store.Store, log *slog.Logger, c motion.Calming) {
+	action, details := "motion.calm_ended", map[string]any{"sensitivity": c.Sensitivity.String()}
+	if c.Calmed {
+		action, details["episodes"] = "motion.calmed", c.Episodes
+	}
+	raw, _ := json.Marshal(details)
+	if err := st.Actions().Append(context.Background(), store.Action{Actor: "hive", Action: action, Target: c.Camera, At: c.At, Details: raw}); err != nil {
+		log.Error("action log", "err", err)
+	}
+}
+
+// diskEpisode is disk.failing or disk.failed (#155): an Event on the
+// hive's timeline, sent to the cloud (without the evidence's detail lines)
+// and written to the action log when it begins, as storage.low is.
+func diskEpisode(st *store.Store, agent *hiveagent.Agent, kind string, log *slog.Logger) *events.Condition {
+	return events.NewCondition(st.Events(), "", kind, events.WithLogger(log), events.Observe(func(e store.Event) {
+		cloud := e
+		cloud.Data = diskhealth.ForCloud(e.Data) // the detail lines (paths, log text) stay on the hive
+		agent.EmitStart(cloud)
+		if !e.End.IsZero() {
+			return
+		}
+		if err := st.Actions().Append(context.Background(), store.Action{Actor: "hive", Action: kind, Target: "archive", Details: e.Data}); err != nil {
+			log.Error("action log", "err", err)
+		}
+	}))
 }
 
 // closeOpenEvents ends the lasting Events a crash left open (ADR-0020): the
@@ -181,6 +238,16 @@ func cloudKeys(cfg hiveconfig.Config, log *slog.Logger) (auth.Keys, error) {
 		return nil, fmt.Errorf("cloud_public_keys: %w", err)
 	}
 	return keys, nil
+}
+
+// engineUnlessMoving is newEngine, or none while hive move-data copies
+// the archive (#155): the hive answers, but does not record.
+func engineUnlessMoving(cfg hiveconfig.Config, paths hiveconfig.Paths, log *slog.Logger, opts ...video.Option) (*video.MediaMTX, error) {
+	if datamove.Moving(paths.Data) {
+		log.Warn("the data is being moved to a new disk (hive move-data): recording is off until the move ends or is cancelled")
+		return nil, nil
+	}
+	return newEngine(cfg, paths, log, opts...)
 }
 
 // newEngine builds the MediaMTX engine, or returns nil (and logs) when the

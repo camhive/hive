@@ -1,5 +1,7 @@
 # Cameras
 
+*[Deutsch](de/cameras.md)*
+
 Open a hive: its page shows all cameras. Only the owner can add, edit, switch
 off or remove cameras; members see the cameras they were granted. *Add camera*
 is the last tile (or the last line of the list). Edit, switch off and remove
@@ -7,11 +9,11 @@ are on the opened camera and in the list.
 
 ## Adding a camera over ONVIF (recommended)
 
-1. *Add camera* → *ONVIF discovery*. The hive scans your network for a few
-   seconds and lists the devices that answered.
+1. *Add camera* → *Find on the network (ONVIF)*. The hive scans your
+   network for a few seconds and lists the devices that answered.
 2. Pick a device, or type its service address by hand
    (`http://192.168.1.50/onvif/device_service` is the usual form). Enter the
-   camera's username and password and press *Probe*.
+   camera's user and password and press *Read profiles*.
 3. The hive reads manufacturer, model and firmware, and lists the camera's
    profiles. The largest profile is preselected as **main**, the smallest as
    **sub**. Give the camera a name and, optionally, a group, and save.
@@ -30,7 +32,7 @@ Use this for cameras without ONVIF, or when discovery cannot see them.
 | Group | Optional label used to sort the list |
 | RTSP URL | The **main** stream, `rtsp://host:554/path`. Do not put the login into the URL |
 | Sub stream URL | Optional: the camera's second, smaller stream (`rtsp://` or `rtsps://`, no login in the URL); the same login is used |
-| Username, Password | The camera's login; the hive stores the password encrypted |
+| Camera user, Camera password | The camera's login; the hive stores the password encrypted |
 
 The camera's manual or vendor support page lists the path. Common ones:
 
@@ -116,11 +118,71 @@ camera is online when its main stream delivers data; two consecutive failed
 checks (about 10 seconds) mark it offline. Changes are recorded as events,
 visible as marks on the archive timeline and in *Activity*.
 
+## Camera health
+
+The hive also watches how each camera is doing, so you hear about a failing
+cable or illuminator before footage goes missing. When a reason holds, the
+camera page shows a health line with what the hive measured and what to do,
+and the camera gets a small badge in the list and on its tile. Everyone who
+may view the camera sees them, sharing recipients included. The owner gets
+one notification when a camera starts to need attention (setting *Offline*
+under *Notifications*, at most one a day per camera) and none when it is
+over: the badge goes away.
+
+| Reason | When the hive says it | What to do |
+|---|---|---|
+| Bitrate drop | A stream sent less than 60 % of what it usually sends at this hour for the last hour. "Usually" is the same clock hour (and the hours beside it) on the last 7 days, so a scene that is quiet every evening is normal; the hive needs 3 days of history first. | A quieter scene also lowers the bitrate; if the picture looks wrong, check the cable or the PoE budget |
+| Footage missing | More than 30 seconds of footage missing in the last hour, or no new segment for three checks in a row (about 15 minutes) while the camera is online | Check the cable, then update the camera's firmware |
+| Reconnects | The stream dropped and came back 4 times or more in the last hour | Check the cable or the PoE budget |
+| Clock drift | An ONVIF camera's clock was more than 30 seconds off the hive's at the last reading (every 6 hours) | Set the camera's NTP server |
+| Offline pattern | Offline for 5 minutes or more in the same hour on 3 of the last 7 days | Check what switches the camera's power or network off at that hour |
+| Night picture | At night (22:00–06:00) the bitrate fell below 60 % of the camera's own earlier nights and below 25 % of its day: the picture went dark | The IR illuminator may have failed |
+| Stream changed | Codec or resolution changed in the last 24 hours without anyone changing the camera in Camhive | Check the camera's video settings, and update its firmware if it reset them |
+
+What does not count: time the camera was offline (it has its own
+notification), time the hive or its video engine was not running (a restart,
+a reboot, an update), and a source restarting right after you changed the
+camera. Late segments are not reported while the hive's storage is low,
+which has its own notice. A night picture clears by day; the other reasons
+clear only well past their threshold (bitrate above 80 %, at most 5 seconds
+missing, at most one reconnect in the hour), so they do not come and go.
+Reconnects are counted since the hive last started.
+
 ## PTZ
 
 Pan-tilt-zoom works for ONVIF cameras that expose a PTZ service. Owners and
 operators see a control pad on the opened camera: hold a direction to move, tap a
 preset to go there. RTSP-only cameras cannot be moved.
+
+## Motion sensitivity
+
+Each camera has a **Motion sensitivity**: open the camera → *Edit camera*
+(owner only). It sets how readily the hive reacts to motion on that camera:
+
+| Sensitivity | Reacts to | Use it for |
+|---|---|---|
+| Low | larger movement that lasts at least about 4 seconds | a tree, a street, changing light |
+| Normal (default) | movement of about 2 seconds | most cameras |
+| High | small movement of a second | a quiet room, a far-away gate |
+
+With the camera's own motion detection (ONVIF), *Low* also wants the camera
+to report motion for 3 seconds before it counts; *Normal* and *High* take
+the camera's report as it comes, so set the camera's own sensitivity in its
+web page.
+
+**Calming down.** When a camera has more than 20 motion episodes in an
+hour, the hive makes it one step less sensitive by itself and the form says
+*Calmed since 14:10*. After an hour without motion it goes back to its
+sensitivity. Both are in the hive's activity. Calming raises the threshold,
+so fewer episodes begin; the ones that do are on the timeline as always. A
+restart of the hive starts every camera uncalmed. With the camera's own
+detector, a calmed camera wants its report to last longer: 1 second at
+*High*, 3 at *Normal*, 6 at *Low*.
+
+The field shows on hives that announce it (from v0.1.10). Through the hive's
+API: `PATCH /v0/cameras/{id}` with `sensitivity` `low`, `normal` or `high`.
+How motion becomes a notification is in
+[Notifications](account-and-plans.md#why-motion-stays-calm).
 
 ## Recording settings
 

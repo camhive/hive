@@ -3,7 +3,7 @@
 // pages need.
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { createHiveClient, unwrapHive, type AccessGrant, type CameraHealth, type HiveCamera, type HiveClient } from "@camhive/api";
+import { createHiveClient, unwrapHive, type AccessGrant, type CameraCare, type CameraHealth, type HiveCamera, type HiveClient } from "@camhive/api";
 import type { Hive } from "./hives";
 import { transport, type Transport } from "./transport";
 
@@ -44,6 +44,17 @@ export function useCameraHealth(hive: Hive | undefined, client: HiveClient | nul
     queryFn: async (): Promise<CameraHealth[]> => unwrapHive(await client!.GET("/v0/health/cameras")),
     enabled: !!hive && !!client,
     refetchInterval: intervalMs,
+    retry: false,
+  });
+}
+
+/** Camera care (#163) of one camera, on hives that announce camera.care; the hive judges every 5 minutes. */
+export function useCameraCare(hive: Hive, client: HiveClient | null, cameraId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ["hive", hive.id, "care", cameraId],
+    queryFn: async (): Promise<CameraCare> => unwrapHive(await client!.GET("/v0/cameras/{id}/care", { params: { path: { id: cameraId } } })),
+    enabled: enabled && !!client,
+    refetchInterval: 60_000,
     retry: false,
   });
 }

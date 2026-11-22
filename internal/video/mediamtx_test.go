@@ -159,6 +159,23 @@ func TestParseStatusFromMediaMTXPathJSON(t *testing.T) {
 	}
 }
 
+// The video track's codec and size come from tracks2 (camera care, #163:
+// a stream that changes them without the owner is worth a word).
+func TestParseStatusReadsTheTrack(t *testing.T) {
+	raw := `{"ready":true,"tracks":["MPEG-4 Audio","H265"],"tracks2":[{"codec":"MPEG-4 Audio","codecProps":{"sampleRate":8000}},` +
+		`{"codec":"H265","codecProps":{"width":2560,"height":1440,"profile":"Main"}}]}`
+	st, err := parseStatus([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Video != (Track{Codec: "H265", Width: 2560, Height: 1440}) {
+		t.Fatalf("video = %+v", st.Video)
+	}
+	if st, _ := parseStatus([]byte(`{"ready":true,"tracks":["H264"]}`)); st.Video != (Track{Codec: "H264"}) {
+		t.Fatalf("without tracks2 the codec comes from tracks: %+v", st.Video)
+	}
+}
+
 func TestParseSegmentsSortedOldestFirstAndNullDuration(t *testing.T) {
 	raw := `{"name":"front/main","segments":[
 		{"start":"2026-11-09T10:00:10Z","duration":10},

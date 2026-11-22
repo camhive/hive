@@ -11,7 +11,15 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Liveness */
+        /**
+         * Liveness and the database schema
+         * @description Always 200 while the process runs. `schema` compares the database with the
+         *     migrations compiled into the binary: `behind` (served only under
+         *     CAMHIVE_ALLOW_OLD_SCHEMA=1), `ahead` (an older image after a rollback),
+         *     `unknown` (the database did not answer within 1 s). The schema is read at most
+         *     every 15 s. `status` is `ok` only when `schema` is `ok`.
+         *
+         */
         get: operations["getHealthz"];
         put?: never;
         post?: never;
@@ -1208,6 +1216,11 @@ export interface components {
         NotifyToggle: {
             email: boolean;
             push: boolean;
+            /**
+             * @description When the group's notifications go out (#157). Motion: each episode, one digest per hive and local hour or day with motion, or none (the episodes stay on the hive's timeline and in the counts). Offline and storage are always immediate; any other mode for them is 422 invalid. Absent on PUT: the stored mode stays
+             * @enum {string}
+             */
+            mode?: "immediate" | "hourly" | "daily" | "quiet";
         };
         /** @description The signed-in account's notification preferences (ADR-0021); a camera without an entry gets motion on with a 10-minute cooldown */
         NotificationSettings: {
@@ -1221,7 +1234,7 @@ export interface components {
                 storage: components["schemas"]["NotifyToggle"];
                 motion: components["schemas"]["NotifyToggle"];
             };
-            /** @description A daily window in which motion notifications are dropped; absent or null for none */
+            /** @description A daily window in which motion is not pushed but held for one digest when the window ends, and a motion digest due inside it waits for that end; offline and storage still go out. Absent or null for none */
             quiet_hours?: null | {
                 /** @example 22:00 */
                 start: string;
@@ -1236,6 +1249,11 @@ export interface components {
             }[];
             /** @description Channels the account's plan includes and this cloud can deliver */
             readonly channels?: ("email" | "push")[];
+            /** @description The last seven days (#157): motion episodes the cloud heard of (quiet ones included) and push notifications sent; an account whose daily motion cap is reached hears it once a day (motion.capped) */
+            readonly counts?: {
+                episodes_week: number;
+                pushes_week: number;
+            };
         };
         PushDevice: {
             id: string;
@@ -1280,12 +1298,20 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description OK */
+            /** @description process up */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        status: "ok" | "degraded";
+                        version: string;
+                        /** @enum {string} */
+                        schema: "ok" | "behind" | "ahead" | "unknown";
+                    };
+                };
             };
         };
     };
@@ -1875,6 +1901,15 @@ export interface operations {
                 };
             };
             400: components["responses"]["Error"];
+            /** @description a summary mode for offline or storage (invalid); only motion has one */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     getMePush: {

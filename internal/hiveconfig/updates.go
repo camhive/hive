@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 )
@@ -30,10 +31,20 @@ func (c Config) UpdateSettings() UpdateSettings {
 	return UpdateSettings{Updates: c.Updates, UpdateWindow: c.UpdateWindow, UpdateChannel: c.UpdateChannel}
 }
 
+// editMu makes the hive's own edits of hive.yaml (update and storage
+// settings) one at a time, so one does not undo the other. It cannot
+// cover another process: an owner who saves hive.yaml from an editor that
+// read it before the app's change writes the old value back (the running
+// hive keeps the app's value until it restarts), and an app change
+// between an editor's read and write is lost the same way.
+var editMu sync.Mutex
+
 // SaveUpdateSettings validates s like hive.yaml and writes it into
 // hive.yaml in place: comments and every other setting stay. The file is
 // replaced atomically, so the updater never reads half of it.
 func SaveUpdateSettings(p Paths, s UpdateSettings) error {
+	editMu.Lock()
+	defer editMu.Unlock()
 	cfg, _, err := Load(p)
 	if err != nil {
 		return err
@@ -46,15 +57,18 @@ func SaveUpdateSettings(p Paths, s UpdateSettings) error {
 	if err != nil {
 		return fmt.Errorf("hiveconfig: read %s: %w", p.Config, err)
 	}
-	out, err := setKeys(raw, [][2]string{{"updates", s.Updates}, {"update_window", s.UpdateWindow}, {"update_channel", s.UpdateChannel}})
+	out, err := setKeys(raw, []entry{{"updates", s.Updates, "!!str"}, {"update_window", s.UpdateWindow, "!!str"}, {"update_channel", s.UpdateChannel, "!!str"}})
 	if err != nil {
 		return fmt.Errorf("hiveconfig: edit %s: %w", p.Config, err)
 	}
 	return replaceFile(p.Config, out)
 }
 
+// entry is one top-level scalar of hive.yaml with its YAML tag (!!str, !!int).
+type entry struct{ key, value, tag string }
+
 // setKeys sets top-level scalar keys of a YAML document, adding missing ones.
-func setKeys(raw []byte, kv [][2]string) ([]byte, error) {
+func setKeys(raw []byte, kv []entry) ([]byte, error) {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(raw, &doc); err != nil {
 		return nil, err
@@ -67,7 +81,7 @@ func setKeys(raw []byte, kv [][2]string) ([]byte, error) {
 		return nil, errors.New("not a mapping")
 	}
 	for _, e := range kv {
-		setKey(m, e[0], e[1])
+		setKey(m, e)
 	}
 	var out bytes.Buffer
 	enc := yaml.NewEncoder(&out)
@@ -78,14 +92,14 @@ func setKeys(raw []byte, kv [][2]string) ([]byte, error) {
 	return out.Bytes(), enc.Close()
 }
 
-func setKey(m *yaml.Node, key, value string) {
+func setKey(m *yaml.Node, e entry) {
 	for i := 0; i+1 < len(m.Content); i += 2 {
-		if m.Content[i].Value == key {
-			m.Content[i+1].Kind, m.Content[i+1].Tag, m.Content[i+1].Value, m.Content[i+1].Style = yaml.ScalarNode, "!!str", value, 0
+		if m.Content[i].Value == e.key {
+			m.Content[i+1].Kind, m.Content[i+1].Tag, m.Content[i+1].Value, m.Content[i+1].Style = yaml.ScalarNode, e.tag, e.value, 0
 			return
 		}
 	}
-	m.Content = append(m.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: key}, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: value})
+	m.Content = append(m.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: e.key}, &yaml.Node{Kind: yaml.ScalarNode, Tag: e.tag, Value: e.value})
 }
 
 // replaceFile writes data next to path and renames it over path, keeping

@@ -1,5 +1,7 @@
 # Live and archive
 
+*[Deutsch](de/live-and-archive.md)*
+
 Live video, recordings and camera management share one page: open a hive from
 *Hives* and you see all its cameras.
 
@@ -143,6 +145,41 @@ stops because of retention; if the disk cannot be freed, the hive reports
 began and, once space is back, when it ended.
 Downgrading a plan never deletes anything.
 
+### How long the disk lasts
+
+**Hive → Connection → Storage → Show storage…** shows what the hive holds
+(from v0.1.10; an older hive shows which version brings it):
+
+- the disk's size, the footage on it, the exports and the free space;
+- per camera: the days it holds, their size, how much it writes per day
+  (the larger of the last day's and the last week's average, so a bitrate
+  raised yesterday shows at once; rates and space needed are rounded up)
+  and the days it will keep;
+- one sentence that puts it together, for example *At 46 GB per day this
+  disk holds 11 days; retention is 30 days, so it will effectively be 11.*
+  When the disk cannot hold the retention, a note says how much space it
+  would need and when the hive starts deleting the oldest footage for
+  space, or that it is doing so now. If your plan keeps footage for fewer
+  days than the setting, the block says so. Lower the retention, record less (a lower bitrate, no sub stream)
+  or use a bigger disk; the hive never stops recording because of it.
+
+The owner changes two settings there: **Keep footage for (days)** (0 to
+3650; 0 keeps footage until space runs out; a camera's own retention, see
+[cameras](cameras.md), overrides it) and **Keep free on the disk (GiB)** (at
+least 1 GiB, that is 1.07 GB, and less than the disk; the value is in
+GiB, as in `hive.yaml`). They are written to `hive.yaml` and take
+effect at the next retention sweep, within five minutes, without a restart;
+the action log records the change (`storage.settings_changed`). If the new
+values delete footage at that sweep (a camera on the hive-wide value has
+footage older than the new number of days, or the new floor is above the
+free space), the app asks first: deleted footage cannot be recovered. Setting the floor to 0, which turns the free-space rule
+off, is possible only by hand in `hive.yaml`, and the disk can then fill up.
+
+Members see only the days held and the size of the footage of the cameras
+shared with them. The numbers
+use the same arithmetic as the [storage calculator](/en/calculator/)
+on the website, on what your cameras really write.
+
 ## Deleting recordings
 
 The owner can remove footage from the hive's disk at once, for example when
@@ -207,9 +244,39 @@ encryption…** (it needs hive version 0.1.7 or later).
   your network ([Connection](connection.md)); switching encryption on,
   changing the passphrase and downloading the key file need a sign-in
   through Camhive, and the app says so instead of offering them.
+- **Locking automatically** (hive version 0.1.10 or later). Under **Lock
+  automatically** the owner chooses when the hive locks the recordings by
+  itself, so the key does not stay in its memory for weeks. Both are off
+  until you choose otherwise, and either can lock first:
+  - **When nobody watched recordings for** 1 hour, 8 hours, 24 hours or 7
+    days. Playing a recording, its sound, starting an export or downloading
+    one, by anyone, starts the time again; so does unlocking. A member who
+    keeps watching keeps the recordings unlocked; only the second setting
+    locks while someone watches.
+  - **When I leave home**, after 10 minutes or 1 hour away. The app tells the
+    hive when it no longer reaches it on your network and goes through the
+    Camhive relay instead, and when it reaches it at home again; coming back
+    within the time cancels the lock, so a Wi-Fi hiccup does not lock. The
+    app can tell only while it is open on a hive page or on the Connection
+    tab (it reminds the hive once a minute): if you leave with the app closed, or your phone stays at home, only
+    the first setting applies. With several devices, the one that reported
+    last counts. If you unlock from outside, you get the full time again.
+
+  While a time runs the tab says when the recordings lock, for example
+  "Locks in 42 minutes". The hive locks as the **Lock recordings** button
+  does: playback that is running stops at its next request, members read that the archive is
+  locked by its owner, and the activity log shows the lock with its reason
+  (no one watched, or you left home). Unlocking always takes your
+  passphrase; nothing unlocks by itself when you come home. Camhive's cloud
+  takes no part: it neither holds the key nor learns whether you are home.
+  Changing these settings needs a sign-in through Camhive. Away from home you
+  can make them stricter; switching a lock off or making it later works only
+  at home, on your network, so whoever got hold of your sign-in cannot relax
+  it from outside. A hive that was asleep (a laptop with its lid closed)
+  locks as soon as it wakes if the time ran out meanwhile.
 - **Changing the passphrase** (**Change passphrase…**: the current one, then
   the new one twice) keeps the recordings as they are. A key file downloaded
-  earlier still opens with the old passphrase, so the app offers **Download
+  earlier opens only with the old passphrase, so the app offers **Download
   the new key file** right after the change.
 - **If the app warns that new recordings are stored unencrypted,** the
   hive could not read the archive key from its disk. Unlocking the

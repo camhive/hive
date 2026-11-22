@@ -82,10 +82,11 @@ type Config struct {
 	APIPort      int // MediaMTX control API (bound to Host)
 	ONVIFPort    int
 	Cameras      []Camera
-	NoEvents     bool   // no ONVIF event service, as on cameras without one
-	WorkDir      string // generated config and logs; temp dir when empty
-	MediaMTXPath string // binary; looked up in PATH when empty
-	FFmpegPath   string // binary; looked up in PATH when empty
+	NoEvents     bool          // no ONVIF event service, as on cameras without one
+	ClockOffset  time.Duration // GetSystemDateAndTime answers the time this far off (camera care, #163)
+	WorkDir      string        // generated config and logs; temp dir when empty
+	MediaMTXPath string        // binary; looked up in PATH when empty
+	FFmpegPath   string        // binary; looked up in PATH when empty
 }
 
 var nameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
@@ -212,10 +213,6 @@ func (c *Config) mediamtxYAML() string {
 // with a microphone, a G.711 µ-law tone, as most real cameras send.
 func (c *Config) ffmpegArgs(cam Camera, s Stream) []string {
 	res := cam.resolution(s)
-	enc := "libx264"
-	if cam.Codec == H265 {
-		enc = "libx265"
-	}
 	args := []string{
 		"-hide_banner", "-loglevel", "error", "-nostdin",
 		"-re", "-f", "lavfi", "-i", cam.scene(res),
@@ -225,11 +222,41 @@ func (c *Config) ffmpegArgs(cam Camera, s Stream) []string {
 		args = append(args, "-re", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=8000")
 		audio = []string{"-map", "0:v", "-map", "1:a", "-c:a", "pcm_mulaw", "-ar", "8000", "-ac", "1"}
 	}
-	args = append(args,
-		"-c:v", enc, "-preset", "ultrafast", "-tune", "zerolatency",
-		"-g", itoa(cam.FPS*2), "-pix_fmt", "yuv420p")
+	args = append(args, cam.videoEncoder()...)
 	args = append(args, audio...)
 	return append(args, "-f", "rtsp", "-rtsp_transport", "tcp", c.RTSPURL(cam, s))
+}
+
+// videoEncoder is how every stream is encoded: the camera's codec, fast,
+// no B-frames, a keyframe every 2 seconds.
+func (cam Camera) videoEncoder() []string {
+	enc := "libx264"
+	if cam.Codec == H265 {
+		enc = "libx265"
+	}
+	return []string{"-c:v", enc, "-preset", "ultrafast", "-tune", "zerolatency",
+		"-g", itoa(cam.FPS * 2), "-pix_fmt", "yuv420p"}
+}
+
+// ClipArgs builds the ffmpeg command line that encodes d of the stream's
+// test pattern once, as fast as it can, into a raw Annex-B file at out
+// with an access unit delimiter before every frame: the live publisher's
+// scene and encoder, with temporal noise so the encoder spends the
+// bitrate, held at kbps. A source that replays the clip costs
+// a fraction of a live encoder, so a benchmark measures the recorder, not
+// ffmpeg (tools/sizing, #142).
+func (cam Camera) ClipArgs(s Stream, kbps int, d time.Duration, out string) []string {
+	rate := strconv.Itoa(kbps) + "k"
+	args := []string{"-hide_banner", "-loglevel", "error", "-nostdin",
+		"-f", "lavfi", "-i", cam.scene(cam.resolution(s)) + ",noise=alls=12:allf=t",
+		"-t", strconv.Itoa(int(d.Seconds()))}
+	args = append(args, cam.videoEncoder()...)
+	raw := "h264"
+	if cam.Codec == H265 {
+		raw = "hevc"
+	}
+	return append(args, "-b:v", rate, "-maxrate", rate, "-bufsize", rate, "-an",
+		"-bsf:v", raw+"_metadata=aud=insert", "-f", raw, "-y", out)
 }
 
 // scene is the lavfi source of a stream. testsrc2 is a moving pattern with a

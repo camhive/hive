@@ -1,5 +1,7 @@
 # Getting started
 
+*[Deutsch](de/README.md)*
+
 Camhive keeps your camera footage at home. A small program called a **hive**
 runs on a computer in your house (a PC, a NAS, a Raspberry Pi), records your
 IP cameras to its own disk and never uploads video anywhere. The Camhive
@@ -12,7 +14,7 @@ watching on your own network, and exporting clips locally.
 
 ## Fifteen minutes to the first picture
 
-1. **Create an account.** Open the app, choose *Sign up*, enter your e-mail and
+1. **Create an account.** Open the app, choose *Create account*, enter your e-mail and
    a password of at least 10 characters. A 6-digit code arrives by e-mail;
    enter it on the next page, then sign in.
 2. **Install a hive** on the computer that will record. Follow

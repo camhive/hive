@@ -16,10 +16,13 @@ type CameraLister interface {
 	List(ctx context.Context) ([]camera.Camera, error)
 }
 
-// Reporter is told what a camera's own detector says; *Hub is one.
+// Reporter is told what a camera's own detector says and each camera's
+// sensitivity; *Hub is one.
 type Reporter interface {
 	CameraSource(cam string, live bool)
 	CameraMotion(cam string, on bool, at time.Time)
+	Sensitivity(cam string, s camera.Sensitivity)
+	Known(cams []string)
 }
 
 // WatchOptions tune the Watcher.
@@ -32,7 +35,8 @@ type WatchOptions struct {
 }
 
 // Watcher keeps a PullPoint subscription to every enabled ONVIF Camera and
-// tells the Hub what the camera's own detector reports (ADR-0020). The
+// tells the Hub what the camera's own detector reports (ADR-0020), and
+// every Camera's sensitivity (#157). The
 // camera source counts as live from its first motion message on: a camera
 // whose detection is off never sends one and stays on the frames source.
 type Watcher struct {
@@ -118,6 +122,12 @@ func (w *Watcher) reconcile(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	ids := make([]string, 0, len(cams))
+	for _, c := range cams {
+		w.hub.Sensitivity(string(c.ID), c.Sensitivity)
+		ids = append(ids, string(c.ID))
+	}
+	w.hub.Known(ids)
 	want := watched(cams)
 	w.mu.Lock()
 	defer w.mu.Unlock()

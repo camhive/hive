@@ -17,6 +17,8 @@ import { LocalLoginSettings } from "@/components/LocalLogin";
 import { NeedsUpdate } from "@/components/NeedsUpdate";
 import { UpdatesSettings } from "@/components/Updates";
 import { EncryptionSettings } from "@/components/ArchiveEncryption";
+import { StorageSettings } from "@/components/Storage";
+import { MoveDataSettings } from "@/components/DiskHealth";
 import { useHiveCapability } from "@/lib/capabilities";
 import type { Hive } from "@/lib/hives";
 
@@ -73,7 +75,9 @@ export function HiveSettings() {
         )}
         {decision?.path === "lan" && <p className="mt-4 text-sm muted">{t("transport.lnaNote")}</p>}
         <button className="btn btn-secondary mt-4" disabled={probing} onClick={() => void reprobe()}>{probing ? t("transport.probing") : t("transport.reprobe")}</button>
+        {hive.status !== "revoked" && <MoveDataSettings hive={hive} owner={owned} />}
       </section>
+      {hive.status !== "revoked" && <StorageSettings hive={hive} owner={owned} />}
       {owned && hive.status !== "revoked" && <UpdatesSettings hive={hive} />}
       {owned && hive.status !== "revoked" && <LocalLoginSettings hive={hive} />}
       {owned && hive.status !== "revoked" && <EncryptionSettings hive={hive} />}

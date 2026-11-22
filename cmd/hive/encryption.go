@@ -10,6 +10,7 @@ import (
 	"github.com/camhive/hive/internal/archivekey"
 	"github.com/camhive/hive/internal/export"
 	"github.com/camhive/hive/internal/hiveconfig"
+	"github.com/camhive/hive/internal/store"
 	"github.com/camhive/hive/internal/video"
 )
 
@@ -31,6 +32,27 @@ func openArchiveKey(paths hiveconfig.Paths, log *slog.Logger) *archivekey.Vault 
 		log.Info("the archive is encrypted and locked until its owner unlocks it")
 	}
 	return v
+}
+
+// autolockEvery is how often the automatic lock looks whether a timer is
+// due (ADR-0019 addendum): a lock comes at most this late.
+const autolockEvery = 30 * time.Second
+
+// openAutolock starts the automatic lock with the owner's stored settings;
+// unreadable settings leave it off, as on a fresh hive.
+func openAutolock(ctx context.Context, st *store.Store, vault *archivekey.Vault, log *slog.Logger) *archivekey.Autolock {
+	a := archivekey.NewAutolock(vault)
+	s, err := st.Autolock().Get(ctx)
+	if err != nil {
+		log.Error("automatic lock settings unreadable: the archive does not lock itself until the owner sets them again", "err", err)
+		return a
+	}
+	if as := archivekey.AutolockSettings(s); as.Valid() {
+		a.Set(as)
+	} else {
+		log.Error("automatic lock settings are not among the choices: the archive does not lock itself until the owner sets them again", "after", s.After, "away", s.Away)
+	}
+	return a
 }
 
 // segmentMinutes is how long the engine's segments are: at most
@@ -65,11 +87,11 @@ func (k keyWithEngine) Enable(passphrase string) error {
 
 // sealLoop seals closed segments and stored exports while encryption is on,
 // at once (what a crash left behind) and then every sealEvery.
-func sealLoop(ctx context.Context, vault *archivekey.Vault, idx *archive.Index, root string, exports *export.Manager, log *slog.Logger) {
+func sealLoop(ctx context.Context, vault *archivekey.Vault, idx *archive.Index, root string, exports *export.Manager, failed func(error), log *slog.Logger) {
 	t := time.NewTicker(sealEvery)
 	defer t.Stop()
 	for {
-		sealOnce(ctx, vault, idx, root, exports, log)
+		sealOnce(ctx, vault, idx, root, exports, failed, log)
 		select {
 		case <-ctx.Done():
 			return
@@ -79,15 +101,18 @@ func sealLoop(ctx context.Context, vault *archivekey.Vault, idx *archive.Index, 
 }
 
 // sealOnce is one pass of sealLoop; nothing happens while encryption is off.
-func sealOnce(ctx context.Context, vault *archivekey.Vault, idx *archive.Index, root string, exports *export.Manager, log *slog.Logger) {
+// A failed write goes to failed too: the disk's health counts it (#155).
+func sealOnce(ctx context.Context, vault *archivekey.Vault, idx *archive.Index, root string, exports *export.Manager, failed func(error), log *slog.Logger) {
 	to := vault.Recipient()
 	if to == nil {
 		return
 	}
 	if _, err := idx.Seal(ctx, root, to, time.Now()); err != nil {
 		log.Error("sealing segments", "err", err)
+		failed(err)
 	}
 	if _, err := exports.Seal(ctx, to); err != nil {
 		log.Error("sealing exports", "err", err)
+		failed(err)
 	}
 }

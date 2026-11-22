@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -171,6 +172,31 @@ func TestReconcileMakesTheIndexMatchTheFiles(t *testing.T) {
 	rep, _ = idx.Reconcile(ctx, root)
 	if rep.Added != 0 || rep.Removed != 0 {
 		t.Fatalf("third reconcile = %+v", rep)
+	}
+}
+
+// The samples behind FMP4Duration one by one, in order: a recorder that
+// dropped frames shows as one long sample, which a total cannot show.
+func TestFMP4SampleDurationsListsEverySample(t *testing.T) {
+	data := buildFMP4(t, 90000, 6000, []fragment{{samples: 2, explicitDur: 3000}, {samples: 3}})
+	got, err := archive.FMP4SampleDurations(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []time.Duration{time.Second / 30, time.Second / 30, time.Second / 15, time.Second / 15, time.Second / 15}
+	if !slices.Equal(got, want) {
+		t.Fatalf("samples = %v, want %v", got, want)
+	}
+	total, _ := archive.FMP4Duration(data)
+	var sum time.Duration
+	for _, d := range got {
+		sum += d
+	}
+	if diff := sum - total; diff < -time.Microsecond || diff > time.Microsecond {
+		t.Fatalf("samples add up to %v, FMP4Duration says %v", sum, total)
+	}
+	if _, err := archive.FMP4SampleDurations([]byte("not an mp4 at all")); err == nil {
+		t.Fatal("garbage must error")
 	}
 }
 

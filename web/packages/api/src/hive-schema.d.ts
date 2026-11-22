@@ -1254,6 +1254,147 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v0/archive/encryption/autolock": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Set the automatic lock (owner signed in through Camhive; a local session gets 403)
+         * @description A field left out keeps its value; at least one is required. A change
+         *     that makes the archive lock later (a timer switched off or made
+         *     longer) takes the owner at home, on the hive's LAN address from a
+         *     machine in the local network; through the relay or a forwarded port
+         *     it answers 403 `lan_only`, so a stolen token cannot relax the lock.
+         *     Stricter changes work from anywhere. The settings persist in the hive's
+         *     store and apply while the archive is unlocked; unlocking stays
+         *     manual. Recorded as `archive.encryption.autolock`. When a timer
+         *     fires, the hive locks the archive as `POST /v0/archive/encryption/lock`
+         *     does and records `archive.encryption.lock` with actor `hive` and
+         *     `reason: inactivity | away`.
+         *
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["AutolockSettings"];
+                };
+            };
+            responses: {
+                /** @description Set */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ArchiveEncryption"];
+                    };
+                };
+                /** @description `code: invalid` — not one of the choices, or nothing to change */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                /** @description `code: forbidden` (not the owner signed in through Camhive) or `code: lan_only` (relaxing the lock from outside the home network) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description `code: not_ready` — automatic locking is not available */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/v0/archive/encryption/presence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The owner's app reports whether it is at home (owner, a local emergency session included)
+         * @description Sent when a page that holds a connection to the hive opens, when the
+         *     app's transport decision changes, after an unlock and once a minute
+         *     while the page is open; at most once a minute. Leaving
+         *     starts the `away` grace period (repeated reports keep its start); a
+         *     return cancels it. Advisory: an app that is closed reports nothing,
+         *     and the inactivity timer is the fallback. Kept in memory only, not
+         *     recorded.
+         *
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["Presence"];
+                };
+            };
+            responses: {
+                /** @description Taken */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+                /** @description `code: not_ready` — automatic locking is not available */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v0/exports/{id}": {
         parameters: {
             query?: never;
@@ -2236,6 +2377,249 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v0/storage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The archive disk, every camera's footage and the forecast (#150)
+         * @description Owner and members; a member sees only the cameras the token covers, without disk, settings and forecast. A local session (#57) reads it too.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["StorageOverview"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                /** @description internal: the index, the disk or the database could not be read */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description not_ready: the archive is not available yet */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v0/hive/storage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change retention_days and min_free_gb (owner through Camhive); action-logged as storage.settings_changed
+         * @description Written to hive.yaml and to the running retention sweeper: the next sweep (at most 5 minutes) applies them, no restart. Lowering retention_days or raising min_free_gb can delete footage at that sweep. Only the fields sent are validated: a min_free_gb of 0 set by hand stands. A local session (#57) is refused.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["StoragePatch"];
+                };
+            };
+            responses: {
+                /** @description The overview with the new settings */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["StorageOverview"];
+                    };
+                };
+                /** @description bad_json (not whole numbers, unknown fields) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+                /** @description invalid: retention_days outside 0-3650, or min_free_gb sent below 1 or not smaller than the disk */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description internal: hive.yaml could not be written */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description not_ready: the archive is not available yet */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/v0/hive/move": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The state of `hive move-data`, for the guided disk replacement (#155)
+         * @description Owner only. The move itself runs as `hive move-data <new-dir>` as root on the hive's computer; while it copies, the hive answers without recording.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DataMove"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+                /** @description internal: move.json could not be read */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v0/cameras/{id}/care": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Camera care, the camera's signals and what to do (viewer,
+         * @description Owner and members who may view the camera.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CameraCare"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                404: components["responses"]["NotFound"];
+                /** @description not_ready: camera care is not running (no video engine) */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2245,7 +2629,7 @@ export interface components {
              * @description Stable machine-readable code.
              * @enum {string}
              */
-            code: "token_missing" | "token_invalid" | "token_expired" | "clock_skew" | "wrong_hive" | "license_required" | "forbidden" | "not_found" | "invalid" | "bad_json" | "not_ready" | "engine" | "unsupported" | "camera" | "camera_auth" | "plan_limit" | "internal" | "lan_only" | "local_login_disabled" | "local_login_rate_limited" | "invalid_credentials" | "weak_password" | "invalid_update_window" | "updates_unavailable" | "archive_locked" | "encryption_on" | "encryption_off" | "wrong_passphrase" | "unlock_rate_limited";
+            code: "token_missing" | "token_invalid" | "token_expired" | "clock_skew" | "wrong_hive" | "license_required" | "forbidden" | "not_found" | "invalid" | "bad_json" | "not_ready" | "engine" | "unsupported" | "camera" | "camera_auth" | "plan_limit" | "internal" | "lan_only" | "local_login_disabled" | "local_login_rate_limited" | "invalid_credentials" | "weak_password" | "invalid_update_window" | "updates_unavailable" | "archive_locked" | "encryption_on" | "encryption_off" | "wrong_passphrase" | "unlock_rate_limited" | "moving";
             message: string;
         };
         HiveInfo: {
@@ -2367,6 +2751,16 @@ export interface components {
              * @enum {string}
              */
             network?: "local" | "routed";
+            /**
+             * @description How readily motion detection reacts (#157, capability camera.sensitivity); normal is ADR-0020's defaults
+             * @enum {string}
+             */
+            sensitivity?: "low" | "normal" | "high";
+            /**
+             * Format: date-time
+             * @description Present while the hive has calmed the camera: it raised more than 20 motion episodes in an hour, so the threshold is one step higher until an hour passes without one (#157)
+             */
+            motion_calmed_since?: string;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -2536,15 +2930,17 @@ export interface components {
             streams?: {
                 [key: string]: components["schemas"]["StreamHealth"];
             };
+            /** @description Camera care (#163); absent on hives without it */
+            care?: components["schemas"]["CareSummary"];
         };
-        /** @description A timeline Event (ADR-0009, ADR-0020). `id` is stable; a lasting Event (motion, storage.low) is listed from its start, also on later days while it goes on, and gains `end` when it is over. */
+        /** @description A timeline Event (ADR-0009, ADR-0020). `id` is stable; a lasting Event (motion, storage.low, disk.failing, disk.failed) is listed from its start, also on later days while it goes on, and gains `end` when it is over. */
         Event: {
             /** @description Stable for the Event's life on this hive */
             id?: number;
-            /** @description Empty for the hive's own Events (storage.low) */
+            /** @description Empty for the hive's own Events (storage.low, disk.failing, disk.failed) */
             camera?: string;
             /** @enum {string} */
-            kind?: "camera.online" | "camera.offline" | "camera.address_changed" | "camera.identity_changed" | "storage.low" | "motion";
+            kind?: "camera.online" | "camera.offline" | "camera.address_changed" | "camera.identity_changed" | "storage.low" | "disk.failing" | "disk.failed" | "motion" | "camera.degraded";
             /**
              * Format: date-time
              * @description When it happened or began
@@ -2555,7 +2951,7 @@ export interface components {
              * @description When it ended: equal to `at` for an instantaneous Event, absent while a lasting Event is still going on
              */
             end?: string;
-            /** @description motion: `source` = camera | frames; storage.low: `free_bytes`, `min_free_gb` */
+            /** @description motion: `source` = camera | frames; storage.low: `free_bytes`, `min_free_gb`; disk.failing and disk.failed: `device`, `evidence` (DiskEvidence); camera.degraded: `reasons` at its start */
             data?: {
                 [key: string]: unknown;
             };
@@ -2580,6 +2976,11 @@ export interface components {
             sub_stream?: string;
             /** @description Owner only. Keep this camera's footage this many days (0 = until space runs out); null puts it back on the hive-wide retention_days. The sweep applies it within five minutes; the plan's archive.retention_days_max caps it. Announced as capability camera.retention (from v0.1.9; v0.1.8 takes it without announcing it). */
             retention_days?: number | null;
+            /**
+             * @description Owner only. Motion sensitivity (#157, capability camera.sensitivity); anything else is 422 invalid
+             * @enum {string}
+             */
+            sensitivity?: "low" | "normal" | "high";
             credentials?: components["schemas"]["Credentials"];
         };
         LocalLogin: {
@@ -2615,12 +3016,330 @@ export interface components {
              * @enum {string}
              */
             state: "off" | "locked" | "unlocked";
+            autolock?: components["schemas"]["Autolock"];
+        };
+        /** @description The owner's automatic-lock settings (#147, ADR-0019 addendum); both off by default. */
+        AutolockSettings: {
+            /**
+             * @description Lock after this long without a playback, its sound, a new export or an export download by anyone; the unlock counts as activity.
+             * @enum {string}
+             */
+            after?: "off" | "1h" | "8h" | "24h" | "7d";
+            /**
+             * @description Lock this long after the owner's app reported that it left home (POST /v0/archive/encryption/presence); an at-home report within it cancels the lock.
+             * @enum {string}
+             */
+            away?: "off" | "10m" | "1h";
+        };
+        /** @description The automatic lock, in GET /v0/archive/encryption and its other answers for the owner only (Members would learn when the owner left home). Absent on a hive without the archive.autolock capability. */
+        Autolock: components["schemas"]["AutolockSettings"] & {
+            /**
+             * Format: date-time
+             * @description When the unlocked archive will lock itself if nothing changes; absent while no timer runs (both off, at home, or not unlocked). The hive checks twice a minute.
+             */
+            locks_at?: string;
+            /**
+             * @description Which timer locks first; present with locks_at.
+             * @enum {string}
+             */
+            reason?: "inactivity" | "away";
+        };
+        Presence: {
+            /** @description The app reaches the hive on the LAN (its transport decision is lan or address). Counts only when the request arrives on the hive's LAN listener from a private or link-local address (loopback refused), the rule of the local login: through the relay, a tunnel or a forwarded port the owner is away. */
+            at_home: boolean;
         };
         Passphrase: {
             /** @description 10-256 characters (the password policy); the current one when changing it */
             passphrase: string;
             /** @description POST /v0/archive/encryption/passphrase only */
             new_passphrase?: string;
+        };
+        /** @description The archive disk, every camera's footage and the forecast (#150, ADR-0024). The arithmetic is
+         *     the website calculator's (docs/dev/sizing.md, "The storage arithmetic"), on measured bytes.
+         *     disk, settings and forecast are the owner's; a member gets only the cameras the token covers
+         *     that still exist, each with id, name, bytes and days_held.
+         *      */
+        StorageOverview: {
+            cameras: components["schemas"]["CameraStorage"][];
+            disk?: components["schemas"]["StorageDisk"];
+            settings?: components["schemas"]["StorageSettings"];
+            forecast?: components["schemas"]["StorageForecast"];
+        };
+        /** @description One camera's footage in the index, main and sub stream together; only cameras with footage are listed. Fields after days_held are the owner's. */
+        CameraStorage: {
+            id: string;
+            /** @description Absent for the footage of a removed camera (owner only) */
+            name?: string;
+            /** Format: int64 */
+            bytes: number;
+            /** @description Newest minus oldest, in days */
+            days_held: number;
+            /**
+             * Format: date-time
+             * @description Start of the oldest segment
+             */
+            oldest?: string;
+            /**
+             * Format: date-time
+             * @description End of the newest segment
+             */
+            newest?: string;
+            /** @description Now minus the oldest segment's start, in days: what the age rule compares with the retention */
+            oldest_age_days?: number;
+            /**
+             * Format: int64
+             * @description Bytes of the segments that started in the last 24 hours over the time since the first of them (a camera that resumed after a gap is not diluted); rounded up
+             */
+            bytes_per_day_24h?: number;
+            /**
+             * Format: int64
+             * @description The same over the last 7 days
+             */
+            bytes_per_day_7d?: number;
+            /** @description The days retention keeps (the camera's own or the hive's, licence cap applied); 0 = until space runs out */
+            retention_days?: number;
+            /** @description The camera follows the hive-wide retention_days (no retention of its own) */
+            follows_hive?: boolean;
+            /** @description What the camera will hold once the settings converge; less than retention_days when the disk runs out first */
+            effective_days?: number;
+        };
+        StorageDisk: {
+            /**
+             * Format: int64
+             * @description Size of the archive's volume
+             */
+            total_bytes: number;
+            /**
+             * Format: int64
+             * @description Footage in the index
+             */
+            archive_bytes: number;
+            /**
+             * Format: int64
+             * @description Exports kept on the hive
+             */
+            export_bytes: number;
+            /**
+             * Format: int64
+             * @description Available to the hive (Bavail), as the space rule measures it
+             */
+            free_bytes: number;
+            health?: components["schemas"]["DiskHealth"];
+        };
+        /** @description The archive disk's last health check (#155, ADR-0024 §6), at start and every 30 minutes. Owner only. */
+        DiskHealth: {
+            /**
+             * @description unknown: nothing could be read (no smartctl, no kernel log, not Linux); failing: replace the disk soon; failed: the archive cannot be written and recording has stopped
+             * @enum {string}
+             */
+            state: "unknown" | "ok" | "failing" | "failed";
+            /**
+             * Format: date-time
+             * @description Absent before the first check
+             */
+            checked_at?: string;
+            /** @description The whole disk the archive is on, e.g. /dev/sdb */
+            device?: string;
+            /** @description From SMART, when it reports one */
+            temperature_c?: number;
+            evidence: components["schemas"]["DiskEvidence"][];
+        };
+        DiskEvidence: {
+            /** @enum {string} */
+            signal: "smart" | "kernel" | "writes" | "probe";
+            /** @description One line in English for the owner and the logs */
+            detail: string;
+            /** @description smart: passed, reallocated_sectors, pending_sectors, offline_uncorrectable, reported_uncorrectable, percentage_used, media_errors, critical_warning; kernel: io_errors; writes: eio, read_only, enospc */
+            values?: {
+                [key: string]: number;
+            };
+        };
+        /** @description The last `hive move-data` (#155), as the command reports it while it runs and after it finished. */
+        DataMove: {
+            /**
+             * @description none: no move was started from this data directory; copying: the hive answers but does not record; switching (the new directory's note): everything is copied and the service is being pointed here; failed: cancelled
+             * @enum {string}
+             */
+            state: "none" | "copying" | "switching" | "done" | "failed";
+            /** @description The hive runs as a systemd service on Linux, which `hive move-data` can point at a new directory */
+            supported: boolean;
+            /** @description The data directory the hive runs from */
+            data_dir?: string;
+            /** @description archive_dir of hive.yaml; may be outside the data directory */
+            archive_dir?: string;
+            /** @description The files to save first by hand, hardest to replace first, where they really are (hive.yaml is in /etc/camhive on a default Linux install) */
+            files: {
+                name: string;
+                path: string;
+            }[];
+            /** @description Segments the old disk could not read; left behind */
+            unreadable_segments?: number;
+            /** Format: int64 */
+            unreadable_bytes?: number;
+            from?: string;
+            to?: string;
+            /** @description What is being copied: hive.key, cloud.json, hive.yaml, archive-key, hive.db, exports, archive, index, service */
+            step?: string;
+            /** Format: int64 */
+            copied_bytes?: number;
+            /**
+             * Format: int64
+             * @description Bytes the move will copy in all
+             */
+            planned_bytes?: number;
+            /** @description Segments that did not fit on the new disk; they stay on the old one */
+            skipped_segments?: number;
+            /** Format: int64 */
+            skipped_bytes?: number;
+            /**
+             * Format: date-time
+             * @description The start of the newest footage that did not fit
+             */
+            skipped_newest?: string;
+            /** Format: date-time */
+            started_at?: string;
+            /** Format: date-time */
+            updated_at?: string;
+            error?: string;
+        };
+        StorageSettings: {
+            /** @description Hive-wide retention in days; 0 = until space runs out */
+            retention_days: number;
+            /** @description Free space the space rule keeps, in GiB; 0 (set by hand) turns the rule off */
+            min_free_gb: number;
+            /** @description The exports' share of the disk, in GiB; set in hive.yaml only */
+            export_max_gb: number;
+            /** @description The licence's cap on every retention (archive.retention_days_max); absent when none */
+            retention_days_max?: number;
+        };
+        StorageForecast: {
+            /**
+             * Format: int64
+             * @description Every camera's rate, the larger of its two windows; 0 when nothing is recorded
+             */
+            bytes_per_day: number;
+            /**
+             * Format: int64
+             * @description archive + exports + free - min_free_gb - export_max_gb: what the archive may fill
+             */
+            capacity_bytes: number;
+            /** @description Whole days capacity_bytes holds at bytes_per_day */
+            disk_days: number;
+            /** @description How far back the space rule lets footage reach; absent when retention is met */
+            horizon_days?: number;
+            /**
+             * Format: int64
+             * @description Space retention needs at these rates, the reserve included; absent when a recording camera keeps footage without limit
+             */
+            needed_bytes?: number;
+            /** @description Whole days until the space rule starts deleting, counting only cameras still short of their retention (0: within a day); absent when retention is met or the growth stops first */
+            fills_in_days?: number;
+            retention_met: boolean;
+            /** @description The last retention sweep deleted footage for space or could not reach the floor */
+            deleting_for_space: boolean;
+        };
+        /** @description An absent field keeps its value. */
+        StoragePatch: {
+            /** @description 0 = until space runs out */
+            retention_days?: number;
+            /** @description GiB; smaller than the disk. 0 (no space rule) only by hand in hive.yaml */
+            min_free_gb?: number;
+        };
+        /**
+         * @description Why a camera is degraded (#163): bitrate_drop, a stream sent less than 60 % of its usual bitrate at this clock hour over the last hour (usual: the same hour of the last 7 days, from 3 days of history); frame_loss, more than 30 s of footage missing in the last hour (offline time and the hive's own downtime excluded), or segments late on 3 checks in a row while online; reconnects, 4 or more in the last hour; clock_drift, the ONVIF camera's clock off by more than 30 s at the last reading (every 6 h); offline_pattern, offline 5 minutes or more in the same hour on 3 of the last 7 days; night_picture, a night hour below 60 % of the camera's earlier nights and 25 % of its day (the IR illuminator), cleared by day; stream_changed, codec or resolution changed in the last 24 h without the owner
+         * @enum {string}
+         */
+        CareReason: "bitrate_drop" | "frame_loss" | "reconnects" | "clock_drift" | "offline_pattern" | "night_picture" | "stream_changed";
+        CareSummary: {
+            degraded: boolean;
+            reasons: components["schemas"]["CareReason"][];
+        };
+        VideoTrack: {
+            /** @example H264 */
+            codec?: string;
+            /** @description 0: not known */
+            width?: number;
+            height?: number;
+        };
+        /** @description What camera care (#163) says about a camera, checked every 5 minutes. Bitrate, missing footage and reconnects cover the last hour; the clock and a stream change are single readings; the offline pattern covers a week. Each reason clears only past a level of its own, so it does not flap. One degraded episode is one camera.degraded Event, ended by camera.recovered. */
+        CameraCare: {
+            camera: string;
+            /**
+             * Format: date-time
+             * @description null before the first check (a few minutes after the hive starts)
+             */
+            checked_at: string | null;
+            degraded: boolean;
+            /**
+             * Format: date-time
+             * @description The episode's start; absent while not degraded
+             */
+            since?: string;
+            reasons: {
+                reason: components["schemas"]["CareReason"];
+                /**
+                 * @description Plain-language advice in English; the app shows its own translation by reason
+                 * @example Check the cable or the PoE budget.
+                 */
+                suggestion: string;
+            }[];
+            signals: {
+                streams: {
+                    stream?: string;
+                    /** @description 0: under half an hour of footage in the last hour */
+                    last_hour_kbps?: number;
+                    /** @description Median of the same clock hour and the hours beside it on the last 7 days; 0: fewer than 3 days of history */
+                    usual_kbps?: number;
+                    /** @description Median of the day hours; 0: not known yet */
+                    day_kbps?: number;
+                    night?: boolean;
+                }[];
+                /** @description Footage of the main stream missing in the last hour; time the camera was offline and time before the hive or its engine last started excluded */
+                missing_s: number;
+                /** @description How long the next segment is overdue while the camera is online; a reason after 3 checks in a row, not while storage.low is open */
+                late_s: number;
+                reconnects_hour: number;
+                /** @description Counted since the hive started, at most 24 hours back */
+                reconnects_24h: number;
+                /** @description The camera's clock minus the hive's, read every 6 hours from ONVIF cameras; null: not read */
+                clock_drift_s: number | null;
+                /** Format: date-time */
+                clock_checked_at: string | null;
+                /** @description The last 7 local days, today last */
+                offline_minutes: {
+                    /** Format: date */
+                    day?: string;
+                    minutes?: number;
+                }[];
+                /** @description Local hours of day of the offline pattern */
+                pattern_hours: number[];
+                stream_change: {
+                    stream?: string;
+                    /** Format: date-time */
+                    at?: string;
+                    from?: components["schemas"]["VideoTrack"];
+                    to?: components["schemas"]["VideoTrack"];
+                } | null;
+            };
+            /** @description Where each signal becomes a reason and where it clears */
+            thresholds: {
+                bitrate_drop?: number;
+                bitrate_ok?: number;
+                night_picture?: number;
+                night_ok?: number;
+                missing_s?: number;
+                missing_ok_s?: number;
+                reconnects?: number;
+                reconnects_ok?: number;
+                clock_drift_s?: number;
+                clock_every_h?: number;
+                pattern_days?: number;
+                pattern_minutes?: number;
+                stream_changed_h?: number;
+                baseline_days?: number;
+                baseline_min_days?: number;
+                late_checks?: number;
+            };
         };
     };
     responses: {

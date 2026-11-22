@@ -1,9 +1,10 @@
 import { useState, type FormEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { CamhiveError, unwrapHive, type HiveCamera, type HiveClient, type hiveComponents } from "@camhive/api";
+import { CamhiveError, unwrapHive, type CameraHealth, type HiveCamera, type HiveClient, type hiveComponents } from "@camhive/api";
 import { errorMessage } from "@/lib/errors";
 import { Field } from "@/components/Field";
+import { CareBadge } from "@/components/CameraCare";
 import { useHiveCapability, type HiveInfo } from "@/lib/capabilities";
 import { refusedOptional, subStreamChange, subStreamOf } from "@/lib/streams";
 import { MAX_RETENTION_DAYS, retentionChange, retentionOf, type Retention } from "@/lib/retention";
@@ -59,7 +60,7 @@ export function useCameraActions(camera: HiveCamera, client: HiveClient | null, 
 }
 
 /** One camera in the list layout: name (opens it), source, health; management for the owner. */
-export function CameraRow({ hive, camera, online, client, editable, onOpen, onRecordings }: { hive: HiveInfo; camera: HiveCamera; online: boolean | undefined; client: HiveClient | null; editable: boolean; onOpen: () => void; onRecordings: () => void }) {
+export function CameraRow({ hive, camera, online, health, client, editable, onOpen, onRecordings }: { hive: HiveInfo; camera: HiveCamera; online: boolean | undefined; health?: CameraHealth; client: HiveClient | null; editable: boolean; onOpen: () => void; onRecordings: () => void }) {
   const { t } = useTranslation();
   const { editing, setEditing, error, mismatch, replace, patch, remove } = useCameraActions(camera, client);
   const main = camera.streams?.main;
@@ -70,11 +71,12 @@ export function CameraRow({ hive, camera, online, client, editable, onOpen, onRe
           <p className="font-medium"><button type="button" className="hover:underline underline-offset-4 text-left" aria-label={t("live.open", { name: camera.name })} onClick={onOpen}>{camera.name}</button> {camera.group && <span className="muted text-sm">· {camera.group}</span>}</p>
           <p className="text-xs muted">{camera.source.kind} · {camera.source.address}{main?.Codec ? ` · ${main.Codec}` : ""}{main?.Width ? ` ${main.Width}×${main.Height}` : ""}</p>
         </div>
-        <div className="flex items-center gap-3 text-sm">
+        <div className="flex flex-wrap items-center gap-3 text-sm">
           <button type="button" className="btn btn-secondary btn-sm !min-h-11 min-w-11 gap-1.5" aria-label={t("live.recordingsOf", { name: camera.name })} onClick={onRecordings}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5M12 7v5l3 2" /></svg>
             {t("live.recordings")}
           </button>
+          <CareBadge health={health} />
           <span className={!camera.enabled || !online ? "badge" : "badge badge-success"} data-testid="camera-status"><span className="dot" aria-hidden="true" />{!camera.enabled ? t("live.disabled") : online === undefined ? "…" : online ? t("hives.statusOnline") : t("hives.statusOffline")}</span>
           {editable && (
             <>
@@ -102,6 +104,9 @@ export function CameraEditForm({ hive, camera, onSubmit }: { hive: HiveInfo; cam
   const retentionEditable = useHiveCapability(hive, "camera.retention").has;
   const [retention, setRetention] = useState<Retention>(retentionOf(camera));
   const [retentionInvalid, setRetentionInvalid] = useState(false);
+  // #157: motion sensitivity, on hives that announce it.
+  const sensitivityEditable = useHiveCapability(hive, "camera.sensitivity").has;
+  const [sensitivity, setSensitivity] = useState<Sensitivity>(camera.sensitivity ?? "normal");
   const [name, setName] = useState(camera.name);
   const [group, setGroup] = useState(camera.group ?? "");
   const [creds, setCreds] = useState<Creds>({ username: camera.credentials?.username ?? "", password: "" });
@@ -115,6 +120,7 @@ export function CameraEditForm({ hive, camera, onSubmit }: { hive: HiveInfo; cam
     setRetentionInvalid(kept === "invalid");
     if (subbed === "invalid" || kept === "invalid") return;
     const p: hiveComponents["schemas"]["CameraPatch"] = { name, group, record_audio: recordAudio, ...subbed, ...kept };
+    if (sensitivityEditable && sensitivity !== (camera.sensitivity ?? "normal")) p.sensitivity = sensitivity;
     if (creds.password) p.credentials = creds;
     if (host.trim() && host.trim() !== hostOf(camera.source.address)) p.host = host.trim();
     void onSubmit(p);
@@ -129,6 +135,7 @@ export function CameraEditForm({ hive, camera, onSubmit }: { hive: HiveInfo; cam
       <CameraIdentity camera={camera} />
       {subEditable && <div className="sm:col-span-2"><SubStreamField name={`sub-${camera.id}`} value={sub} onChange={setSub} invalid={invalid} /></div>}
       {retentionEditable && <RetentionField name={`retention-${camera.id}`} value={retention} onChange={setRetention} invalid={retentionInvalid} />}
+      {sensitivityEditable && <SensitivityField name={`sensitivity-${camera.id}`} value={sensitivity} onChange={setSensitivity} calmedSince={camera.motion_calmed_since} />}
       <label className="sm:col-span-2 flex items-start gap-2 text-sm mb-3">
         <input type="checkbox" className="mt-1" checked={recordAudio} onChange={(e) => setRecordAudio(e.target.checked)} aria-describedby={`audio-hint-${camera.id}`} />
         <span>{t("cameras.recordAudio")}<span id={`audio-hint-${camera.id}`} className="block muted text-xs">{t("cameras.recordAudioHint")}</span></span>
@@ -310,6 +317,24 @@ function SubStreamField({ name, value, onChange, invalid }: { name: string; valu
         aria-describedby={invalid ? `${name}-hint ${name}-error` : `${name}-hint`} value={value} onChange={(e) => onChange(e.target.value)} />
       {invalid && <p id={`${name}-error`} role="alert" className="error text-sm -mt-3 mb-3">{t("cameras.streamUrlInvalid")}</p>}
     </>
+  );
+}
+
+type Sensitivity = NonNullable<HiveCamera["sensitivity"]>;
+const SENSITIVITIES: Sensitivity[] = ["low", "normal", "high"];
+
+/** Motion sensitivity (#157) and, while the hive has calmed the camera, since when. */
+function SensitivityField({ name, value, onChange, calmedSince }: { name: string; value: Sensitivity; onChange: (s: Sensitivity) => void; calmedSince?: string }) {
+  const { t, i18n } = useTranslation();
+  return (
+    <div className="sm:col-span-2 mb-4">
+      <label className="block mb-1 text-sm font-medium" htmlFor={name}>{t("cameras.sensitivity")}</label>
+      <select id={name} className="input sm:!w-1/2" value={value} aria-describedby={`${name}-hint`} onChange={(e) => onChange(e.target.value as Sensitivity)}>
+        {SENSITIVITIES.map((s) => <option key={s} value={s}>{t(`cameras.sensitivityLevels.${s}`)}</option>)}
+      </select>
+      <p id={`${name}-hint`} className="muted text-xs mt-1">{t("cameras.sensitivityHint")}</p>
+      {calmedSince && <p className="text-sm mt-1" role="status">{t("cameras.calmedSince", { time: new Date(calmedSince).toLocaleTimeString(i18n.language, { hour: "2-digit", minute: "2-digit" }) })}</p>}
+    </div>
   );
 }
 

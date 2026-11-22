@@ -53,6 +53,9 @@ type Deps struct {
 	HTTP   *http.Client // for the engine's WHEP endpoint; default 15 s timeout
 	Logger *slog.Logger
 	Now    func() time.Time
+	// AtHome says whether someone is at home (#157, archivekey.Autolock):
+	// motion starts are then sent quiet. Nil: never.
+	AtHome func() bool
 }
 
 // Agent routes commands and produces events.

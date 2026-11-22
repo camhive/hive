@@ -4,11 +4,13 @@
 //	hive install | uninstall | start | stop | status   manage the OS service
 //	hive run                                          run in the foreground
 //	hive diag                                         write a diagnostic bundle
+//	hive move-data <new-dir> | --cancel               move the data to a new disk (#155)
 //	hive version                                      this binary and the running hive
 //	hive --version                                    this binary, one line
 //
 // Files live in the OS-conventional data directory (see hiveconfig), or under
-// CAMHIVE_DATA_DIR when set; the service is installed with that environment.
+// CAMHIVE_DATA_DIR when set; the service is installed with that environment,
+// and commands run without it use the installed service's (Linux).
 package main
 
 import (
@@ -32,6 +34,7 @@ import (
 	"github.com/camhive/hive/internal/hiveconfig"
 	"github.com/camhive/hive/internal/hivetls"
 	"github.com/camhive/hive/internal/logging"
+	"github.com/camhive/hive/internal/recordcheck"
 	"github.com/camhive/hive/internal/update/journal"
 	"github.com/camhive/hive/internal/version"
 )
@@ -53,6 +56,11 @@ func run(args []string, stdout, stderr *os.File) int {
 	}
 
 	paths := hiveconfig.DefaultPaths()
+	if os.Getenv("CAMHIVE_DATA_DIR") == "" && cmd != "run" {
+		if dir := unitDataDir(systemdUnit); dir != "" {
+			_ = os.Setenv("CAMHIVE_DATA_DIR", dir) // sudo drops it; a reinstall keeps it
+		}
+	}
 	if dir := os.Getenv("CAMHIVE_DATA_DIR"); dir != "" {
 		paths = paths.WithDataDir(dir)
 	}
@@ -83,7 +91,7 @@ func run(args []string, stdout, stderr *os.File) int {
 		fmt.Fprintf(stdout, "%s: %s ok\n", serviceName, cmd)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "unknown command %q\nusage: hive [run|claim|install|uninstall|start|stop|restart|status|update|diag|local-login|version|--version]\n", cmd)
+		fmt.Fprintf(stderr, "unknown command %q\nusage: hive [run|claim|install|uninstall|start|stop|restart|status|update|diag|local-login|move-data|version|--version]\n", cmd)
 		return 2
 	}
 }
@@ -121,6 +129,8 @@ func standalone(cmd string, args []string, paths hiveconfig.Paths, stdout, stder
 		return requestUpdate(journal.DefaultDir(), stdout, stderr), true
 	case "local-login":
 		return runLocalLogin(paths, args[1:], os.Stdin, stdout, stderr), true
+	case "move-data":
+		return runMoveData(paths, args[1:], stdout, stderr), true
 	case "version":
 		reportVersion(context.Background(), stdout, stderr, version.Current(), paths)
 		return 0, true
@@ -221,10 +231,12 @@ func (p *program) serve(ctx context.Context, app *hiveapp.App, parts *runtimePar
 				log.Error("ingest stopped", "err", err)
 			}
 		}()
-		go parts.index.Run(ctx, parts.archive, time.Minute)
-		go sealLoop(ctx, parts.vault, parts.index, parts.archive, parts.exports, log.With("component", "archivekey"))
+		go parts.index.Run(ctx, parts.archive, recordcheck.IndexInterval)
+		go sealLoop(ctx, parts.vault, parts.index, parts.archive, parts.exports, parts.disk.RecordWrite, log.With("component", "archivekey"))
+		go parts.disk.Run(ctx) // #155: at start and every 30 minutes
 		go parts.sweeper.Run(ctx, 5*time.Minute)
 		go parts.health.Run(ctx)
+		go parts.care.Run(ctx, careEvery)
 		go parts.locator.Run(ctx, time.Minute)
 		motionCtx, stopMotion := context.WithCancel(ctx)
 		motionDone := make(chan struct{})
@@ -232,6 +244,7 @@ func (p *program) serve(ctx context.Context, app *hiveapp.App, parts *runtimePar
 		defer func() { stopMotion(); <-motionDone }() // it ends open episodes before the store closes
 		go parts.cameras.Run(ctx)
 	}
+	go hiveapp.RunAutolock(ctx, parts.deps, autolockEvery) // #147: works without the video engine too
 	go reportUpdates(ctx, journal.DefaultDir(), parts.store, parts.agent, log)
 	if err := app.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		log.Error("hive exited", "err", err)

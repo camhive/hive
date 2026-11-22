@@ -126,15 +126,16 @@ const AnalysisVersion = 2
 // (mu): both rewrite rows from the files, and a row Seal points at a sealed
 // file must not be overwritten by a reconcile that listed the plain one.
 type Index struct {
-	repo *store.Segments
-	log  *slog.Logger
-	open SegmentOpener
-	mu   sync.Mutex
+	repo   *store.Segments
+	log    *slog.Logger
+	open   SegmentOpener
+	failed func(error)
+	mu     sync.Mutex
 }
 
 // NewIndex creates an Index backed by s.
 func NewIndex(s *store.Store, opts ...Option) *Index {
-	idx := &Index{repo: s.Segments(), log: slog.New(slog.DiscardHandler), open: OpenPlain}
+	idx := &Index{repo: s.Segments(), log: slog.New(slog.DiscardHandler), open: OpenPlain, failed: func(error) {}}
 	for _, o := range opts {
 		o(idx)
 	}
@@ -146,6 +147,10 @@ type Option func(*Index)
 
 // WithLogger sets the logger.
 func WithLogger(l *slog.Logger) Option { return func(i *Index) { i.log = l } }
+
+// WithFailed is told every reconcile of Run that failed: the disk's
+// health counts the failed writes among them (#155).
+func WithFailed(fn func(error)) Option { return func(i *Index) { i.failed = fn } }
 
 // WithOpener sets how segment files are read to fill rows; the default
 // reads plain files only. The hive passes the archive key's (ADR-0019).
@@ -236,6 +241,7 @@ func (i *Index) Run(ctx context.Context, root string, interval time.Duration) {
 	for {
 		if rep, err := i.Reconcile(ctx, root); err != nil {
 			i.log.Warn("archive reconcile", "err", err)
+			i.failed(err)
 		} else if rep.Added+rep.Updated+rep.Removed > 0 {
 			i.log.Info("archive reconciled", "added", rep.Added, "updated", rep.Updated, "removed", rep.Removed)
 		}

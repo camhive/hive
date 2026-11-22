@@ -78,6 +78,8 @@ import type { paths as hivePaths, components as hiveComponents } from "./hive-sc
 export type { hivePaths, hiveComponents };
 export type HiveCamera = hiveComponents["schemas"]["Camera"];
 export type CameraHealth = hiveComponents["schemas"]["CameraHealth"];
+export type CameraCare = hiveComponents["schemas"]["CameraCare"];
+export type CareReason = hiveComponents["schemas"]["CareReason"];
 export type HiveApiError = hiveComponents["schemas"]["Error"];
 
 export interface HiveClientOptions {

@@ -36,7 +36,7 @@ func (a *api) cameraHealth(w http.ResponseWriter, r *http.Request) {
 	if h.Camera == "" {
 		h = health.CameraHealth{Camera: id, Streams: map[string]health.StreamHealth{}}
 	}
-	writeJSON(w, http.StatusOK, h)
+	writeJSON(w, http.StatusOK, a.withCare(h))
 }
 
 // healthOverview lists the health of every camera the token may view.
@@ -49,7 +49,7 @@ func (a *api) healthOverview(w http.ResponseWriter, r *http.Request) {
 	out := make([]health.CameraHealth, 0, len(all))
 	for _, h := range all {
 		if claims.Allows(h.Camera, auth.ActionLive) {
-			out = append(out, h)
+			out = append(out, a.withCare(h))
 		}
 	}
 	writeJSON(w, http.StatusOK, out)

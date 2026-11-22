@@ -226,6 +226,7 @@ func (a *api) play(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	a.readingFootage()
 	body, err := a.d.Playback(r.Context(), export.Request{Camera: id, Stream: stream, Start: start, Duration: span, Owner: claimsFrom(r).Account})
 	if playbackFailed(w, err) {
 		return
@@ -270,6 +271,7 @@ func (a *api) audio(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid", "audio spans are at most 60 seconds")
 		return
 	}
+	a.readingFootage()
 	body, err := a.d.Playback(r.Context(), export.Request{Camera: id, Stream: stream, Start: start, Duration: span, Owner: claimsFrom(r).Account})
 	if playbackFailed(w, err) {
 		return
@@ -356,6 +358,7 @@ func (a *api) createExport(w http.ResponseWriter, r *http.Request) {
 		a.internal(w, err)
 		return
 	}
+	a.readingFootage()
 	writeJSON(w, http.StatusAccepted, toExportView(job))
 }
 
@@ -418,6 +421,7 @@ func (a *api) exportFile(w http.ResponseWriter, r *http.Request) {
 		a.internal(w, err)
 		return
 	}
+	a.readingFootage()
 	defer func() { _ = f.Close() }()
 	w.Header().Set("Content-Type", "video/mp4")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+job.FileName+`"`)

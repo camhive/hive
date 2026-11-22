@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"fmt"
+	"math"
+	"strings"
 	"time"
 )
 
@@ -91,6 +93,70 @@ func (r *Segments) Usage(ctx context.Context) (Usage, error) {
 	return u, err
 }
 
+// CameraBytes is one camera's footage in the index, both streams
+// together (#150): what the storage overview and forecast read.
+type CameraBytes struct {
+	Camera   string
+	Bytes    int64
+	Oldest   time.Time // start of the oldest segment
+	Newest   time.Time // end of the newest segment, to the millisecond
+	Since24h int64     // bytes of segments that started at or after the first time given
+	Since7d  int64     // and at or after the second
+	First24h time.Time // start of the first segment at or after the first time; zero when none
+	First7d  time.Time // and at or after the second
+}
+
+// ByCamera sums the index per camera, sorted by camera id.
+func (r *Segments) ByCamera(ctx context.Context, since24h, since7d time.Time) ([]CameraBytes, error) {
+	rows, err := r.s.db.QueryContext(ctx, `
+		SELECT camera, SUM(bytes), MIN(start_utc), MAX(julianday(start_utc) + duration_ms/86400000.0),
+		  SUM(CASE WHEN start_utc >= ?1 THEN bytes ELSE 0 END), SUM(CASE WHEN start_utc >= ?2 THEN bytes ELSE 0 END),
+		  COALESCE(MIN(CASE WHEN start_utc >= ?1 THEN start_utc END), ''), COALESCE(MIN(CASE WHEN start_utc >= ?2 THEN start_utc END), '')
+		FROM segment GROUP BY camera ORDER BY camera`, ts(since24h), ts(since7d))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []CameraBytes
+	for rows.Next() {
+		var (
+			c                     CameraBytes
+			oldest, first, first7 string
+			newest                float64 // Julian day
+		)
+		if err := rows.Scan(&c.Camera, &c.Bytes, &oldest, &newest, &c.Since24h, &c.Since7d, &first, &first7); err != nil {
+			return nil, err
+		}
+		if c.Oldest, err = parseStart(oldest); err != nil {
+			return nil, err
+		}
+		if c.First24h, err = parseStart(first); err != nil {
+			return nil, err
+		}
+		if c.First7d, err = parseStart(first7); err != nil {
+			return nil, err
+		}
+		c.Newest = time.UnixMilli(int64(math.Round((newest - julianUnixEpoch) * 86_400_000))).UTC()
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// parseStart reads a stored segment start; "" is the zero time.
+func parseStart(s string) (time.Time, error) {
+	if s == "" {
+		return time.Time{}, nil
+	}
+	t, err := time.Parse("2006-01-02T15:04:05.000000Z", s)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("store: segment start %q: %w", s, err)
+	}
+	return t, nil
+}
+
+// julianUnixEpoch is 1970-01-01T00:00:00Z as a Julian day.
+const julianUnixEpoch = 2440587.5
+
 // nullText stores an empty value as NULL.
 func nullText(b []byte) any {
 	if len(b) == 0 {
@@ -161,6 +227,53 @@ func (r *Segments) Deletions(ctx context.Context, limit int) ([]Deletion, error)
 		d.DeletedAt, _ = time.Parse("2006-01-02T15:04:05.000000Z", at)
 		d.Start, _ = time.Parse("2006-01-02T15:04:05.000000Z", start)
 		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// Rebase points every row under the directory from at the same place under
+// to (#155: the archive moved to a new disk) and says how many it changed.
+func (r *Segments) Rebase(ctx context.Context, from, to string) (int64, error) {
+	from = strings.TrimRight(from, `/\`)
+	to = strings.TrimRight(to, `/\`)
+	res, err := r.s.db.ExecContext(ctx, `UPDATE segment SET path = ?2 || substr(path, length(?1) + 1)
+		WHERE substr(path, 1, length(?1)) = ?1 AND substr(path, length(?1) + 1, 1) IN ('/', '\')`, from, to)
+	if err != nil {
+		return 0, fmt.Errorf("store: rebase segments: %w", err)
+	}
+	return res.RowsAffected()
+}
+
+// SegmentSize is what camera care (#163) reads of a segment.
+type SegmentSize struct {
+	Start    time.Time
+	Duration time.Duration
+	Bytes    int64
+}
+
+// Sizes returns start, length and size of a stream's segments that start
+// in [from, to), oldest first: three columns over the primary key, so a
+// week of segments stays cheap to read every few minutes.
+func (r *Segments) Sizes(ctx context.Context, camera, stream string, from, to time.Time) ([]SegmentSize, error) {
+	rows, err := r.s.db.QueryContext(ctx, `SELECT start_utc, duration_ms, bytes FROM segment
+		WHERE camera = ? AND stream = ? AND start_utc >= ? AND start_utc < ? ORDER BY start_utc`, camera, stream, ts(from), ts(to))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []SegmentSize
+	for rows.Next() {
+		var start string
+		var ms int64
+		var s SegmentSize
+		if err := rows.Scan(&start, &ms, &s.Bytes); err != nil {
+			return nil, err
+		}
+		if s.Start, err = parseStart(start); err != nil {
+			return nil, err
+		}
+		s.Duration = time.Duration(ms) * time.Millisecond
+		out = append(out, s)
 	}
 	return out, rows.Err()
 }

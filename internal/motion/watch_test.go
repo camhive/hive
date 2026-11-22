@@ -101,6 +101,25 @@ func TestTheWatcherTurnsTheCamerasOwnMotionIntoEvents(t *testing.T) {
 type reporter struct {
 	mu   sync.Mutex
 	live []bool
+	sens map[string]camera.Sensitivity
+}
+
+func (r *reporter) Sensitivity(cam string, s camera.Sensitivity) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.sens == nil {
+		r.sens = map[string]camera.Sensitivity{}
+	}
+	r.sens[cam] = s
+}
+
+func (r *reporter) Known([]string) {}
+
+func (r *reporter) sensitivity(cam string) (camera.Sensitivity, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s, ok := r.sens[cam]
+	return s, ok
 }
 
 func (r *reporter) CameraSource(_ string, live bool) {
@@ -150,3 +169,41 @@ func TestASubscriptionThatNeverMentionsMotionLeavesFramesOn(t *testing.T) {
 type fixedCameras []camera.Camera
 
 func (f fixedCameras) List(context.Context) ([]camera.Camera, error) { return f, nil }
+
+// #157: every camera's stored sensitivity reaches the hub, RTSP cameras
+// (frames only) included, and a change does after Notify.
+func TestTheWatcherPassesEachCamerasSensitivity(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	st, err := store.Open(ctx, filepath.Join(t.TempDir(), "hive.db"), make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	cam, _ := camera.New(camera.Spec{Name: "Plain", Source: camera.Source{Kind: camera.SourceRTSP, Address: "rtsp://127.0.0.1:1/x"}}, time.Now())
+	low := camera.SensitivityLow
+	cam, _ = cam.Update(camera.Patch{Sensitivity: &low}, time.Now())
+	_ = st.Cameras().Put(ctx, cam)
+	var r reporter
+	w := motion.NewWatcher(st.Cameras(), &r, motion.WatchOptions{})
+	go w.Run(ctx)
+	wait := func(want camera.Sensitivity) {
+		t.Helper()
+		for {
+			if s, ok := r.sensitivity(string(cam.ID)); ok && s == want {
+				return
+			}
+			select {
+			case <-ctx.Done():
+				t.Fatalf("sensitivity never became %v", want)
+			case <-time.After(5 * time.Millisecond):
+			}
+		}
+	}
+	wait(camera.SensitivityLow)
+	high := camera.SensitivityHigh
+	cam, _ = cam.Update(camera.Patch{Sensitivity: &high}, time.Now())
+	_ = st.Cameras().Put(ctx, cam)
+	w.Notify()
+	wait(camera.SensitivityHigh)
+}

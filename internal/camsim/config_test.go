@@ -164,3 +164,20 @@ func TestMotionScheduleIsStillThenMovingEachPeriod(t *testing.T) {
 		t.Error("a camera without a motion period never reports motion")
 	}
 }
+
+// A clip is the camera's test pattern encoded once at a fixed bitrate into
+// a raw stream with access unit delimiters, for a source that replays it
+// instead of encoding live (#142).
+func TestClipArgsEncodeTheTestPatternAtAFixedBitrate(t *testing.T) {
+	cam := testConfig().Cameras[0]
+	args := strings.Join(cam.ClipArgs(Sub, 500, 10*time.Second, "/tmp/sub.h264"), " ")
+	for _, want := range []string{"testsrc2=size=640x360:rate=15", "-t 10", "-c:v libx264", "-g 30",
+		"-b:v 500k", "-maxrate 500k", "h264_metadata=aud=insert", "-f h264", "-y /tmp/sub.h264"} {
+		if !strings.Contains(args, want) {
+			t.Errorf("clip args missing %q\n%s", want, args)
+		}
+	}
+	if strings.Contains(args, "-re") || strings.Contains(args, "rtsp") {
+		t.Errorf("a clip is encoded as fast as possible into a file\n%s", args)
+	}
+}

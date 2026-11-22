@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -228,7 +229,8 @@ func TestRunRestartsEngineAfterCrashAndReaddsSources(t *testing.T) {
 	eng := newFakeEngine()
 	st := &memStore{}
 	st.set(cam(t, "a", true, true))
-	ing := ingest.New(st, eng, ingest.Options{Interval: time.Hour, RestartBackoff: 10 * time.Millisecond})
+	var starts atomic.Int32 // camera care hears of every start (#163)
+	ing := ingest.New(st, eng, ingest.Options{Interval: time.Hour, RestartBackoff: 10 * time.Millisecond, OnStart: func(time.Time) { starts.Add(1) }})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -241,6 +243,9 @@ func TestRunRestartsEngineAfterCrashAndReaddsSources(t *testing.T) {
 	}
 	eng.crash()
 	waitUntil(t, func() bool { return eng.startCount() == 2 && len(eng.keys()) == 2 }, "restart and re-add")
+	if starts.Load() != 2 {
+		t.Fatalf("OnStart heard %d starts", starts.Load())
+	}
 
 	cancel()
 	if err := <-done; err != nil {

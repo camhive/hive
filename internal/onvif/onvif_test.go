@@ -159,6 +159,22 @@ func TestSetSystemDateAndTime(t *testing.T) {
 	}
 }
 
+// The camera's clock is read as UTC; a camera that wants credentials for
+// it gets them (camera care, #163, compares it with the hive's).
+func TestSystemDateAndTime(t *testing.T) {
+	for name, user := range map[string]string{"open": "", "with credentials": "admin"} {
+		srv, _ := mockCamera(t, func(c *camsim.Config) { c.Username, c.Password, c.ClockOffset = user, "secret", 45*time.Second })
+		c := onvif.NewClient(srv.URL+"/onvif/device_service", onvif.Credentials{Username: user, Password: "secret"})
+		got, err := c.SystemDateAndTime(ctx(t))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if drift := time.Until(got); got.Location() != time.UTC || drift < 43*time.Second || drift > 47*time.Second {
+			t.Fatalf("%s: camera time %v, drift %s, want about 45s in UTC", name, got, drift)
+		}
+	}
+}
+
 func TestDiscoverFindsTheMockByUnicastProbe(t *testing.T) {
 	cfg := camsim.Config{Cameras: []camsim.Camera{{Name: "one"}}, Host: "127.0.0.1", ONVIFPort: 18089}
 	c, cancel := context.WithCancel(context.Background())

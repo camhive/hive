@@ -1,5 +1,7 @@
 # Sharing
 
+*[Deutsch](de/sharing.md)*
+
 Sharing has two steps: a person becomes a **member** of your account, then you
 **grant** them cameras on a hive. Members never pay; the owner's plan covers
 everyone they share with.
@@ -62,7 +64,7 @@ get one notice and one e-mail for it again when its last three days begin.
 
 ## What members see
 
-On their home page your hive appears under *Shared with you*. They get live video
+On their home page your hive appears under *Shared with me*. They get live video
 and recordings for the granted cameras, and PTZ and Export if they are operators.
 They cannot add or change cameras or see your sharing, and the *Connection*
 tab shows them only how the app reaches the hive, without your sections

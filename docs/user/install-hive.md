@@ -1,5 +1,7 @@
 # Installing a hive
 
+*[Deutsch](de/install-hive.md)*
+
 A hive is one binary, `hive`, plus the video engine MediaMTX next to it. It
 runs as a system service, keeps its data in one directory and talks to the
 cloud only after you claim it.
@@ -67,6 +69,64 @@ Everything the hive owns is under the data directory: `hive.yaml`
 (configuration), `hive.key` (its identity, never share it), `hive.db`,
 `archive/`, `exports/`, `logs/hive.log`, `engine/` (MediaMTX config and log).
 
+### Replace the disk
+
+When the disk is failing (the app shows a banner, see
+[Troubleshooting](troubleshooting.md#the-disk-is-failing)), or simply full,
+move the hive to a new one. First copy these files from the data directory to
+another place by hand, in this order; they are small, and without them the
+hive cannot be restored:
+
+1. `hive.key`: the hive's identity
+2. `cloud.json`: its claim (with `hive.crt` and `cloud-ca.crt` beside it)
+3. `hive.yaml`: its settings (`/etc/camhive/hive.yaml` when the hive was
+   installed without `CAMHIVE_DATA_DIR`)
+4. `archive-key/`: the keyring; without it an encrypted archive is lost
+5. `hive.db`: cameras, the index, sharing and the activity log
+
+Then connect and mount the new disk (add it to `/etc/fstab`; ext4 or
+another Linux file system, not FAT, exFAT or NTFS) and run, with a plain
+directory name (letters, digits, `/ . - _`; no spaces, no shell characters
+such as `; & | $ * ?`):
+
+```bash
+sudo hive move-data /mnt/newdisk/camhive
+```
+
+The command refuses a directory on the disk being replaced. It restarts the
+hive so that it answers but does not record, copies and verifies (size and
+SHA-256, read back from the disk) the files above, `exports/` and then the
+footage, newest first, until the new disk would be 80 % full or reach the
+hive's free-space floor (`min_free_gb`); older footage stays on the old
+disk. A segment the old disk cannot read is left there and counted; the
+move goes on. While it copies, the app shows the hive and its recordings,
+and you can sign in and unlock the archive, but changes (cameras,
+settings, the local login, new exports) are refused with "The hive is
+moving to a new disk" until the move ends; `hive.db` is copied again at the
+end with the events and sign-ins of that time. Then it points the service at the new directory (a
+drop-in, `/etc/systemd/system/camhive-hive.service.d/data-dir.conf`),
+starts the hive there and waits until it answers; if it does not start,
+the old definition comes back and the hive runs from the old disk again.
+It prints what did not fit or could not be read and never deletes or
+changes anything on the old disk. `archive/` or `archive-key/` may be links
+to another disk: their targets are copied. The app's **Settings →
+Connection → Move to a new disk** shows the same steps and the progress.
+
+If the command is cut off (power, a full disk), run it again with the same
+directory: it goes on where it stopped and does not copy again what is
+already verified. Until it finishes the hive does not record; `hive status`
+says so. To give the move up and record from the old disk again (this
+works also when the service already points at the new directory; the
+service definition is put back as it was before the move):
+
+```bash
+sudo hive move-data --cancel
+```
+
+The guided move needs Linux with systemd (deb, rpm or `hive install`).
+Elsewhere, stop the service, copy the data directory by hand and install
+the service again with `CAMHIVE_DATA_DIR` set to the new place.
+
 ## Windows
 
 Unpack `hive_<version>_windows_amd64.zip` into `C:\Program Files\Camhive`
@@ -113,8 +173,10 @@ disk.
 | `hive diag` | Write a diagnostic bundle, see [Troubleshooting](troubleshooting.md) |
 | `hive version` | Version, commit and build date of this command, marked `(this binary)`, then the running hive's version; `hive --version` prints only the first line |
 | `hive update` | Ask `hive-updater` to install an available update now (needs root / Administrator); the same as Update now in the app |
+| `hive move-data <new-dir>` | Move the hive to a new disk (root; see [Replace the disk](#replace-the-disk)); `--cancel` gives an unfinished move up |
 
-With a custom data directory, prefix every command with
+With a custom data directory, a command run without `CAMHIVE_DATA_DIR` uses
+the one in the installed service definition (Linux); otherwise prefix it with
 `CAMHIVE_DATA_DIR=…`, or the command looks in the default location.
 
 ## Ports the hive uses

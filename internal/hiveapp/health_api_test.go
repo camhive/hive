@@ -28,7 +28,7 @@ func (f fakeHealth) All() []health.CameraHealth {
 	return out
 }
 
-func newHealthAPI(t *testing.T) (*apiFixture, camera.Camera, camera.Camera) {
+func newHealthAPI(t *testing.T, with ...func(*hiveapp.Deps)) (*apiFixture, camera.Camera, camera.Camera) {
 	t.Helper()
 	iss, _ := auth.NewIssuer("k1")
 	st, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "hive.db"), make([]byte, 32))
@@ -48,7 +48,11 @@ func newHealthAPI(t *testing.T) (*apiFixture, camera.Camera, camera.Camera) {
 		string(a.ID): {Camera: string(a.ID), Enabled: true, Online: true, Streams: map[string]health.StreamHealth{"main": {Stream: "main", Online: true, BitrateKbps: 1500, Tracks: []string{"H264"}}}},
 		string(b.ID): {Camera: string(b.ID), Enabled: true, Online: false, Streams: map[string]health.StreamHealth{"main": {Stream: "main", Online: false, LastError: "connection refused"}}},
 	}}
-	h := hiveapp.NewAPI(hiveapp.Deps{Store: st, Verifier: auth.NewVerifier("hv_1", auth.Keys{"k1": iss.PublicKey()}), Version: "test", Health: fh})
+	d := hiveapp.Deps{Store: st, Verifier: auth.NewVerifier("hv_1", auth.Keys{"k1": iss.PublicKey()}), Version: "test", Health: fh}
+	for _, w := range with {
+		w(&d)
+	}
+	h := hiveapp.NewAPI(d)
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 	return &apiFixture{srv: srv, iss: iss, st: st}, a, b

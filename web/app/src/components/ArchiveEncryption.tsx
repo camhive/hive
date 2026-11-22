@@ -14,6 +14,9 @@ import {
   START, enableStep, encryptionActions, encryptionError, encryptionKey, keyFileName, passphraseProblem, useArchiveEncryption,
   type EnableEvent, type EnableFlow, type Encryption, type EncryptionActions,
 } from "@/lib/archiveEncryption";
+import { AFTER_CHOICES, AWAY_CHOICES, locksIn, presenceOf, type AutolockSettings } from "@/lib/archiveAutolock";
+import { useReportPresence } from "@/lib/usePresence";
+import { useTransport } from "@/lib/useTransport";
 import { NeedsUpdate } from "@/components/NeedsUpdate";
 import { Field } from "@/components/Field";
 
@@ -41,9 +44,11 @@ export function EncryptionSettings({ hive }: { hive: Hive }) {
 
 function EncryptionPanel({ hive }: { hive: Hive }) {
   const { t } = useTranslation();
-  const { grant, access, localSession } = useGrant(hive);
+  const { grant, access, local, localSession } = useGrant(hive);
   const client = useHiveClient(hive, grant);
   const enc = useArchiveEncryption(hive, client);
+  const { decision, probing } = useTransport(hive);
+  useReportPresence(hive, client, presenceOf(local, decision, probing), true); // #147: only the owner opens this panel
   // Above every condition: a failed refetch must not reset the enable flow (ADR-0019 §4, the key file).
   const [flow, dispatch] = useReducer(enableStep, START);
   const err = access.error ?? enc.error;
@@ -75,6 +80,7 @@ export function EncryptionOwner({ hive, enc, actions, cloud, flow, dispatch }: O
       <p className="font-medium" data-testid="encryption-state">{t(`encryption.state.${enc.state}`)}</p>
       {!enc.sealing && <p role="alert" className="callout" data-testid="not-sealing">{t("encryption.notSealing")}</p>}
       <LockControl hive={hive} enc={enc} actions={actions} />
+      {cloud && <AutolockControl hive={hive} enc={enc} actions={actions} />}
       {cloud ? (
         <>
           <KeyFileButton hive={hive} actions={actions} />
@@ -223,6 +229,52 @@ function LockControl({ hive, enc, actions }: { hive: Hive; enc: Encryption; acti
       <Problem error={error} />
       <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => void attempt(async () => { store(await actions.lock()); })}>{t("encryption.lock")}</button>
     </div>
+  );
+}
+
+/** Re-renders every `ms`, for a countdown that reads the clock as it renders. */
+function useTick(ms: number): void {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((n) => n + 1), ms);
+    return () => clearInterval(id);
+  }, [ms]);
+}
+
+/**
+ * The automatic lock (#147): after inactivity, and when the owner leaves
+ * home; with a hive that has it and a session through Camhive.
+ */
+function AutolockControl({ hive, enc, actions }: { hive: Hive; enc: Encryption; actions: EncryptionActions }) {
+  const { t } = useTranslation();
+  const cap = useHiveCapability(hive, "archive.autolock");
+  const store = useStore(hive);
+  const { error, busy, attempt } = useAttempt();
+  useTick(30_000);
+  const a = enc.autolock;
+  if (!cap.has || !a) return null;
+  const set = (patch: AutolockSettings) => void attempt(async () => { store(await actions.autolock(patch)); });
+  const due = a.locks_at && enc.state === "unlocked" ? locksIn(a.locks_at) : null;
+  return (
+    <fieldset className="space-y-3" data-testid="autolock">
+      <legend className="font-medium mb-1">{t("encryption.autolockTitle")}</legend>
+      <p className="muted">{t("encryption.autolockHelp")}</p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block"><span className="block mb-1">{t("encryption.autolockAfter")}</span>
+          <select className="input" value={a.after} disabled={busy} onChange={(e) => set({ after: e.target.value as AutolockSettings["after"] })}>
+            {AFTER_CHOICES.map((c) => <option key={c} value={c}>{t(`encryption.autolockAfterChoice.${c}`)}</option>)}
+          </select>
+        </label>
+        <label className="block"><span className="block mb-1">{t("encryption.autolockAway")}</span>
+          <select className="input" value={a.away} disabled={busy} onChange={(e) => set({ away: e.target.value as AutolockSettings["away"] })}>
+            {AWAY_CHOICES.map((c) => <option key={c} value={c}>{t(`encryption.autolockAwayChoice.${c}`)}</option>)}
+          </select>
+        </label>
+      </div>
+      {a.away !== "off" && <p className="muted text-xs">{t("encryption.autolockAwayNote")}</p>}
+      {due && <p role="status" data-testid="locks-in">{t(`encryption.autolockLocksIn.${a.reason ?? "inactivity"}.${due.unit}`, { count: due.count })}</p>}
+      <Problem error={error} />
+    </fieldset>
   );
 }
 

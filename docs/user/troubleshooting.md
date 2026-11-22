@@ -1,14 +1,16 @@
 # Troubleshooting
 
+*[Deutsch](de/troubleshooting.md)*
+
 ## Messages in the app and what they mean
 
 Cloud (account, hives, sharing):
 
 | Message | Cause | What to do |
 |---|---|---|
-| Wrong e-mail or password / account locked | Ten failed sign-ins | Wait 15 minutes or reset the password |
-| Please confirm your e-mail | Code not entered yet | Use *Resend code* on the confirm page |
-| Unknown or expired code | Claim or confirmation code older than 10 minutes, or mistyped | Run `hive claim` again / request a new code |
+| Wrong e-mail or password / Too many attempts | Ten failed sign-ins | Wait 15 minutes or reset the password |
+| Confirm your e-mail first | Code not entered yet | Enter the code from the e-mail on the *Confirm e-mail* page. No e-mail, or the code expired: choose *Create account* again with the same e-mail address; an unconfirmed account gets a new code and the old one stops working |
+| Unknown or expired code | Hive claim code older than 10 minutes, e-mail confirmation code older than 15 minutes, or mistyped | Run `hive claim` again / for the e-mail, choose *Create account* again with the same address |
 | This hive is already claimed | The hive belongs to an account | Remove it there, delete `cloud.json`, claim again |
 | Your plan does not include this | A limit (hives, members, shares, sessions) | The box shows the number; upgrade or free a slot |
 | The hive did not answer | Hive offline or unreachable | See "Hive offline" below |
@@ -70,6 +72,33 @@ Live works and Archive says the hive did not answer:
 `listen tcp 127.0.0.1:16016: bind: address already in use` means another hive
 process is running, typically a foreground `hive run` next to the service.
 Stop one of them.
+
+## The disk is failing
+
+The hive checks the disk it records to when it starts and every 30 minutes.
+It reads SMART through `smartctl` (install `smartmontools`; a USB enclosure is
+asked again as SAT), the kernel's I/O errors on that disk
+(`journalctl -k`, else `dmesg`), its own and the video engine's failed writes
+and a small test write. Pending or uncorrectable sectors, 50 or more
+reallocated sectors, a failed SMART check, an NVMe drive past its rated
+endurance, kernel I/O errors or failed writes mean **failing**: the hive still
+records, the owner gets one notification ("storage" group) and a banner on the
+hive page with what it saw. When the test write fails because the disk
+cannot be written (an I/O error, or the file system remounted read-only),
+the state is **failed**: recording has stopped. A full disk is not a failing
+one; that is *storage low*.
+
+What to do: save `hive.key`, `cloud.json`, `hive.yaml`, `archive-key/` and
+`hive.db` from the data directory (the banner lists them with their full
+paths), then replace the disk with `sudo hive move-data <new-dir>` as in
+[Replace the disk](install-hive.md#replace-the-disk). The notification ends
+after the disk has looked healthy for a day.
+
+Without `smartctl` and without access to the kernel log the state is
+*unknown*, and so it is on file systems whose disk the hive cannot trace
+(btrfs subvolumes, ZFS, mergerfs, network shares); on Windows and macOS it
+is unknown unless the hive's own writes fail. A disk asleep at a check is
+not woken; it is asked again at the next one.
 
 ## Logs
 

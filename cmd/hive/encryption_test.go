@@ -97,14 +97,14 @@ func TestASealingPassRunsOnlyWhileEncryptionIsOn(t *testing.T) {
 	idx := archive.NewIndex(st, archive.WithOpener(vault.OpenSegment))
 	exports := export.NewManager(t.TempDir(), nil, st.Exports(), export.WithVault(vault))
 
-	sealOnce(ctx, vault, idx, root, exports, log)
+	sealOnce(ctx, vault, idx, root, exports, func(error) {}, log)
 	if sealed := countSealedIn(t, dir); sealed != 0 {
 		t.Fatalf("sealed %d with encryption off", sealed)
 	}
 	if err := vault.Enable(testPassphrase); err != nil {
 		t.Fatal(err)
 	}
-	sealOnce(ctx, vault, idx, root, exports, log)
+	sealOnce(ctx, vault, idx, root, exports, func(error) {}, log)
 	if sealed := countSealedIn(t, dir); sealed != 1 {
 		t.Fatalf("sealed %d, want the closed one (the newest is being written)", sealed)
 	}
@@ -123,4 +123,33 @@ func countSealedIn(t *testing.T, dir string) int {
 		}
 	}
 	return n
+}
+
+// #147: the owner's automatic-lock settings survive a restart.
+func TestTheAutomaticLockStartsWithTheStoredSettings(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(ctx, filepath.Join(t.TempDir(), "hive.db"), make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	log := slog.New(slog.DiscardHandler)
+	vault := archivekey.New(t.TempDir())
+	if s := openAutolock(ctx, st, vault, log).Settings(); s != (archivekey.AutolockSettings{}) {
+		t.Fatalf("fresh hive: %+v", s)
+	}
+	want := store.AutolockSettings{After: 24 * time.Hour, Away: 10 * time.Minute}
+	if err := st.Autolock().Set(ctx, want); err != nil {
+		t.Fatal(err)
+	}
+	if s := openAutolock(ctx, st, vault, log).Settings(); s != archivekey.AutolockSettings(want) {
+		t.Fatalf("after a restart: %+v, want %+v", s, want)
+	} // A value no choice names (written by hand, or by a newer version rolled
+	// back) is ignored: the app could not show it.
+	if err := st.Autolock().Set(ctx, store.AutolockSettings{After: 2 * time.Hour, Away: 10 * time.Minute}); err != nil {
+		t.Fatal(err)
+	}
+	if s := openAutolock(ctx, st, vault, log).Settings(); s != (archivekey.AutolockSettings{}) {
+		t.Fatalf("unknown stored value: %+v, want both off", s)
+	}
 }

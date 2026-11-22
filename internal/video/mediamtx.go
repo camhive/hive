@@ -189,11 +189,31 @@ func parseStatus(raw []byte) (Status, error) {
 		Tracks        []string `json:"tracks"`
 		Readers       []any    `json:"readers"`
 		BytesReceived int64    `json:"bytesReceived"`
+		Tracks2       []struct {
+			Codec string `json:"codec"`
+			Props struct {
+				Width  int `json:"width"`
+				Height int `json:"height"`
+			} `json:"codecProps"`
+		} `json:"tracks2"`
 	}
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return Status{}, fmt.Errorf("video: parse path status: %w", err)
 	}
-	return Status{Ready: p.Ready, Tracks: p.Tracks, Readers: len(p.Readers), BytesReceived: p.BytesReceived}, nil
+	st := Status{Ready: p.Ready, Tracks: p.Tracks, Readers: len(p.Readers), BytesReceived: p.BytesReceived}
+	for _, t := range p.Tracks2 {
+		if videoCodecs[t.Codec] {
+			st.Video = Track{Codec: t.Codec, Width: t.Props.Width, Height: t.Props.Height}
+			return st, nil
+		}
+	}
+	for _, name := range p.Tracks { // engines before tracks2
+		if videoCodecs[name] {
+			st.Video = Track{Codec: name}
+			break
+		}
+	}
+	return st, nil
 }
 
 func parseSegments(raw []byte) ([]Segment, error) {

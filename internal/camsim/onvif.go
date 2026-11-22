@@ -99,7 +99,7 @@ func newONVIFHandlerWithPTZ(cfg *Config, ptz *ptzLog) http.Handler {
 		case "GetDeviceInformation":
 			writeSOAP(w, http.StatusOK, deviceInformation(cfg))
 		case "GetSystemDateAndTime":
-			writeSOAP(w, http.StatusOK, systemDateAndTime(time.Now().UTC()))
+			writeSOAP(w, http.StatusOK, systemDateAndTime(time.Now().UTC().Add(cfg.ClockOffset)))
 		case "SetSystemDateAndTime":
 			writeSOAP(w, http.StatusOK, `<tds:SetSystemDateAndTimeResponse/>`)
 		case "GetCapabilities":

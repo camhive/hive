@@ -23,7 +23,7 @@ func Plans() []Plan {
 		}},
 		{ID: PlanPro, Name: "Pro", Entitlements: Set{
 			HivesMax: I(10), MembersMax: I(14), SharesMax: I(15), SessionsConcurrent: I(10), RemoteQuality: S("full"),
-			ExportRemotePerDay: I(Unlimited), ExportMaxMinutes: I(Unlimited), ExportAPI: B(true), NotifyChannels: S("all"), NotifyDevices: I(Unlimited),
+			ExportRemotePerDay: I(Unlimited), ExportMaxMinutes: I(Unlimited), ExportAPI: B(true), NotifyChannels: S("all"), NotifyDevices: I(20),
 			AnalyticsLevel: S("full"), PTZEnabled: B(true), RetentionDaysMax: I(Unlimited), UpdatesEarlyAccess: B(true), RemoteAccessEnabled: B(true),
 		}},
 	}

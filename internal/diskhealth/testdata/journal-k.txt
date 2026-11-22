@@ -1,0 +1,10 @@
+2026-11-21T22:10:01+01:00 nas kernel: usb 2-1: new SuperSpeed USB device number 3 using xhci_hcd
+2026-11-21T22:14:12+01:00 nas kernel: sd 2:0:0:0: [sdb] tag#0 FAILED Result: hostbyte=DID_OK driverbyte=DRIVER_OK cmd_age=3s
+2026-11-21T22:14:12+01:00 nas kernel: sd 2:0:0:0: [sdb] tag#0 Sense Key : Medium Error [current]
+2026-11-21T22:14:12+01:00 nas kernel: blk_update_request: I/O error, dev sdb, sector 2048 op 0x1:(WRITE) flags 0x800 phys_seg 1 prio class 0
+2026-11-21T22:14:12+01:00 nas kernel: I/O error, dev sdb, sector 4096 op 0x0:(READ) flags 0x80700 phys_seg 1 prio class 0
+2026-11-21T22:14:13+01:00 nas kernel: Buffer I/O error on dev sdb1, logical block 512, lost async page write
+2026-11-21T22:14:13+01:00 nas kernel: EXT4-fs error (device sdb1): ext4_find_entry:1455: inode #2: comm hive: reading directory lblock 0
+2026-11-21T22:14:14+01:00 nas kernel: EXT4-fs (sdb1): Remounting filesystem read-only
+2026-11-21T22:15:00+01:00 nas kernel: blk_update_request: I/O error, dev sda, sector 77 op 0x0:(READ) flags 0x0 phys_seg 1 prio class 0
+2026-11-21T22:16:00+01:00 nas kernel: EXT4-fs warning (device sdb1): ext4_dx_add_entry: Directory index full!

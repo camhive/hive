@@ -149,6 +149,9 @@ func TestMediaMTXEnginePullsH265WithoutAudioAndRefusesStrangers(t *testing.T) {
 	if st, _ := eng.Status(ctx, "yard", video.Main); len(st.Tracks) != 1 || st.Tracks[0] != "H265" {
 		t.Fatalf("tracks = %v, want [H265] (audio off)", st.Tracks)
 	}
+	if st, _ := eng.Status(ctx, "yard", video.Main); st.Video != (video.Track{Codec: "H265", Width: 640, Height: 360}) {
+		t.Fatalf("video = %+v, want H265 640x360 from tracks2", st.Video)
+	}
 	if n := whepReceive(t, ctx, eng.WHEPURL("yard", video.Main), 5); n < 5 {
 		t.Fatalf("received %d RTP packets over WebRTC, want >= 5", n)
 	}

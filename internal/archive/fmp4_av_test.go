@@ -14,7 +14,7 @@ import (
 // A segment's length is its video's length. Seen on the dev stack: with a
 // camera's audio track in the file, 10 s segments were counted as 7.3 s and
 // the timeline showed gaps between every segment.
-func TestFMP4DurationCountsTheVideoTrackWhateverComesFirst(t *testing.T) {
+func TestFMP4DurationCountsTheTrackWhateverComesFirst(t *testing.T) {
 	init := fmp4.Init{Tracks: []*fmp4.InitTrack{
 		{ID: 1, TimeScale: 8000, Codec: &codecs.LPCM{BitDepth: 16, SampleRate: 8000, ChannelCount: 1}},
 		{ID: 2, TimeScale: 90000, Codec: &codecs.H264{SPS: testSPS, PPS: []byte{0x08}}},

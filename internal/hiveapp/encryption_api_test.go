@@ -33,20 +33,27 @@ type encFixture struct {
 	owner, viewer string
 	camera        string
 	vault         *archivekey.Vault
+	clock         *testClock // the automatic lock's clock (#147)
+	autolock      *archivekey.Autolock
+	deps          *hiveapp.Deps
 	mu            sync.Mutex
 	emitted       []string
+	sent          []any // the data of each emitted event
 }
 
 func newEncFixture(t *testing.T) *encFixture {
 	t.Helper()
-	f := &encFixture{vault: archivekey.New(t.TempDir())}
+	f := &encFixture{vault: archivekey.New(t.TempDir()), clock: &testClock{t: time.Date(2026, 11, 22, 9, 0, 0, 0, time.UTC)}}
+	f.autolock = archivekey.NewAutolock(f.vault, archivekey.WithAutolockClock(f.clock.now, f.clock.since))
 	exportDir := t.TempDir()
 	api, _, cam := newArchiveAPIWith(t, func(d *hiveapp.Deps) {
 		d.Vault = f.vault
+		d.Autolock = f.autolock
+		f.deps = d
 		d.Exports = export.NewManager(exportDir, d.Playback, d.Store.Exports(), export.WithVault(f.vault))
-		d.Emit = func(name string, _ any) {
+		d.Emit = func(name string, data any) {
 			f.mu.Lock()
-			f.emitted = append(f.emitted, name)
+			f.emitted, f.sent = append(f.emitted, name), append(f.sent, data)
 			f.mu.Unlock()
 		}
 	})

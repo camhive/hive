@@ -13,8 +13,10 @@ import (
 
 // Event names the hive emits.
 const (
-	EventHeartbeat  = "hive.heartbeat"
-	EventStorageLow = "storage.low"
+	EventHeartbeat   = "hive.heartbeat"
+	EventStorageLow  = "storage.low"
+	EventDiskFailing = "disk.failing" // #155: replace the archive disk soon
+	EventDiskFailed  = "disk.failed"  // #155: the archive cannot be written
 )
 
 // Heartbeat is the periodic health summary (ADR-0008).
@@ -115,11 +117,18 @@ func (a *Agent) EmitStart(e store.Event) {
 }
 
 // PromptStart sends a lasting Event on the prompt lane when it begins (the
-// start of motion); its end is not sent. Use it as an Observe callback.
+// start of motion); its end is not sent. While someone is at home it is
+// marked quiet: the cloud keeps it for digests and counts but pushes
+// nothing (#157). Use it as an Observe callback.
 func (a *Agent) PromptStart(e store.Event) {
-	if e.End.IsZero() {
-		a.enqueuePrompt(e.Kind, e.At.UTC(), a.eventData(e))
+	if !e.End.IsZero() {
+		return
 	}
+	m := a.eventData(e)
+	if a.d.AtHome != nil && a.d.AtHome() {
+		m["quiet"] = true
+	}
+	a.enqueuePrompt(e.Kind, e.At.UTC(), m)
 }
 
 // The prompt lane (ADR-0021) carries events that matter only while they are

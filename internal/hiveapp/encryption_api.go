@@ -33,14 +33,23 @@ type encryptionView struct {
 	// Sealing: new footage is being sealed. False while off, and while on
 	// with the public key unreadable (unlocking writes it again).
 	Sealing bool `json:"sealing"`
+	// Autolock: the automatic lock (#147), for the owner only.
+	Autolock *autolockView `json:"autolock,omitempty"`
 }
 
-// encryptionStatusOf is the vault's state as the API shows it.
-func (a *api) encryptionStatusOf() encryptionView {
+// encryptionStatusFor is the vault's state as the API shows it to the
+// caller; the owner also sees the automatic lock.
+func (a *api) encryptionStatusFor(r *http.Request) encryptionView {
+	var v encryptionView
 	if a.d.Vault == nil {
-		return encryptionView{State: archivekey.Off}
+		v.State = archivekey.Off
+	} else {
+		v.State, v.Sealing = a.d.Vault.State(), a.d.Vault.Sealing()
 	}
-	return encryptionView{State: a.d.Vault.State(), Sealing: a.d.Vault.Sealing()}
+	if isOwner(r) {
+		v.Autolock = a.autolockOf()
+	}
+	return v
 }
 
 type passphraseInput struct {
@@ -70,8 +79,8 @@ func writeLocked(w http.ResponseWriter) {
 	writeError(w, http.StatusLocked, "archive_locked", "the archive is locked until its owner unlocks it")
 }
 
-func (a *api) encryptionStatus(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, a.encryptionStatusOf())
+func (a *api) encryptionStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, a.encryptionStatusFor(r))
 }
 
 // requireVaultOwner: unlocking and locking take the owner, signed in
@@ -105,7 +114,7 @@ func (a *api) enableEncryption(w http.ResponseWriter, r *http.Request) {
 	if !a.requireCloudVaultOwner(w, r) || !decodeJSON(w, r, &in) {
 		return
 	}
-	a.vaultAnswer(w, r, "enable", a.d.Vault.Enable(in.Passphrase), http.StatusOK)
+	a.vaultAnswer(w, r, "enable", a.unlocked(a.d.Vault.Enable(in.Passphrase)), http.StatusOK)
 }
 
 func (a *api) unlockArchive(w http.ResponseWriter, r *http.Request) {
@@ -113,7 +122,16 @@ func (a *api) unlockArchive(w http.ResponseWriter, r *http.Request) {
 	if !a.requireVaultOwner(w, r) || !decodeJSON(w, r, &in) {
 		return
 	}
-	a.vaultAnswer(w, r, "unlock", a.d.Vault.Unlock(in.Passphrase), http.StatusOK)
+	a.vaultAnswer(w, r, "unlock", a.unlocked(a.d.Vault.Unlock(in.Passphrase)), http.StatusOK)
+}
+
+// unlocked starts the automatic lock's timers after a successful unlock
+// (switching encryption on leaves the archive unlocked too); it passes err on.
+func (a *api) unlocked(err error) error {
+	if err == nil && a.d.Autolock != nil {
+		a.d.Autolock.Unlocked()
+	}
+	return err
 }
 
 func (a *api) lockArchive(w http.ResponseWriter, r *http.Request) {
@@ -152,7 +170,7 @@ func (a *api) vaultAnswer(w http.ResponseWriter, r *http.Request, change string,
 		w.WriteHeader(status)
 		return
 	}
-	writeJSON(w, status, a.encryptionStatusOf())
+	writeJSON(w, status, a.encryptionStatusFor(r))
 }
 
 // audit records an archive key change in the action log and sends it to

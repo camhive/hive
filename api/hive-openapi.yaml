@@ -21,6 +21,12 @@ info:
     Changing or disabling the login, here or with `hive local-login` on the
     hive's console, ends every local session.
 
+    Moving the data (#155): while `hive move-data` copies the hive to a new
+    disk the hive answers without recording, and every change (POST, PUT,
+    PATCH, DELETE) answers `409 moving`, since it would stay on the old disk;
+    reads, the local sign-in and unlocking, locking and presence of the
+    archive go on.
+
     Archive encryption at rest (ADR-0019): off until the owner switches it on
     with a passphrase (`POST /v0/archive/encryption`). From then on the hive
     seals closed segments and stored exports to the archive key; after every
@@ -66,7 +72,7 @@ components:
         code:
           type: string
           description: Stable machine-readable code.
-          enum: [token_missing, token_invalid, token_expired, clock_skew, wrong_hive, license_required, forbidden, not_found, invalid, bad_json, not_ready, engine, unsupported, camera, camera_auth, plan_limit, internal, lan_only, local_login_disabled, local_login_rate_limited, invalid_credentials, weak_password, invalid_update_window, updates_unavailable, archive_locked, encryption_on, encryption_off, wrong_passphrase, unlock_rate_limited]
+          enum: [token_missing, token_invalid, token_expired, clock_skew, wrong_hive, license_required, forbidden, not_found, invalid, bad_json, not_ready, engine, unsupported, camera, camera_auth, plan_limit, internal, lan_only, local_login_disabled, local_login_rate_limited, invalid_credentials, weak_password, invalid_update_window, updates_unavailable, archive_locked, encryption_on, encryption_off, wrong_passphrase, unlock_rate_limited, moving]
         message: { type: string }
     HiveInfo:
       type: object
@@ -169,6 +175,14 @@ components:
           type: string
           enum: [local, routed]
           description: "local: in one of the hive's networks, found again after an address change; routed: behind a router, reserve its address. Absent until known."
+        sensitivity:
+          type: string
+          enum: [low, normal, high]
+          description: "How readily motion detection reacts (#157, capability camera.sensitivity); normal is ADR-0020's defaults"
+        motion_calmed_since:
+          type: string
+          format: date-time
+          description: "Present while the hive has calmed the camera: it raised more than 20 motion episodes in an hour, so the threshold is one step higher until an hour passes without one (#157)"
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     CameraIdentity:
@@ -317,16 +331,17 @@ components:
         enabled: { type: boolean }
         online: { type: boolean, description: follows the main stream }
         streams: { type: object, additionalProperties: { $ref: "#/components/schemas/StreamHealth" } }
+        care: { $ref: "#/components/schemas/CareSummary", description: "Camera care (#163); absent on hives without it" }
     Event:
       type: object
-      description: "A timeline Event (ADR-0009, ADR-0020). `id` is stable; a lasting Event (motion, storage.low) is listed from its start, also on later days while it goes on, and gains `end` when it is over."
+      description: "A timeline Event (ADR-0009, ADR-0020). `id` is stable; a lasting Event (motion, storage.low, disk.failing, disk.failed) is listed from its start, also on later days while it goes on, and gains `end` when it is over."
       properties:
         id: { type: integer, description: "Stable for the Event's life on this hive" }
-        camera: { type: string, description: "Empty for the hive's own Events (storage.low)" }
-        kind: { type: string, enum: [camera.online, camera.offline, camera.address_changed, camera.identity_changed, storage.low, motion] }
+        camera: { type: string, description: "Empty for the hive's own Events (storage.low, disk.failing, disk.failed)" }
+        kind: { type: string, enum: [camera.online, camera.offline, camera.address_changed, camera.identity_changed, storage.low, disk.failing, disk.failed, motion, camera.degraded] }
         at: { type: string, format: date-time, description: "When it happened or began" }
         end: { type: string, format: date-time, description: "When it ended: equal to `at` for an instantaneous Event, absent while a lasting Event is still going on" }
-        data: { type: object, additionalProperties: true, description: "motion: `source` = camera | frames; storage.low: `free_bytes`, `min_free_gb`" }
+        data: { type: object, additionalProperties: true, description: "motion: `source` = camera | frames; storage.low: `free_bytes`, `min_free_gb`; disk.failing and disk.failed: `device`, `evidence` (DiskEvidence); camera.degraded: `reasons` at its start" }
     CameraPatch:
       type: object
       properties:
@@ -342,6 +357,10 @@ components:
           minimum: 0
           maximum: 3650
           description: "Owner only. Keep this camera's footage this many days (0 = until space runs out); null puts it back on the hive-wide retention_days. The sweep applies it within five minutes; the plan's archive.retention_days_max caps it. Announced as capability camera.retention (from v0.1.9; v0.1.8 takes it without announcing it)."
+        sensitivity:
+          type: string
+          enum: [low, normal, high]
+          description: "Owner only. Motion sensitivity (#157, capability camera.sensitivity); anything else is 422 invalid"
         credentials: { $ref: "#/components/schemas/Credentials" }
     LocalLogin:
       type: object
@@ -377,12 +396,242 @@ components:
           type: string
           enum: [off, locked, unlocked]
           description: "off: footage is stored in clear. locked: new footage is sealed, nothing sealed can be played until the owner unlocks. unlocked: everything plays."
+        autolock:
+          $ref: "#/components/schemas/Autolock"
+    AutolockSettings:
+      type: object
+      description: "The owner's automatic-lock settings (#147, ADR-0019 addendum); both off by default."
+      properties:
+        after:
+          type: string
+          enum: ["off", "1h", "8h", "24h", "7d"]
+          description: "Lock after this long without a playback, its sound, a new export or an export download by anyone; the unlock counts as activity."
+        away:
+          type: string
+          enum: ["off", "10m", "1h"]
+          description: "Lock this long after the owner's app reported that it left home (POST /v0/archive/encryption/presence); an at-home report within it cancels the lock."
+    Autolock:
+      description: "The automatic lock, in GET /v0/archive/encryption and its other answers for the owner only (Members would learn when the owner left home). Absent on a hive without the archive.autolock capability."
+      allOf:
+        - $ref: "#/components/schemas/AutolockSettings"
+        - type: object
+          required: [after, away]
+          properties:
+            locks_at:
+              type: string
+              format: date-time
+              description: "When the unlocked archive will lock itself if nothing changes; absent while no timer runs (both off, at home, or not unlocked). The hive checks twice a minute."
+            reason:
+              type: string
+              enum: [inactivity, away]
+              description: "Which timer locks first; present with locks_at."
+    Presence:
+      type: object
+      required: [at_home]
+      properties:
+        at_home:
+          type: boolean
+          description: "The app reaches the hive on the LAN (its transport decision is lan or address). Counts only when the request arrives on the hive's LAN listener from a private or link-local address (loopback refused), the rule of the local login: through the relay, a tunnel or a forwarded port the owner is away."
     Passphrase:
       type: object
       required: [passphrase]
       properties:
         passphrase: { type: string, minLength: 10, maxLength: 256, writeOnly: true, description: "10-256 characters (the password policy); the current one when changing it" }
         new_passphrase: { type: string, minLength: 10, maxLength: 256, writeOnly: true, description: "POST /v0/archive/encryption/passphrase only" }
+    StorageOverview:
+      type: object
+      required: [cameras]
+      description: |
+        The archive disk, every camera's footage and the forecast (#150, ADR-0024). The arithmetic is
+        the website calculator's (docs/dev/sizing.md, "The storage arithmetic"), on measured bytes.
+        disk, settings and forecast are the owner's; a member gets only the cameras the token covers
+        that still exist, each with id, name, bytes and days_held.
+      properties:
+        cameras: { type: array, items: { $ref: "#/components/schemas/CameraStorage" } }
+        disk: { $ref: "#/components/schemas/StorageDisk" }
+        settings: { $ref: "#/components/schemas/StorageSettings" }
+        forecast: { $ref: "#/components/schemas/StorageForecast" }
+    CameraStorage:
+      type: object
+      required: [id, bytes, days_held]
+      description: "One camera's footage in the index, main and sub stream together; only cameras with footage are listed. Fields after days_held are the owner's."
+      properties:
+        id: { type: string }
+        name: { type: string, description: "Absent for the footage of a removed camera (owner only)" }
+        bytes: { type: integer, format: int64 }
+        days_held: { type: number, description: "Newest minus oldest, in days" }
+        oldest: { type: string, format: date-time, description: Start of the oldest segment }
+        newest: { type: string, format: date-time, description: End of the newest segment }
+        oldest_age_days: { type: number, description: "Now minus the oldest segment's start, in days: what the age rule compares with the retention" }
+        bytes_per_day_24h: { type: integer, format: int64, description: "Bytes of the segments that started in the last 24 hours over the time since the first of them (a camera that resumed after a gap is not diluted); rounded up" }
+        bytes_per_day_7d: { type: integer, format: int64, description: The same over the last 7 days }
+        retention_days: { type: integer, description: "The days retention keeps (the camera's own or the hive's, licence cap applied); 0 = until space runs out" }
+        follows_hive: { type: boolean, description: "The camera follows the hive-wide retention_days (no retention of its own)" }
+        effective_days: { type: integer, description: What the camera will hold once the settings converge; less than retention_days when the disk runs out first }
+    StorageDisk:
+      type: object
+      required: [total_bytes, archive_bytes, export_bytes, free_bytes]
+      properties:
+        total_bytes: { type: integer, format: int64, description: Size of the archive's volume }
+        archive_bytes: { type: integer, format: int64, description: Footage in the index }
+        export_bytes: { type: integer, format: int64, description: Exports kept on the hive }
+        free_bytes: { type: integer, format: int64, description: "Available to the hive (Bavail), as the space rule measures it" }
+        health: { $ref: "#/components/schemas/DiskHealth" }
+    DiskHealth:
+      type: object
+      description: "The archive disk's last health check (#155, ADR-0024 §6), at start and every 30 minutes. Owner only."
+      required: [state, evidence]
+      properties:
+        state: { type: string, enum: [unknown, ok, failing, failed], description: "unknown: nothing could be read (no smartctl, no kernel log, not Linux); failing: replace the disk soon; failed: the archive cannot be written and recording has stopped" }
+        checked_at: { type: string, format: date-time, description: Absent before the first check }
+        device: { type: string, description: "The whole disk the archive is on, e.g. /dev/sdb" }
+        temperature_c: { type: integer, description: "From SMART, when it reports one" }
+        evidence: { type: array, items: { $ref: "#/components/schemas/DiskEvidence" } }
+    DiskEvidence:
+      type: object
+      required: [signal, detail]
+      properties:
+        signal: { type: string, enum: [smart, kernel, writes, probe] }
+        detail: { type: string, description: "One line in English for the owner and the logs" }
+        values: { type: object, additionalProperties: { type: integer, format: int64 }, description: "smart: passed, reallocated_sectors, pending_sectors, offline_uncorrectable, reported_uncorrectable, percentage_used, media_errors, critical_warning; kernel: io_errors; writes: eio, read_only, enospc" }
+    DataMove:
+      type: object
+      description: "The last `hive move-data` (#155), as the command reports it while it runs and after it finished."
+      required: [state, supported, files]
+      properties:
+        state: { type: string, enum: [none, copying, switching, done, failed], description: "none: no move was started from this data directory; copying: the hive answers but does not record; switching (the new directory's note): everything is copied and the service is being pointed here; failed: cancelled" }
+        supported: { type: boolean, description: "The hive runs as a systemd service on Linux, which `hive move-data` can point at a new directory" }
+        data_dir: { type: string, description: The data directory the hive runs from }
+        archive_dir: { type: string, description: "archive_dir of hive.yaml; may be outside the data directory" }
+        files:
+          type: array
+          description: "The files to save first by hand, hardest to replace first, where they really are (hive.yaml is in /etc/camhive on a default Linux install)"
+          items: { type: object, required: [name, path], properties: { name: { type: string }, path: { type: string } } }
+        unreadable_segments: { type: integer, description: "Segments the old disk could not read; left behind" }
+        unreadable_bytes: { type: integer, format: int64 }
+        from: { type: string }
+        to: { type: string }
+        step: { type: string, description: "What is being copied: hive.key, cloud.json, hive.yaml, archive-key, hive.db, exports, archive, index, service" }
+        copied_bytes: { type: integer, format: int64 }
+        planned_bytes: { type: integer, format: int64, description: Bytes the move will copy in all }
+        skipped_segments: { type: integer, description: "Segments that did not fit on the new disk; they stay on the old one" }
+        skipped_bytes: { type: integer, format: int64 }
+        skipped_newest: { type: string, format: date-time, description: The start of the newest footage that did not fit }
+        started_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        error: { type: string }
+    StorageSettings:
+      type: object
+      required: [retention_days, min_free_gb, export_max_gb]
+      properties:
+        retention_days: { type: integer, description: "Hive-wide retention in days; 0 = until space runs out" }
+        min_free_gb: { type: integer, description: "Free space the space rule keeps, in GiB; 0 (set by hand) turns the rule off" }
+        export_max_gb: { type: integer, description: "The exports' share of the disk, in GiB; set in hive.yaml only" }
+        retention_days_max: { type: integer, description: "The licence's cap on every retention (archive.retention_days_max); absent when none" }
+    StorageForecast:
+      type: object
+      required: [bytes_per_day, capacity_bytes, disk_days, retention_met, deleting_for_space]
+      properties:
+        bytes_per_day: { type: integer, format: int64, description: "Every camera's rate, the larger of its two windows; 0 when nothing is recorded" }
+        capacity_bytes: { type: integer, format: int64, description: "archive + exports + free - min_free_gb - export_max_gb: what the archive may fill" }
+        disk_days: { type: integer, description: Whole days capacity_bytes holds at bytes_per_day }
+        horizon_days: { type: integer, description: "How far back the space rule lets footage reach; absent when retention is met" }
+        needed_bytes: { type: integer, format: int64, description: "Space retention needs at these rates, the reserve included; absent when a recording camera keeps footage without limit" }
+        fills_in_days: { type: integer, description: "Whole days until the space rule starts deleting, counting only cameras still short of their retention (0: within a day); absent when retention is met or the growth stops first" }
+        retention_met: { type: boolean }
+        deleting_for_space: { type: boolean, description: "The last retention sweep deleted footage for space or could not reach the floor" }
+    StoragePatch:
+      type: object
+      additionalProperties: false
+      description: An absent field keeps its value.
+      properties:
+        retention_days: { type: integer, minimum: 0, maximum: 3650, description: "0 = until space runs out" }
+        min_free_gb: { type: integer, minimum: 1, description: "GiB; smaller than the disk. 0 (no space rule) only by hand in hive.yaml" }
+    CareReason:
+      type: string
+      enum: [bitrate_drop, frame_loss, reconnects, clock_drift, offline_pattern, night_picture, stream_changed]
+      description: "Why a camera is degraded (#163): bitrate_drop, a stream sent less than 60 % of its usual bitrate at this clock hour over the last hour (usual: the same hour of the last 7 days, from 3 days of history); frame_loss, more than 30 s of footage missing in the last hour (offline time and the hive's own downtime excluded), or segments late on 3 checks in a row while online; reconnects, 4 or more in the last hour; clock_drift, the ONVIF camera's clock off by more than 30 s at the last reading (every 6 h); offline_pattern, offline 5 minutes or more in the same hour on 3 of the last 7 days; night_picture, a night hour below 60 % of the camera's earlier nights and 25 % of its day (the IR illuminator), cleared by day; stream_changed, codec or resolution changed in the last 24 h without the owner"
+    CareSummary:
+      type: object
+      required: [degraded, reasons]
+      properties:
+        degraded: { type: boolean }
+        reasons: { type: array, items: { $ref: "#/components/schemas/CareReason" } }
+    VideoTrack:
+      type: object
+      properties:
+        codec: { type: string, example: H264 }
+        width: { type: integer, description: "0: not known" }
+        height: { type: integer }
+    CameraCare:
+      type: object
+      description: "What camera care (#163) says about a camera, checked every 5 minutes. Bitrate, missing footage and reconnects cover the last hour; the clock and a stream change are single readings; the offline pattern covers a week. Each reason clears only past a level of its own, so it does not flap. One degraded episode is one camera.degraded Event, ended by camera.recovered."
+      required: [camera, checked_at, degraded, reasons, signals, thresholds]
+      properties:
+        camera: { type: string }
+        checked_at: { type: [string, "null"], format: date-time, description: "null before the first check (a few minutes after the hive starts)" }
+        degraded: { type: boolean }
+        since: { type: string, format: date-time, description: "The episode's start; absent while not degraded" }
+        reasons:
+          type: array
+          items:
+            type: object
+            required: [reason, suggestion]
+            properties:
+              reason: { $ref: "#/components/schemas/CareReason" }
+              suggestion: { type: string, description: "Plain-language advice in English; the app shows its own translation by reason", example: "Check the cable or the PoE budget." }
+        signals:
+          type: object
+          required: [streams, missing_s, late_s, reconnects_hour, reconnects_24h, clock_drift_s, clock_checked_at, offline_minutes, pattern_hours, stream_change]
+          properties:
+            streams:
+              type: array
+              items:
+                type: object
+                properties:
+                  stream: { type: string }
+                  last_hour_kbps: { type: integer, description: "0: under half an hour of footage in the last hour" }
+                  usual_kbps: { type: integer, description: "Median of the same clock hour and the hours beside it on the last 7 days; 0: fewer than 3 days of history" }
+                  day_kbps: { type: integer, description: "Median of the day hours; 0: not known yet" }
+                  night: { type: boolean }
+            missing_s: { type: number, description: "Footage of the main stream missing in the last hour; time the camera was offline and time before the hive or its engine last started excluded" }
+            late_s: { type: number, description: "How long the next segment is overdue while the camera is online; a reason after 3 checks in a row, not while storage.low is open" }
+            reconnects_hour: { type: integer }
+            reconnects_24h: { type: integer, description: "Counted since the hive started, at most 24 hours back" }
+            clock_drift_s: { type: [number, "null"], description: "The camera's clock minus the hive's, read every 6 hours from ONVIF cameras; null: not read" }
+            clock_checked_at: { type: [string, "null"], format: date-time }
+            offline_minutes:
+              type: array
+              description: The last 7 local days, today last
+              items: { type: object, properties: { day: { type: string, format: date }, minutes: { type: integer } } }
+            pattern_hours: { type: array, items: { type: integer, minimum: 0, maximum: 23 }, description: "Local hours of day of the offline pattern" }
+            stream_change:
+              type: [object, "null"]
+              properties:
+                stream: { type: string }
+                at: { type: string, format: date-time }
+                from: { $ref: "#/components/schemas/VideoTrack" }
+                to: { $ref: "#/components/schemas/VideoTrack" }
+        thresholds:
+          type: object
+          description: Where each signal becomes a reason and where it clears
+          properties:
+            bitrate_drop: { type: number }
+            bitrate_ok: { type: number }
+            night_picture: { type: number }
+            night_ok: { type: number }
+            missing_s: { type: number }
+            missing_ok_s: { type: number }
+            reconnects: { type: integer }
+            reconnects_ok: { type: integer }
+            clock_drift_s: { type: number }
+            clock_every_h: { type: integer }
+            pattern_days: { type: integer }
+            pattern_minutes: { type: integer }
+            stream_changed_h: { type: integer }
+            baseline_days: { type: integer }
+            baseline_min_days: { type: integer }
+            late_checks: { type: integer }
   responses:
     ArchiveLocked:
       description: "`code: archive_locked` — the archive is encrypted and locked until its owner unlocks it (ADR-0019)"
@@ -704,6 +953,49 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "409": { description: "`code: encryption_off`", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /v0/archive/encryption/autolock:
+    patch:
+      summary: Set the automatic lock (owner signed in through Camhive; a local session gets 403)
+      description: |
+        A field left out keeps its value; at least one is required. A change
+        that makes the archive lock later (a timer switched off or made
+        longer) takes the owner at home, on the hive's LAN address from a
+        machine in the local network; through the relay or a forwarded port
+        it answers 403 `lan_only`, so a stolen token cannot relax the lock.
+        Stricter changes work from anywhere. The settings persist in the hive's
+        store and apply while the archive is unlocked; unlocking stays
+        manual. Recorded as `archive.encryption.autolock`. When a timer
+        fires, the hive locks the archive as `POST /v0/archive/encryption/lock`
+        does and records `archive.encryption.lock` with actor `hive` and
+        `reason: inactivity | away`.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/AutolockSettings" } } }
+      responses:
+        "200": { description: "Set", content: { application/json: { schema: { $ref: "#/components/schemas/ArchiveEncryption" } } } }
+        "400": { description: "`code: invalid` — not one of the choices, or nothing to change", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "`code: forbidden` (not the owner signed in through Camhive) or `code: lan_only` (relaxing the lock from outside the home network)", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "503": { description: "`code: not_ready` — automatic locking is not available", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /v0/archive/encryption/presence:
+    post:
+      summary: The owner's app reports whether it is at home (owner, a local emergency session included)
+      description: |
+        Sent when a page that holds a connection to the hive opens, when the
+        app's transport decision changes, after an unlock and once a minute
+        while the page is open; at most once a minute. Leaving
+        starts the `away` grace period (repeated reports keep its start); a
+        return cancels it. Advisory: an app that is closed reports nothing,
+        and the inactivity timer is the fallback. Kept in memory only, not
+        recorded.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/Presence" } } }
+      responses:
+        "204": { description: "Taken" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "503": { description: "`code: not_ready` — automatic locking is not available", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
   /v0/exports/{id}:
     parameters:
       - { name: id, in: path, required: true, schema: { type: string } }
@@ -974,3 +1266,47 @@ paths:
           headers:
             Retry-After: { schema: { type: integer }, description: seconds }
           content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  /v0/storage:
+    get:
+      summary: The archive disk, every camera's footage and the forecast (#150)
+      description: "Owner and members; a member sees only the cameras the token covers, without disk, settings and forecast. A local session (#57) reads it too."
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/StorageOverview" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "500": { description: "internal: the index, the disk or the database could not be read", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "503": { description: "not_ready: the archive is not available yet", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /v0/hive/storage:
+    patch:
+      summary: Change retention_days and min_free_gb (owner through Camhive); action-logged as storage.settings_changed
+      description: "Written to hive.yaml and to the running retention sweeper: the next sweep (at most 5 minutes) applies them, no restart. Lowering retention_days or raising min_free_gb can delete footage at that sweep. Only the fields sent are validated: a min_free_gb of 0 set by hand stands. A local session (#57) is refused."
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/StoragePatch" } } }
+      responses:
+        "200": { description: The overview with the new settings, content: { application/json: { schema: { $ref: "#/components/schemas/StorageOverview" } } } }
+        "400": { description: "bad_json (not whole numbers, unknown fields)", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { description: "invalid: retention_days outside 0-3650, or min_free_gb sent below 1 or not smaller than the disk", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "500": { description: "internal: hive.yaml could not be written", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "503": { description: "not_ready: the archive is not available yet", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /v0/hive/move:
+    get:
+      summary: The state of `hive move-data`, for the guided disk replacement (#155)
+      description: "Owner only. The move itself runs as `hive move-data <new-dir>` as root on the hive's computer; while it copies, the hive answers without recording."
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/DataMove" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { description: "internal: move.json could not be read", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /v0/cameras/{id}/care:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      summary: Camera care, the camera's signals and what to do (viewer, #163)
+      description: "Owner and members who may view the camera."
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/CameraCare" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { description: "not_ready: camera care is not running (no video engine)", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }

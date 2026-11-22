@@ -101,10 +101,11 @@ type Camera struct {
 	Credentials Credentials
 	Streams     map[Stream]StreamSpec
 	Enabled     bool
-	RecordAudio bool      // ADR-0015: sound is pulled from the camera only when on; off by default
-	Retention   Retention // #61: how long its footage is kept
-	Identity    Identity  // ADR-0017: what the camera is, learned by the Hive
-	Network     Network   // ADR-0017: local or routed; empty until known
+	RecordAudio bool        // ADR-0015: sound is pulled from the camera only when on; off by default
+	Retention   Retention   // #61: how long its footage is kept
+	Sensitivity Sensitivity // #157: how readily motion detection reacts
+	Identity    Identity    // ADR-0017: what the camera is, learned by the Hive
+	Network     Network     // ADR-0017: local or routed; empty until known
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
@@ -123,6 +124,7 @@ type Patch struct {
 	Credentials *Credentials
 	SubStream   *string // the sub stream's RTSP URL; "" removes it
 	Retention   *Retention
+	Sensitivity *Sensitivity
 }
 
 // MaxRetentionDays bounds a camera's own retention (ten years).
@@ -203,6 +205,9 @@ func (c Camera) withFields(p Patch) Camera {
 	if p.Retention != nil {
 		u.Retention = *p.Retention
 	}
+	if p.Sensitivity != nil {
+		u.Sensitivity = *p.Sensitivity
+	}
 	return u
 }
 
@@ -228,6 +233,9 @@ func (c Camera) validate() error {
 		return fmt.Errorf("%w: group longer than 100 characters", ErrInvalid)
 	}
 	if err := c.Retention.validate(); err != nil {
+		return err
+	}
+	if err := c.Sensitivity.validate(); err != nil {
 		return err
 	}
 	return c.validateStreams()

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -113,6 +114,60 @@ func TestSealingSealsExportsKeptInClear(t *testing.T) {
 	}
 	if data := download(t, m, job.ID); len(data) != 1012 {
 		t.Fatalf("download: %d bytes", len(data))
+	}
+}
+
+// stallingRecipient holds the first seal inside age's key wrapping, between
+// Seal reading a job's row and writing it back, until release closes.
+type stallingRecipient struct {
+	age.Recipient
+	once     sync.Once
+	stalled  chan struct{}
+	released chan struct{}
+}
+
+func (r *stallingRecipient) Wrap(fileKey []byte) ([]*age.Stanza, error) {
+	r.once.Do(func() { close(r.stalled); <-r.released })
+	return r.Recipient.Wrap(fileKey)
+}
+
+// #113: the owner's deletion (or a prune) while Seal is sealing the same
+// export removes it for good: no row comes back, no file is left behind.
+func TestRemovingAnExportWhileItIsBeingSealedLeavesNothing(t *testing.T) {
+	dir, v := t.TempDir(), newVault(t, false)
+	m := export.NewManager(dir, fetchOK, jobs(t), export.WithVault(v))
+	job, _ := m.Start(ctx, exportReq)
+	waitStatus(t, m, job.ID, export.StatusDone)
+	to := &stallingRecipient{Recipient: v.key.Recipient(), stalled: make(chan struct{}), released: make(chan struct{})}
+
+	sealed := make(chan error, 1)
+	go func() { _, err := m.Seal(ctx, to); sealed <- err }()
+	<-to.stalled
+	removed := make(chan error, 1)
+	go func() {
+		_, err := m.Remove(ctx, func(string, time.Time, time.Time) bool { return true }, false)
+		removed <- err
+	}()
+	// A removal that does not wait for the seal finishes now; one that waits
+	// is given the time to try before the seal goes on.
+	select {
+	case err := <-removed:
+		removed <- err
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(to.released)
+	if err := <-sealed; err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+	if err := <-removed; err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+
+	if got, err := m.Get(ctx, job.ID); !errors.Is(err, export.ErrNotFound) {
+		t.Fatalf("job after removal: %+v, %v; want ErrNotFound", got, err)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Fatalf("export dir holds %v, want nothing", entries)
 	}
 }
 

@@ -16,6 +16,7 @@ import (
 	"io/fs"
 	"sort"
 	"strings"
+	"time"
 
 	_ "modernc.org/sqlite" // database/sql driver
 )
@@ -139,4 +140,45 @@ func (s *Store) unseal(blob []byte) (string, error) {
 		return "", ErrCredentials
 	}
 	return string(plain), nil
+}
+
+// ErrCheckpointBusy says a reader kept the write-ahead log from being written
+// into the database file.
+var ErrCheckpointBusy = errors.New("store: checkpoint held back by a reader")
+
+// Checkpoint writes the write-ahead log into the database file and empties
+// it, so the file alone holds everything (#155: copied to a new disk). A
+// checkpoint a reader holds back is tried again for about three seconds,
+// each try waiting briefly instead of the store's five-second busy wait.
+func (s *Store) Checkpoint(ctx context.Context) (err error) {
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = conn.Close() }()
+	if _, err := conn.ExecContext(ctx, `PRAGMA busy_timeout=50`); err != nil {
+		return err
+	}
+	defer func() {
+		if _, rerr := conn.ExecContext(context.WithoutCancel(ctx), `PRAGMA busy_timeout=5000`); err == nil {
+			err = rerr
+		}
+	}()
+	for try := 0; ; try++ {
+		var busy, logPages, done int
+		if err := conn.QueryRowContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`).Scan(&busy, &logPages, &done); err != nil {
+			return err
+		}
+		if busy == 0 {
+			return nil
+		}
+		if try == 30 {
+			return ErrCheckpointBusy
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
 }

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -40,7 +40,7 @@ function stubCloud(start: NotifySettings = defaults) {
   return puts;
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe("notification settings", () => {
   it("shows the plan's channels, saves switches and quiet hours", async () => {
@@ -72,6 +72,27 @@ describe("notification settings", () => {
     expect("channels" in put).toBe(false);
   });
 
+  it("chooses when each group notifies, shows the week's counts and keeps them out of the save (#157)", async () => {
+    const puts = stubCloud({ ...defaults, events: { ...defaults.events, motion: { email: false, push: true, mode: "immediate" } }, counts: { episodes_week: 5600, pushes_week: 312 } });
+    const router = makeRouter(createMemoryHistory({ initialEntries: ["/notifications"] }));
+    render(<App router={router} queryClient={new QueryClient({ defaultOptions: { queries: { retry: false } } })} />);
+    const user = userEvent.setup();
+
+    expect(await screen.findByText("This week: 5,600 motion episodes, 312 push notifications.")).toBeInTheDocument();
+    const motion = screen.getByRole("combobox", { name: "Motion: when" });
+    expect(motion).toHaveDisplayValue("Each time");
+    expect(screen.queryByRole("combobox", { name: "Storage low: when" })).toBeNull(); // offline and storage always come at once
+    expect(screen.getByText(/stays silent until it has been quiet/)).toBeInTheDocument();
+    await user.selectOptions(motion, "Hourly summary");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(puts).toHaveLength(1));
+    const [put] = puts as [NotifySettings];
+    expect(put.events.motion).toEqual({ email: false, push: true, mode: "hourly" });
+    expect(put.events.storage).toEqual({ email: true, push: true });
+    expect("counts" in put).toBe(false);
+  });
+
   it("switches motion notifications for one camera and keeps the rest", async () => {
     const other = { hive_id: "hv_1", camera_id: "cam_2", motion: false, cooldown_minutes: 30 };
     const puts = stubCloud({ ...defaults, cameras: [other] });
@@ -83,7 +104,7 @@ describe("notification settings", () => {
     const user = userEvent.setup();
     const toggle = await screen.findByRole("checkbox", { name: "Motion notifications for this camera" });
     expect(toggle).toBeChecked();
-    await user.selectOptions(screen.getByLabelText("At most every"), "30");
+    await user.selectOptions(screen.getByLabelText("After a push, silent until quiet for"), "30");
     await waitFor(() => expect(puts).toHaveLength(1));
     await user.click(toggle);
     await waitFor(() => expect(puts).toHaveLength(2));

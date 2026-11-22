@@ -13,25 +13,53 @@ import (
 // first track. Truncated trailing data is ignored, so a file still being
 // written yields the duration of what is already there.
 func FMP4Duration(data []byte) (time.Duration, error) {
-	if len(data) < 8 || string(data[4:8]) != "ftyp" {
-		return 0, errors.New("archive: not an MP4 file")
+	var total uint64
+	tr, err := walkSamples(data, func(dur, n uint32) { total += uint64(dur) * uint64(n) })
+	if err != nil {
+		return 0, err
 	}
-	var (
-		tr    track
-		total uint64
-	)
+	return time.Duration(float64(total) / float64(tr.timescale) * float64(time.Second)), nil
+}
+
+// FMP4SampleDurations lists the durations of the samples FMP4Duration adds
+// up, in order. A recorder that dropped frames leaves one long sample where
+// they were, which the total does not show (tools/sizing, #142).
+func FMP4SampleDurations(data []byte) ([]time.Duration, error) {
+	var ticks []uint32
+	tr, err := walkSamples(data, func(dur, n uint32) {
+		for range n {
+			ticks = append(ticks, dur)
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]time.Duration, len(ticks))
+	for k, d := range ticks {
+		out[k] = time.Duration(d) * time.Second / time.Duration(tr.timescale)
+	}
+	return out, nil
+}
+
+// walkSamples tells visit about the timed track's samples in every
+// complete moof, in order: n samples of dur ticks each.
+func walkSamples(data []byte, visit func(dur, n uint32)) (track, error) {
+	if len(data) < 8 || string(data[4:8]) != "ftyp" {
+		return track{}, errors.New("archive: not an MP4 file")
+	}
+	var tr track
 	for _, b := range boxes(data) {
 		switch b.typ {
 		case "moov":
 			tr = timedTrack(b.payload)
 		case "moof":
-			total += parseMoof(b.payload, tr)
+			parseMoof(b.payload, tr, visit)
 		}
 	}
 	if tr.timescale == 0 {
-		return 0, errors.New("archive: no timescale in moov")
+		return tr, errors.New("archive: no timescale in moov")
 	}
-	return time.Duration(float64(total) / float64(tr.timescale) * float64(time.Second)), nil
+	return tr, nil
 }
 
 // track is what timing a segment needs of one track.
@@ -146,15 +174,13 @@ func trexDefaultDuration(moov []byte, id uint32) uint32 {
 	return 0
 }
 
-// parseMoof sums the durations of the track's samples in one fragment.
-func parseMoof(moof []byte, tr track) uint64 {
-	var total uint64
+// parseMoof visits the track's samples in one fragment.
+func parseMoof(moof []byte, tr track, visit func(dur, n uint32)) {
 	for _, b := range boxes(moof) {
 		if b.typ == "traf" {
-			total += parseTraf(b.payload, tr)
+			parseTraf(b.payload, tr, visit)
 		}
 	}
-	return total
 }
 
 // tfhdDefaultDuration is the default sample duration a tfhd declares, or
@@ -174,26 +200,24 @@ func tfhdDefaultDuration(tfhd []byte, fallback uint32) uint32 {
 	return fallback
 }
 
-// parseTraf sums one traf's sample durations if it belongs to the track.
-func parseTraf(traf []byte, tr track) uint64 {
+// parseTraf visits one traf's samples if it belongs to the track.
+func parseTraf(traf []byte, tr track, visit func(dur, n uint32)) {
 	tfhd, ok := find(traf, "tfhd")
 	if !ok || len(tfhd) < 8 || binary.BigEndian.Uint32(tfhd[4:8]) != tr.id {
-		return 0
+		return
 	}
 	defaultDur := tfhdDefaultDuration(tfhd, tr.defaultDur)
-	var total uint64
 	for _, b := range boxes(traf) {
 		if b.typ == "trun" {
-			total += parseTrun(b.payload, defaultDur)
+			parseTrun(b.payload, defaultDur, visit)
 		}
 	}
-	return total
 }
 
-// parseTrun sums sample durations of one run.
-func parseTrun(trun []byte, defaultDur uint32) uint64 {
+// parseTrun visits the samples of one run.
+func parseTrun(trun []byte, defaultDur uint32, visit func(dur, n uint32)) {
 	if len(trun) < 8 {
-		return 0
+		return
 	}
 	flags := binary.BigEndian.Uint32(trun[:4]) & 0xffffff
 	count := binary.BigEndian.Uint32(trun[4:8])
@@ -211,15 +235,14 @@ func parseTrun(trun []byte, defaultDur uint32) uint64 {
 		}
 	}
 	if flags&0x100 == 0 {
-		return uint64(count) * uint64(defaultDur)
+		visit(defaultDur, count)
+		return
 	}
-	var total uint64
 	for k := uint32(0); k < count; k++ {
 		p := off + int(k)*perSample
 		if p+4 > len(trun) {
 			break
 		}
-		total += uint64(binary.BigEndian.Uint32(trun[p : p+4]))
+		visit(binary.BigEndian.Uint32(trun[p:p+4]), 1)
 	}
-	return total
 }

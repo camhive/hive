@@ -36,9 +36,14 @@ func TestEveryCapabilityMapsToDocumentedEndpoints(t *testing.T) {
 // Names are never removed or renamed (ADR-0022). A ratchet: every name the
 // list has had stays, including names whose feature ships in the next
 // release (local_login and motion with v0.1.6, camera.retention with
-// v0.1.9). Add a name here when it joins the list.
+// v0.1.9, storage and disk.health with v0.1.10). Add a name here when it joins the list.
 func TestShippedNamesStay(t *testing.T) {
-	shipped := []string{"archive.delete", "archive.encryption", "camera.identity", "camera.retention", "camera.sub_stream", "local_login", "motion", "updates"}
+	shipped := []string{"archive.autolock", "archive.delete", "archive.encryption", "camera.identity", "camera.retention", "camera.sub_stream", "local_login", "motion", "updates",
+		"storage",            // #150, v0.1.10
+		"disk.health",        // #155, v0.1.10
+		"camera.care",        // #163, v0.1.10
+		"camera.sensitivity", // #157, v0.1.10
+	}
 	names := capability.Names()
 	for _, n := range shipped {
 		if !slices.Contains(names, n) {

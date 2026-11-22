@@ -13,7 +13,7 @@ beforeEach(() => { resetCloudForTest(); localStorage.clear(); });
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const hive = { id: "hv_1", name: "Home", status: "active", online: true, claimed_at: "2026-11-09T00:00:00Z", lan: { host: "hv_1.h.camhive.app", port: 16017, addrs: ["192.168.1.20"] }, relay_host: "hv_1.relay.camhive.app" };
 type Cam = { id: string; name: string; group: string; enabled: boolean; source: { kind: string; address: string }; streams: Record<string, { URL: string; Codec?: string; Width?: number; Height?: number }>; created_at: string; updated_at: string; credentials?: { username: string };
-  identity?: Record<string, string>; network?: string; retention_days?: number };
+  identity?: Record<string, string>; network?: string; retention_days?: number; sensitivity?: string; motion_calmed_since?: string };
 
 function stub(role: "owner" | "viewer", hiveExtra: Record<string, unknown> = {}) {
   const cams: Cam[] = [{ id: "cam_1", name: "Door", group: "Outside", enabled: true, source: { kind: "rtsp", address: "rtsp://10.0.0.9/s" }, streams: { main: { URL: "rtsp://10.0.0.9/s", Codec: "H264", Width: 1920, Height: 1080 } }, created_at: "", updated_at: "", credentials: { username: "admin" } }];
@@ -376,5 +376,39 @@ describe("camera management on the hive page", () => {
     const row = await screen.findByTestId("camera");
     expect(screen.queryByRole("button", { name: "Add camera" })).toBeNull();
     expect(within(row).queryByRole("button", { name: "Remove" })).toBeNull();
+  });
+
+  it("sets a camera's motion sensitivity and says since when the hive calmed it (#157)", async () => {
+    const { cams, bodies } = stub("owner", { version: "0.1.10", capabilities: ["camera.sensitivity"] });
+    cams[0]!.sensitivity = "normal";
+    cams[0]!.motion_calmed_since = "2026-11-22T13:10:00Z";
+    const patches = () => bodies["PATCH /v0/cameras/cam_1"] ?? [];
+    const user = mount();
+    await user.click(await screen.findByRole("button", { name: "List" }));
+    const door = await screen.findByTestId("camera");
+    await user.click(within(door).getByRole("button", { name: "Edit" }));
+    let edit = within(door).getByRole("form", { name: "Edit Door" });
+    const local = new Date("2026-11-22T13:10:00Z").toLocaleTimeString("en", { hour: "2-digit", minute: "2-digit" });
+    expect(within(edit).getByText(`Calmed since ${local}`, { exact: false })).toBeInTheDocument();
+    expect(within(edit).getByLabelText("Motion sensitivity")).toHaveDisplayValue("Normal");
+    await user.click(within(edit).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(patches()).toHaveLength(1));
+    expect(patches()[0]).not.toHaveProperty("sensitivity"); // unchanged: not sent
+
+    await user.click(within(door).getByRole("button", { name: "Edit" }));
+    edit = within(door).getByRole("form", { name: "Edit Door" });
+    await user.selectOptions(within(edit).getByLabelText("Motion sensitivity"), "Low");
+    await user.click(within(edit).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(patches()).toHaveLength(2));
+    expect(patches()[1]).toMatchObject({ sensitivity: "low" });
+  }, 20_000);
+
+  it("offers no sensitivity on a hive without camera.sensitivity", async () => {
+    stub("owner", { version: "0.1.9", capabilities: ["camera.retention"] });
+    const user = mount();
+    await user.click(await screen.findByRole("button", { name: "List" }));
+    const door = await screen.findByTestId("camera");
+    await user.click(within(door).getByRole("button", { name: "Edit" }));
+    expect(within(door).queryByLabelText("Motion sensitivity")).toBeNull();
   });
 });

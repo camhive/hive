@@ -116,7 +116,8 @@
     "push_not_configured": "Push-Benachrichtigungen sind auf diesem Server nicht eingerichtet.",
     "push_endpoint": "Der Push-Dienst dieses Browsers wird nicht unterstützt.",
     "grant_end_past": "Das Ende muss in der Zukunft liegen.",
-    "grant_end_far": "Das Ende darf höchstens 10 Jahre in der Zukunft liegen. Machen Sie die Freigabe stattdessen unbefristet."
+    "grant_end_far": "Das Ende darf höchstens 10 Jahre in der Zukunft liegen. Machen Sie die Freigabe stattdessen unbefristet.",
+    "moving": "Der Hive zieht auf eine neue Festplatte um; Änderungen warten, bis der Umzug beendet ist."
   },
   "account": {
     "title": "Konto",
@@ -313,7 +314,9 @@
         "camera_offline": "Kamera offline",
         "camera_online": "Kamera online",
         "camera_address_changed": "Kameraadresse geändert",
-        "camera_identity_changed": "Anderes Gerät unter der Kameraadresse"
+        "camera_identity_changed": "Anderes Gerät unter der Kameraadresse",
+        "disk_failing": "Festplatte versagt",
+        "disk_failed": "Festplatte nicht beschreibbar"
       },
       "source": {
         "camera": "von der Kamera erkannt",
@@ -380,7 +383,15 @@
       "routed": "Diese Kamera ist in einem anderen Netz als der Hive: Ändert sich ihre Adresse, findet der Hive sie nicht. Reservieren Sie ihre Adresse im Router."
     },
     "replaceCamera": "Es ist eine neue Kamera, verwenden",
-    "loading": "Kameras werden geladen …"
+    "loading": "Kameras werden geladen …",
+    "sensitivity": "Bewegungsempfindlichkeit",
+    "sensitivityLevels": {
+      "low": "Niedrig",
+      "normal": "Normal",
+      "high": "Hoch"
+    },
+    "sensitivityHint": "Niedrig übergeht kleine und kurze Bewegung (Bäume, Licht, Regen); hoch erkennt auch kleine Bewegung in der Ferne.",
+    "calmedSince": "Beruhigt seit {{time}}: Diese Kamera hatte mehr als 20 Bewegungen in einer Stunde, deshalb reagiert der Hive eine Stufe weniger, bis eine Stunde ohne Bewegung vergeht."
   },
   "members": {
     "title": "Mitglieder",
@@ -688,7 +699,42 @@
     "rateLimited_other": "Zu viele falsche Passphrasen. Versuchen Sie es in {{count}} Minuten erneut.",
     "rateLimitedUnknown": "Zu viele falsche Passphrasen. Der Hive sperrt das Entsperren für bis zu 15 Minuten; versuchen Sie es später erneut.",
     "lockedOwner": "Die Aufnahmen auf diesem Hive sind gesperrt: Der Hive wurde neu gestartet oder Sie haben sie gesperrt. Entsperren Sie sie, um Aufnahmen abzuspielen und zu exportieren. Aufnahme und Livebild laufen weiter.",
-    "lockedMember": "Die Aufnahmen auf diesem Hive sind von seinem Besitzer gesperrt. Das Livebild läuft weiter."
+    "lockedMember": "Die Aufnahmen auf diesem Hive sind von seinem Besitzer gesperrt. Das Livebild läuft weiter.",
+    "autolockTitle": "Automatisch sperren",
+    "autolockHelp": "Der Hive kann die Aufnahmen von selbst sperren, damit der Schlüssel nicht wochenlang in seinem Speicher bleibt. Sie entsperren sie mit Ihrer Passphrase wie nach einem Neustart. Unterwegs können Sie sie verschärfen; eine Sperre ausschalten oder verlängern geht nur zu Hause.",
+    "autolockAfter": "Wenn niemand Aufnahmen angesehen hat seit",
+    "autolockAfterChoice": {
+      "off": "Nie",
+      "1h": "1 Stunde",
+      "8h": "8 Stunden",
+      "24h": "24 Stunden",
+      "7d": "7 Tagen"
+    },
+    "autolockAway": "Wenn ich das Haus verlasse",
+    "autolockAwayChoice": {
+      "off": "Nie",
+      "10m": "Nach 10 Minuten unterwegs",
+      "1h": "Nach 1 Stunde unterwegs"
+    },
+    "autolockAwayNote": "Die App meldet dem Hive, wenn sie ihn nicht mehr in Ihrem Netzwerk erreicht, solange sie geöffnet ist. Gehen Sie mit geschlossener App, gilt nur die erste Einstellung.",
+    "autolockLocksIn": {
+      "inactivity": {
+        "minutes_one": "Sperrt in {{count}} Minute, wenn niemand Aufnahmen ansieht.",
+        "minutes_other": "Sperrt in {{count}} Minuten, wenn niemand Aufnahmen ansieht.",
+        "hours_one": "Sperrt in {{count}} Stunde, wenn niemand Aufnahmen ansieht.",
+        "hours_other": "Sperrt in {{count}} Stunden, wenn niemand Aufnahmen ansieht.",
+        "days_one": "Sperrt in {{count}} Tag, wenn niemand Aufnahmen ansieht.",
+        "days_other": "Sperrt in {{count}} Tagen, wenn niemand Aufnahmen ansieht."
+      },
+      "away": {
+        "minutes_one": "Sie sind unterwegs: sperrt in {{count}} Minute, wenn Sie nicht zurückkommen.",
+        "minutes_other": "Sie sind unterwegs: sperrt in {{count}} Minuten, wenn Sie nicht zurückkommen.",
+        "hours_one": "Sie sind unterwegs: sperrt in {{count}} Stunde, wenn Sie nicht zurückkommen.",
+        "hours_other": "Sie sind unterwegs: sperrt in {{count}} Stunden, wenn Sie nicht zurückkommen.",
+        "days_one": "Sie sind unterwegs: sperrt in {{count}} Tag, wenn Sie nicht zurückkommen.",
+        "days_other": "Sie sind unterwegs: sperrt in {{count}} Tagen, wenn Sie nicht zurückkommen."
+      }
+    }
   },
   "notify": {
     "title": "Benachrichtigungen",
@@ -701,17 +747,17 @@
     },
     "group": {
       "offline": "Kamera oder Hive offline",
-      "storage": "Wenig Speicher",
+      "storage": "Wenig Speicher oder Festplatte versagt",
       "motion": "Bewegung"
     },
     "groupHelp": {
       "offline": "Nach 3 Minuten bei einer Kamera, 5 bei einem Hive; und wenn sie wieder da sind.",
-      "storage": "Die Archivfestplatte hält den freien Platz nicht mehr; einmal, wenn das beginnt.",
-      "motion": "Wenn an einer Kamera Bewegung beginnt; höchstens einmal je Wartezeit der Kamera."
+      "storage": "Die Archivfestplatte hält den freien Platz nicht mehr, oder sie versagt; einmal, wenn das beginnt.",
+      "motion": "Wenn an einer Kamera Bewegung beginnt. Nach einer Push-Meldung schweigt die Kamera, bis sie so lange ruhig war wie ihre Wartezeit (10 Minuten, wenn nicht je Kamera eingestellt) – eine Straßenkamera mit viel Verkehr meldet sich also einmal und wird dann still. Nichts, solange Sie den Hive zu Hause in der App geöffnet haben; nach 50 an einem Tag in Ihrem Konto eine Zusammenfassung pro Stunde je Hive bis Mitternacht."
     },
     "perCamera": "Bewegung je Kamera: Öffnen Sie die Kamera auf der Seite ihres Hives und wählen Sie Benachrichtigungen.",
     "quiet": "Ruhezeiten",
-    "quietHelp": "In diesem Zeitraum keine Bewegungsbenachrichtigungen. Offline- und Speicherhinweise kommen weiterhin.",
+    "quietHelp": "Bewegung in diesem Zeitraum wird nicht gemeldet: Am Ende kommt eine Zusammenfassung. Offline- und Speicherhinweise kommen weiterhin sofort.",
     "from": "Von",
     "until": "Bis",
     "save": "Speichern",
@@ -719,10 +765,20 @@
     "cameraButton": "Benachrichtigungen",
     "cameraTitle": "Benachrichtigungen für diese Kamera",
     "cameraMotion": "Bewegungsbenachrichtigungen für diese Kamera",
-    "cooldown": "Höchstens alle",
+    "cooldown": "Nach einer Meldung still, bis ruhig für",
     "minutes_one": "{{count}} Minute",
     "minutes_other": "{{count}} Minuten",
-    "motionOffEverywhere": "Bewegungsbenachrichtigungen sind auf der Seite Benachrichtigungen ausgeschaltet."
+    "motionOffEverywhere": "Bewegungsbenachrichtigungen sind auf der Seite Benachrichtigungen ausgeschaltet.",
+    "mode": "Wann",
+    "modeLabel": "{{group}}: wann",
+    "modes": {
+      "immediate": "Jedes Mal",
+      "hourly": "Stündliche Zusammenfassung",
+      "daily": "Tägliche Zusammenfassung",
+      "quiet": "Nie"
+    },
+    "modesHelp": "Bewegung kann als Zusammenfassung kommen: eine Benachrichtigung pro Stunde oder Tag mit der Zahl der Bewegungen, den Kameras und der ersten und letzten Uhrzeit. Nie lässt die Bewegungen nur in der Zeitleiste des Hives. Offline- und Speicherhinweise kommen immer sofort.",
+    "counts": "Diese Woche: {{episodes}} Bewegungen, {{pushes}} Push-Benachrichtigungen."
   },
   "push": {
     "title": "Push auf Ihren Geräten",
@@ -813,7 +869,9 @@
       "local_login.success": "Lokal angemeldet",
       "local_login.failure": "Lokale Anmeldung fehlgeschlagen",
       "local_login.locked": "Lokale Anmeldung nach Fehlversuchen gesperrt",
-      "archive.encryption.key_file": "Wiederherstellungs-Schlüsseldatei heruntergeladen"
+      "archive.encryption.key_file": "Wiederherstellungs-Schlüsseldatei heruntergeladen",
+      "motion.calmed": "Bewegungserkennung beruhigt: zu viele Bewegungen in einer Stunde",
+      "motion.calm_ended": "Bewegungserkennung wieder auf ihrer Empfindlichkeit"
     }
   },
   "install": {
@@ -836,5 +894,140 @@
     "available": "Eine neue Version ist verfügbar.",
     "update": "Aktualisieren",
     "updating": "Wird aktualisiert…"
+  },
+  "storage": {
+    "title": "Speicher",
+    "help": "Wie viele Aufnahmen dieser Hive hält, wie schnell die Kameras seine Festplatte füllen und wie lange sie bei diesem Tempo reicht.",
+    "helpMember": "Wie viele Tage Aufnahmen der Hive für Ihre Kameras hält.",
+    "open": "Speicher anzeigen…",
+    "diskTotal": "Festplattengröße",
+    "archive": "Aufnahmen",
+    "exports": "Exporte",
+    "free": "Frei",
+    "forecast": {
+      "nothing": "Noch nichts aufgenommen: Die Prognose beginnt mit den ersten Aufnahmen.",
+      "fits": "Bei {{rate}} pro Tag hält diese Festplatte {{days}} Tage; die Aufbewahrung ist {{retention}} Tage, das passt.",
+      "short": "Bei {{rate}} pro Tag hält diese Festplatte {{days}} Tage; die Aufbewahrung ist {{retention}} Tage, tatsächlich werden es also {{effective}}.",
+      "unlimited": "Bei {{rate}} pro Tag hält diese Festplatte {{days}} Tage; Aufnahmen bleiben, bis der Platz ausgeht, etwa {{effective}} Tage.",
+      "fitsOwn": "Bei {{rate}} pro Tag hält diese Festplatte {{days}} Tage für alle Kameras gleich; die Aufbewahrung ist {{retention}} Tage, das passt, weil {{camera}} nur {{own}} Tage behält.",
+      "unlimitedPlain": "Bei {{rate}} pro Tag hält diese Festplatte {{days}} Tage; Aufnahmen bleiben, bis der Platz ausgeht."
+    },
+    "short": "Die Festplatte kann bei diesem Tempo keine {{retention}} Tage halten: Dafür wären {{needed}} Platz nötig. Verkürzen Sie die Aufbewahrung, nehmen Sie weniger auf (niedrigere Bitrate, ohne Substream) oder verwenden Sie eine größere Festplatte.",
+    "shortOwn": "Die Festplatte kann bei diesem Tempo keine {{retention}} Tage halten, und eine Kamera behält Aufnahmen, bis der Platz ausgeht. Verkürzen Sie die Aufbewahrung, nehmen Sie weniger auf oder verwenden Sie eine größere Festplatte.",
+    "fillsIn_one": "In etwa {{count}} Tag beginnt der Hive, die ältesten Aufnahmen für Platz zu löschen.",
+    "fillsIn_other": "In etwa {{count}} Tagen beginnt der Hive, die ältesten Aufnahmen für Platz zu löschen.",
+    "fillsNow": "Der Hive löscht gerade die ältesten Aufnahmen, um {{floor}} GiB frei zu halten.",
+    "cameras": "Aufnahmen pro Kamera",
+    "cameraLine_one": "{{days}} Tag gespeichert, {{size}}, {{rate}} pro Tag",
+    "cameraLine_other": "{{days}} Tage gespeichert, {{size}}, {{rate}} pro Tag",
+    "keeps": "behält {{retention}} Tage",
+    "keepsShort": "behält {{effective}} von {{retention}} Tagen",
+    "keepsUnlimited": "behält, bis der Platz ausgeht, etwa {{effective}} Tage",
+    "removed": "Entfernte Kamera",
+    "noFootage": "Noch keine Aufnahmen.",
+    "memberLine_one": "{{name}}: {{days}} Tag Aufnahmen, {{size}}",
+    "memberLine_other": "{{name}}: {{days}} Tage Aufnahmen, {{size}}",
+    "settings": "Einstellungen",
+    "retention": "Aufnahmen behalten (Tage)",
+    "retentionHelp": "0 behält Aufnahmen, bis der Platz ausgeht. Die eigene Aufbewahrung einer Kamera geht vor.",
+    "floor": "Auf der Festplatte frei halten (GiB)",
+    "floorHelp": "Der Hive löscht die ältesten Aufnahmen, um so viel frei zu halten: 1 bis {{max}}.",
+    "invalid": {
+      "retention_days": "Geben Sie ganze Tage von 0 bis 3650 ein.",
+      "min_free_gb": "Geben Sie eine ganze Zahl GiB von 1 bis {{max}} ein."
+    },
+    "confirmDelete": "Mit diesen Einstellungen löscht der Hive innerhalb von 5 Minuten Aufnahmen, und gelöschte Aufnahmen lassen sich nicht wiederherstellen. Trotzdem speichern?",
+    "save": "Speichern",
+    "saved": "Gespeichert. Der Hive wendet die Einstellungen beim nächsten Durchlauf an, innerhalb von 5 Minuten.",
+    "fillsSoon": "Innerhalb eines Tages beginnt der Hive, die ältesten Aufnahmen für Platz zu löschen.",
+    "keepsUnlimitedPlain": "behält, bis der Platz ausgeht",
+    "cap": "Ihr Tarif behält Aufnahmen höchstens {{cap}} Tage, also behalten die Kameras mit dieser Einstellung {{cap}}."
+  },
+  "cameraCare": {
+    "title": "Kamerazustand",
+    "ok": "Keine Probleme erkannt.",
+    "degraded": "Braucht Aufmerksamkeit",
+    "degradedSince": "Braucht Aufmerksamkeit seit {{time}}",
+    "badge": "Braucht Aufmerksamkeit: {{reasons}}",
+    "and": "und",
+    "stream": {
+      "main": "Haupt",
+      "sub": "Sub"
+    },
+    "reason": {
+      "bitrate_drop": "Bitrate gesunken",
+      "frame_loss": "Aufnahmen fehlen",
+      "reconnects": "Neuverbindungen",
+      "clock_drift": "Uhr geht falsch",
+      "offline_pattern": "Ausfallmuster",
+      "night_picture": "Nachtbild",
+      "stream_changed": "Stream geändert"
+    },
+    "fact": {
+      "bitrate_drop": "Der {{stream}}stream lieferte in der letzten Stunde {{pct}} % seiner üblichen Bitrate.",
+      "frame_loss": "In der letzten Stunde fehlen {{seconds}} s Aufnahme.",
+      "late_one": "Neue Aufnahmen kommen seit {{count}} Minute zu spät.",
+      "late_other": "Neue Aufnahmen kommen seit {{count}} Minuten zu spät.",
+      "reconnects_one": "In den letzten 24 Stunden {{count}}-mal neu verbunden.",
+      "reconnects_other": "In den letzten 24 Stunden {{count}}-mal neu verbunden.",
+      "clock_drift": "Die Uhr der Kamera geht {{seconds}} s falsch.",
+      "offline_pattern": "An mehreren Tagen gegen {{hours}} offline.",
+      "night_picture": "Nachts sinkt der {{stream}}stream auf {{pct}} % seiner Bitrate am Tag.",
+      "stream_changed": "Der {{stream}}stream wechselte von {{from}} zu {{to}}."
+    },
+    "advice": {
+      "bitrate_drop": "Auch eine ruhigere Szene senkt die Bitrate; sieht das Bild falsch aus, prüfen Sie das Kabel oder das PoE-Budget.",
+      "frame_loss": "Prüfen Sie das Kabel und aktualisieren Sie dann die Firmware der Kamera.",
+      "reconnects": "Prüfen Sie das Kabel oder das PoE-Budget.",
+      "clock_drift": "Stellen Sie den NTP-Server der Kamera ein.",
+      "offline_pattern": "Prüfen Sie, was zu diesen Stunden Strom oder Netzwerk der Kamera abschaltet.",
+      "night_picture": "Die IR-Beleuchtung ist vielleicht ausgefallen.",
+      "stream_changed": "Prüfen Sie die Videoeinstellungen der Kamera und aktualisieren Sie ihre Firmware, wenn sie sie zurückgesetzt hat."
+    }
+  },
+  "disk": {
+    "theDisk": "die Archivfestplatte",
+    "failingTitle": "Die Festplatte {{device}} versagt: ersetzen Sie sie bald",
+    "failingBody": "Der Hive nimmt noch auf, aber die Festplatte zeigt Anzeichen eines Ausfalls. Sichern Sie jetzt die Dateien des Hives, solange sie sich noch lesen lassen, und ziehen Sie den Hive auf eine neue Festplatte um.",
+    "failedTitle": "Der Hive kann nicht mehr auf {{device}} schreiben: die Aufnahme ist gestoppt",
+    "failedBody": "Sichern Sie, was sich noch lesen lässt, und ziehen Sie den Hive auf eine neue Festplatte um.",
+    "signal": {
+      "smart": "SMART",
+      "kernel": "Systemprotokoll",
+      "writes": "Fehlgeschlagene Schreibvorgänge",
+      "probe": "Testschreiben"
+    },
+    "saveFirst": "Kopieren Sie zuerst diese Dateien an einen anderen Ort (ein USB-Stick genügt); ohne archive-key/ lässt sich ein verschlüsseltes Archiv nicht öffnen:",
+    "thenRun": "Schließen Sie dann eine neue Festplatte an und führen Sie auf dem Rechner des Hives aus:",
+    "guided": "Schritt für Schritt auf eine neue Festplatte umziehen",
+    "moveTitle": "Auf eine neue Festplatte umziehen",
+    "moveHelp": "Kopiert die Schlüssel, Einstellungen, Datenbank und die neuesten Aufnahmen des Hives auf eine neue Festplatte und startet den Hive von dort. Auf der alten Festplatte wird nichts gelöscht.",
+    "moveOpen": "Daten umziehen…",
+    "moveUnsupported": "Der geführte Umzug funktioniert für einen Hive, der unter Linux als systemd-Dienst läuft. Kopieren Sie diese Dateien von Hand und lesen Sie in der Dokumentation „Die Festplatte ersetzen“:",
+    "step1": "Kopieren Sie zuerst diese Dateien an einen anderen Ort:",
+    "step2": "Schließen Sie die neue Festplatte an und binden Sie sie ein, zum Beispiel unter /mnt/newdisk.",
+    "target": "Neues Datenverzeichnis auf dieser Festplatte",
+    "targetError": {
+      "absolute": "Geben Sie den vollständigen Pfad an, beginnend mit /.",
+      "overlaps": "Wählen Sie ein Verzeichnis auf der neuen Festplatte, nicht in oder über {{dir}}.",
+      "characters": "Verwenden Sie einen einfachen Pfad ohne Leerzeichen und ohne % \\ \" ' $ ; & | ( ) < > * ? # ` ! ~ { } [ ]: Dienstdefinition und Shell würden sie verändern."
+    },
+    "step3": "Führen Sie dies auf dem Rechner des Hives aus:",
+    "copy": "Befehl kopieren",
+    "copied": "Kopiert",
+    "step4": "Während des Kopierens antwortet der Hive, nimmt aber nicht auf und lehnt Änderungen ab; diese Seite zeigt den Fortschritt.",
+    "copying": "Umzug nach {{to}}: {{step}}",
+    "progress": "Fortschritt des Umzugs",
+    "copiedOf": "{{copied}} von {{planned}} ({{pct}} %)",
+    "stuck": "Der Umzug wurde unterbrochen: {{error}}. Führen Sie denselben Befehl erneut aus, um fortzufahren, oder `sudo hive move-data --cancel`, um wieder auf die alte Festplatte aufzunehmen.",
+    "notRecording": "Der Hive nimmt erst wieder auf, wenn der Umzug beendet ist.",
+    "done": "Der Hive ist von {{from}} nach {{to}} umgezogen und läuft von der neuen Festplatte. Die alte Festplatte wurde nicht verändert.",
+    "cancelled": "Der Umzug wurde abgebrochen; der Hive nimmt wieder in {{from}} auf.",
+    "skipped_one": "{{count}} Segment ({{size}}) passte nicht auf die neue Festplatte; Aufnahmen bis {{newest}} bleiben auf der alten Festplatte.",
+    "skipped_other": "{{count}} Segmente ({{size}}) passten nicht auf die neue Festplatte; Aufnahmen bis {{newest}} bleiben auf der alten Festplatte.",
+    "switching": "Alles ist kopiert; der Hive wird von {{to}} gestartet.",
+    "switchStuck": "Alles ist kopiert, aber der Hive ist nicht von {{to}} gestartet: {{error}}. Führen Sie denselben Befehl erneut aus oder `sudo hive move-data --cancel`, um zurückzugehen.",
+    "unreadable_one": "{{count}} Segment ({{size}}) ließ sich von der alten Festplatte nicht lesen und blieb dort.",
+    "unreadable_other": "{{count}} Segmente ({{size}}) ließen sich von der alten Festplatte nicht lesen und blieben dort."
   }
 }

@@ -35,6 +35,9 @@ func runStatus(status func() (service.Status, error), self version.Info, paths h
 	} else {
 		fmt.Fprintln(stdout, statusString(st))
 	}
+	if l := moveLine(paths.Data); l != "" {
+		fmt.Fprintln(stdout, l)
+	}
 	reportHive(context.Background(), stdout, stderr, self, paths)
 	return code
 }

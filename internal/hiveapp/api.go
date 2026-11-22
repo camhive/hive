@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/camhive/hive/internal/archivekey"
 	"github.com/camhive/hive/internal/auth"
 	"github.com/camhive/hive/internal/domain/camera"
 	"github.com/camhive/hive/internal/entitlements"
@@ -64,6 +65,27 @@ type Deps struct {
 	// Emit sends an event to the cloud (hiveagent.Agent.Emit): the audit
 	// of archive key changes. Nil sends nothing.
 	Emit func(name string, data any)
+	// Autolock locks the unlocked archive after inactivity or when the
+	// owner left home (#147); nil: the endpoints answer 503 not_ready.
+	Autolock *archivekey.Autolock
+	// Storage is the archive disk and the hive-wide retention settings
+	// (#150); nil answers 503 not_ready.
+	Storage *StorageControl
+	// Move is where the hive reads the note of hive move-data (#155);
+	// nil: no move was ever started.
+	Move *MoveInfo
+	// Care is camera care (#163); nil: GET /v0/cameras/{id}/care answers
+	// 503 not_ready and the health views carry no care summary.
+	Care CareSource
+	// Motion says which cameras the hive calmed (#157, motion.Hub); nil:
+	// none.
+	Motion CalmReader
+}
+
+// CalmReader tells since when the hive calmed a camera's motion detection
+// because it raised too many episodes (#157).
+type CalmReader interface {
+	CalmedSince(cam string) (time.Time, bool)
 }
 
 // licensed is the effective local entitlement set.
@@ -132,13 +154,21 @@ func NewAPI(d Deps) http.Handler {
 	mux.Handle("DELETE /v0/local-login", api.auth(api.disableLocalLogin))
 	mux.HandleFunc("POST /v0/local-login/sessions", api.localSignIn)
 	mux.Handle("POST /v0/cameras/{id}/ptz/presets/{preset}/goto", api.auth(api.ptzGoto))
-	return cors(mux)
+	mux.Handle("PATCH /v0/archive/encryption/autolock", api.auth(api.setAutolock))
+	mux.Handle("POST /v0/archive/encryption/presence", api.auth(api.presence))
+	mux.Handle("GET /v0/storage", api.auth(api.getStorage))
+	mux.Handle("PATCH /v0/hive/storage", api.auth(api.patchStorage))
+	mux.Handle("GET /v0/hive/move", api.auth(api.getMove))
+	mux.Handle("GET /v0/cameras/{id}/care", api.auth(api.cameraCare))
+	return cors(whileMoving(d.Move, mux))
 }
 
 type api struct {
 	d      Deps
 	logins *loginLimiter
 	hashMu sync.Mutex // one argon2id verification at a time bounds memory under a flood
+	// autolockMu: one change of the automatic lock at a time (#147).
+	autolockMu sync.Mutex
 }
 
 // --- errors -------------------------------------------------------------
@@ -260,6 +290,8 @@ type cameraView struct {
 	Retention   *int                         `json:"retention_days,omitempty"` // absent: the hive-wide value (#61); every role: it says how far back the archive goes, which the calendar shows them anyway
 	Identity    *camera.Identity             `json:"identity,omitempty"`       // owner only (ADR-0017)
 	Network     string                       `json:"network,omitempty"`
+	Sensitivity string                       `json:"sensitivity"`                   // #157
+	CalmedSince *time.Time                   `json:"motion_calmed_since,omitempty"` // #157: the hive raised the threshold one step since then
 	CreatedAt   time.Time                    `json:"created_at"`
 	UpdatedAt   time.Time                    `json:"updated_at"`
 }
@@ -273,11 +305,17 @@ type credentialsView struct {
 	Username string `json:"username"`
 }
 
-func toView(c camera.Camera, claims auth.Claims) cameraView {
+func (a *api) toView(c camera.Camera, claims auth.Claims) cameraView {
 	v := cameraView{
 		ID: string(c.ID), Name: c.Name, Group: c.Group,
 		Source:  sourceView{Kind: string(c.Source.Kind), Address: c.Source.Address},
-		Streams: map[string]camera.StreamSpec{}, Enabled: c.Enabled, RecordAudio: c.RecordAudio, Retention: c.Retention.Days, Network: string(c.Network), CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
+		Streams: map[string]camera.StreamSpec{}, Enabled: c.Enabled, RecordAudio: c.RecordAudio, Retention: c.Retention.Days, Network: string(c.Network),
+		Sensitivity: c.Sensitivity.String(), CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
+	}
+	if a.d.Motion != nil {
+		if since, ok := a.d.Motion.CalmedSince(string(c.ID)); ok {
+			v.CalmedSince = &since
+		}
 	}
 	if claims.Role == auth.RoleOwner {
 		id := c.Identity
@@ -329,6 +367,8 @@ type cameraPatch struct {
 	Retention       retentionInput `json:"retention_days"`
 	// SubStream sets the sub stream's RTSP URL; "" removes it (#63).
 	SubStream *string `json:"sub_stream"`
+	// Sensitivity is low, normal or high (#157).
+	Sensitivity *string `json:"sensitivity"`
 }
 
 // retentionInput is retention_days in a camera patch (#61): absent leaves
@@ -366,7 +406,11 @@ func (r retentionInput) detail() any {
 // applyPatch returns the camera with the patch applied and, when the host
 // changes, moved there; it writes the error response when it refuses.
 func (a *api) applyPatch(w http.ResponseWriter, r *http.Request, c camera.Camera, in cameraPatch) (camera.Camera, bool) {
-	u, err := c.Update(in.patch(), time.Now())
+	var u camera.Camera
+	p, err := in.patch()
+	if err == nil {
+		u, err = c.Update(p, time.Now())
+	}
 	if err != nil {
 		writeError(w, http.StatusUnprocessableEntity, "invalid", err.Error())
 		return camera.Camera{}, false
@@ -377,17 +421,24 @@ func (a *api) applyPatch(w http.ResponseWriter, r *http.Request, c camera.Camera
 	return a.moveCamera(w, r, u, *in.Host, in.ReplaceIdentity)
 }
 
-func (in cameraPatch) patch() camera.Patch {
+func (in cameraPatch) patch() (camera.Patch, error) {
 	p := camera.Patch{Name: in.Name, Group: in.Group, Enabled: in.Enabled, RecordAudio: in.RecordAudio, Retention: in.Retention.patch(), SubStream: in.SubStream}
 	if in.Credentials != nil {
 		p.Credentials = &camera.Credentials{Username: in.Credentials.Username, Password: in.Credentials.Password}
 	}
-	return p
+	if in.Sensitivity != nil {
+		s, err := camera.ParseSensitivity(*in.Sensitivity)
+		if err != nil {
+			return camera.Patch{}, err
+		}
+		p.Sensitivity = &s
+	}
+	return p, nil
 }
 
 // changesFields reports whether the patch changes more than the host.
 func (in cameraPatch) changesFields() bool {
-	return in.Name != nil || in.Group != nil || in.Enabled != nil || in.RecordAudio != nil || in.Credentials != nil || in.Retention.set || in.SubStream != nil
+	return in.Name != nil || in.Group != nil || in.Enabled != nil || in.RecordAudio != nil || in.Credentials != nil || in.Retention.set || in.SubStream != nil || in.Sensitivity != nil
 }
 
 // recordPatch logs a move and an update separately, each only when it happened.
@@ -397,7 +448,7 @@ func (a *api) recordPatch(r *http.Request, old, now camera.Camera, in cameraPatc
 	}
 	if in.changesFields() {
 		a.record(r, "camera.update", string(now.ID), map[string]any{"name": in.Name, "group": in.Group, "enabled": in.Enabled, "record_audio": in.RecordAudio,
-			"credentials_changed": in.Credentials != nil, "retention_days": in.Retention.detail(), "sub_stream": in.SubStream})
+			"credentials_changed": in.Credentials != nil, "retention_days": in.Retention.detail(), "sub_stream": in.SubStream, "sensitivity": in.Sensitivity})
 	}
 }
 
@@ -424,7 +475,7 @@ func (a *api) listCameras(w http.ResponseWriter, r *http.Request) {
 	out := make([]cameraView, 0, len(cams))
 	for _, c := range cams {
 		if claims.Allows(string(c.ID), auth.ActionLive) {
-			out = append(out, toView(c, claims))
+			out = append(out, a.toView(c, claims))
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -444,7 +495,7 @@ func (a *api) getCamera(w http.ResponseWriter, r *http.Request) {
 	if a.storeErr(w, err) {
 		return
 	}
-	writeJSON(w, http.StatusOK, toView(c, claims))
+	writeJSON(w, http.StatusOK, a.toView(c, claims))
 }
 
 func (a *api) createCamera(w http.ResponseWriter, r *http.Request) {
@@ -481,7 +532,7 @@ func (a *api) createCamera(w http.ResponseWriter, r *http.Request) {
 	}
 	a.record(r, "camera.add", string(c.ID), map[string]any{"name": c.Name, "kind": c.Source.Kind, "address": c.Source.Address})
 	a.d.Notify()
-	writeJSON(w, http.StatusCreated, toView(c, claims))
+	writeJSON(w, http.StatusCreated, a.toView(c, claims))
 }
 
 func (a *api) patchCamera(w http.ResponseWriter, r *http.Request) {
@@ -511,7 +562,7 @@ func (a *api) patchCamera(w http.ResponseWriter, r *http.Request) {
 	}
 	a.recordPatch(r, c, u, in)
 	a.d.Notify()
-	writeJSON(w, http.StatusOK, toView(u, claims))
+	writeJSON(w, http.StatusOK, a.toView(u, claims))
 }
 
 func (a *api) deleteCamera(w http.ResponseWriter, r *http.Request) {

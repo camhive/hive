@@ -17,6 +17,7 @@ import { PtzPad } from "@/components/PtzPad";
 import { Timeline } from "@/components/Timeline";
 import { EventList } from "@/components/EventList";
 import { CameraAlerts } from "@/components/CameraAlerts";
+import { CameraCareLine } from "@/components/CameraCare";
 import { useCloudReachable } from "@/lib/cloud";
 import { Field } from "@/components/Field";
 import { CameraEditForm, ReplaceButton, useCameraActions } from "@/components/CameraManage";
@@ -230,6 +231,7 @@ export function CameraDetail({ hive, grant, quality, client, camera, health, sig
       {actions.mismatch && <ReplaceButton onReplace={actions.replace} />}
       {actions.editing && <div className="card"><CameraEditForm hive={hive} camera={camera} onSubmit={actions.patch} /></div>}
       {alerts && owner && cloud && <div className="card"><CameraAlerts hiveId={hive.id} cameraId={camera.id} /></div>}
+      <CameraCareLine hive={hive} client={client} cameraId={camera.id} />
 
       {live && (
         <LiveTile hiveId={hive.id} camera={camera} health={health} stream={streamFor(quality, "detail")} signal={signal} iceServers={grant.ice_servers} paused={paused} peer={peer}>

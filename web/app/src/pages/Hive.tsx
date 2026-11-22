@@ -22,6 +22,9 @@ import { AddCamera, CameraRow, groupSorted } from "@/components/CameraManage";
 import { LocalSessionBanner, LocalSignIn } from "@/components/LocalLogin";
 import { LanAddressStep } from "@/components/LanAddress";
 import { ArchiveLockNotice } from "@/components/ArchiveEncryption";
+import { DiskHealthNotice } from "@/components/DiskHealth";
+import { presenceOf } from "@/lib/archiveAutolock";
+import { useReportPresence } from "@/lib/usePresence";
 
 /** `view: "recordings"` opens the camera at its timeline instead of live (#84). */
 export type HiveSearch = { camera?: string; day?: string; view?: "recordings" };
@@ -46,6 +49,7 @@ export function HivePage({ peer, playerDeps }: { peer?: PeerFactory; playerDeps?
   const { alive } = useSessionAlive(hive?.id, local ? undefined : grant?.session_id);
   const { decision, probing, reprobe } = useTransport(hive);
   const home = atHome(local, decision);
+  useReportPresence(hive, client, presenceOf(local, decision, probing), grant?.role === "owner"); // #147: the archive may lock when the owner leaves
   const [layout, setLayout] = useState<Layout>(() => readLayout());
   const [adding, setAdding] = useState(false);
   const signal = useMemo(() => (home && client ? hiveSignalling(client) : hive ? apiSignalling(hive.id) : null), [hive?.id, home, client]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -88,6 +92,7 @@ export function HivePage({ peer, playerDeps }: { peer?: PeerFactory; playerDeps?
       {offerLocal && decision && <LocalSignIn hive={hive} base={transport.baseFor(hive, decision)} />}
       {offerAddress && <LanAddressStep hive={hive} probing={probing} reprobe={reprobe} />}
       {!open && <ArchiveLockNotice hive={hive} client={client} owner={owner} />}
+      {!open && <DiskHealthNotice hive={hive} client={client} owner={owner} />}
       {!hive.online && !local && <p role="alert" className="card muted">{t("live.hiveOffline")}</p>}
       {evicted && <p role="alert" className="card error" data-testid="evicted">{t("live.evicted")}</p>}
       {access.isError && !evicted && <p role="alert" className="card error">{errorMessage(t, access.error)}</p>}
@@ -108,7 +113,7 @@ export function HivePage({ peer, playerDeps }: { peer?: PeerFactory; playerDeps?
           {open && others.length > 0 && <h2 className="eyebrow mb-2">{t("live.otherCameras")}</h2>}
           {layout === "list" ? (
             <ul className="card !py-1 divide-y divide-[var(--border)]" data-testid="grid">
-              {others.map((c) => <CameraRow key={c.id} hive={hive} camera={c} online={healthOf(c)?.online} client={client} editable={owner} onOpen={() => openCamera(c)} onRecordings={() => openRecordings(c)} />)}
+              {others.map((c) => <CameraRow key={c.id} hive={hive} camera={c} online={healthOf(c)?.online} health={healthOf(c)} client={client} editable={owner} onOpen={() => openCamera(c)} onRecordings={() => openRecordings(c)} />)}
               {owner && client && !adding && (
                 <li className="py-3"><button type="button" className="link text-sm" onClick={() => setAdding(true)}><span aria-hidden="true">+ </span>{t("cameras.add")}</button></li>
               )}

@@ -17,6 +17,7 @@ import (
 	"os"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/camhive/hive/internal/archive"
@@ -121,14 +122,26 @@ type Report struct {
 	ExportBytes int64
 }
 
+// Limits are the hive-wide settings the owner changes at run time (#150,
+// ADR-0024 §3): retention_days and min_free_gb.
+type Limits struct {
+	DefaultDays  int
+	MinFreeBytes int64
+}
+
 // Sweeper applies a Policy.
 type Sweeper struct {
 	mu     sync.Mutex // one writer: sweeps and owner deletions never overlap
 	idx    *archive.Index
 	repo   *store.Segments
-	policy Policy
+	policy Policy // as built; never written, Limits override its two limits
 	opts   Options
 	log    *slog.Logger
+
+	limMu  sync.Mutex // not mu: a change must not wait for a long sweep
+	limits Limits
+
+	spaceActive atomic.Bool // the last sweep deleted for space or missed the floor
 }
 
 // New creates a Sweeper.
@@ -148,16 +161,44 @@ func New(idx *archive.Index, repo *store.Segments, policy Policy, opts Options) 
 	if opts.Logger == nil {
 		opts.Logger = slog.New(slog.DiscardHandler)
 	}
-	return &Sweeper{idx: idx, repo: repo, policy: policy, opts: opts, log: opts.Logger}
+	return &Sweeper{idx: idx, repo: repo, policy: policy, opts: opts, log: opts.Logger,
+		limits: Limits{DefaultDays: policy.DefaultDays, MinFreeBytes: policy.MinFreeBytes}}
+}
+
+// Limits returns the hive-wide limits the next sweep applies.
+func (s *Sweeper) Limits() Limits {
+	s.limMu.Lock()
+	defer s.limMu.Unlock()
+	return s.limits
+}
+
+// SetLimits changes the hive-wide limits from the next sweep on; a sweep
+// already running finishes with the old ones.
+func (s *Sweeper) SetLimits(l Limits) error {
+	if err := (Policy{DefaultDays: l.DefaultDays, MinFreeBytes: l.MinFreeBytes}).Validate(); err != nil {
+		return err
+	}
+	s.limMu.Lock()
+	defer s.limMu.Unlock()
+	s.limits = l
+	return nil
+}
+
+// current is the policy with the limits of this moment.
+func (s *Sweeper) current() Policy {
+	p, l := s.policy, s.Limits()
+	p.DefaultDays, p.MinFreeBytes = l.DefaultDays, l.MinFreeBytes
+	return p
 }
 
 // Sweep applies both rules once.
 func (s *Sweeper) Sweep(ctx context.Context) (Report, error) {
-	if err := s.policy.Validate(); err != nil {
-		return Report{}, err
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	p := s.current()
+	if err := p.Validate(); err != nil {
+		return Report{}, err
+	}
 	var rep Report
 	if err := s.finishPending(ctx, &rep); err != nil {
 		return rep, err
@@ -170,21 +211,22 @@ func (s *Sweeper) Sweep(ctx context.Context) (Report, error) {
 	if err := s.pruneExports(ctx, now, &rep); err != nil {
 		return rep, err
 	}
-	return rep, s.ageThenSpace(ctx, segs, now, &rep)
+	return rep, s.ageThenSpace(ctx, p, segs, now, &rep)
 }
 
 // ageThenSpace applies the age rule, then the space rule. When the
 // cameras' own retention cannot be read the age rule deletes nothing but
 // the space rule still runs: a full disk would stop recording.
-func (s *Sweeper) ageThenSpace(ctx context.Context, segs []archive.Segment, now time.Time, rep *Report) error {
-	remaining, err := s.byAge(ctx, segs, now, rep)
+func (s *Sweeper) ageThenSpace(ctx context.Context, p Policy, segs []archive.Segment, now time.Time, rep *Report) error {
+	remaining, err := s.byAge(ctx, p, segs, now, rep)
 	if err != nil && !errors.Is(err, errCameraDays) {
 		return err
 	}
-	if s.policy.MinFreeBytes == 0 {
+	if p.MinFreeBytes == 0 {
+		s.spaceActive.Store(false)
 		return err
 	}
-	return errors.Join(err, s.freeSpace(ctx, remaining, rep))
+	return errors.Join(err, s.freeSpace(ctx, p.MinFreeBytes, remaining, rep))
 }
 
 // pruneExports removes old exports first: they are copies of footage.
@@ -204,15 +246,15 @@ func (s *Sweeper) pruneExports(ctx context.Context, now time.Time, rep *Report) 
 // rest. Without the cameras' own retention it deletes nothing (the shorter
 // hive-wide value would otherwise apply to every camera) and returns every
 // segment with an errCameraDays error.
-func (s *Sweeper) byAge(ctx context.Context, segs []archive.Segment, now time.Time, rep *Report) ([]archive.Segment, error) {
-	own, err := s.policy.cameraDays(ctx)
+func (s *Sweeper) byAge(ctx context.Context, p Policy, segs []archive.Segment, now time.Time, rep *Report) ([]archive.Segment, error) {
+	own, err := p.cameraDays(ctx)
 	if err != nil {
 		s.log.Error("age rule skipped", "err", err)
 		return segs, err
 	}
 	remaining := segs[:0:0]
 	for _, seg := range segs {
-		if !expired(seg, s.policy.days(own, seg.Camera), now) {
+		if !expired(seg, p.days(own, seg.Camera), now) {
 			remaining = append(remaining, seg)
 			continue
 		}
@@ -233,8 +275,8 @@ func expired(seg archive.Segment, days int, now time.Time) bool {
 }
 
 // freeSpace deletes oldest complete segments across cameras until the disk
-// has MinFreeBytes available, or nothing deletable is left.
-func (s *Sweeper) freeSpace(ctx context.Context, segs []archive.Segment, rep *Report) error {
+// has want bytes available, or nothing deletable is left.
+func (s *Sweeper) freeSpace(ctx context.Context, want int64, segs []archive.Segment, rep *Report) error {
 	candidates := make([]archive.Segment, 0, len(segs))
 	for _, seg := range segs {
 		if seg.Complete {
@@ -247,8 +289,8 @@ func (s *Sweeper) freeSpace(ctx context.Context, segs []archive.Segment, rep *Re
 		if err != nil {
 			return fmt.Errorf("retention: free space: %w", err)
 		}
-		if free >= s.policy.MinFreeBytes {
-			s.opts.OnStorageOK(free)
+		if free >= want {
+			s.spaceDone(free, want, rep)
 			return nil
 		}
 		if err := s.remove(ctx, seg, "space", rep); err != nil {
@@ -260,13 +302,21 @@ func (s *Sweeper) freeSpace(ctx context.Context, segs []archive.Segment, rep *Re
 	if err != nil {
 		return fmt.Errorf("retention: free space: %w", err)
 	}
-	if free < s.policy.MinFreeBytes {
-		s.log.Warn("storage low: nothing left to delete", "free", free, "want", s.policy.MinFreeBytes)
+	s.spaceDone(free, want, rep)
+	return nil
+}
+
+// spaceDone ends the space rule's work of a sweep: it records whether the
+// rule is deleting (it deleted, or the floor is still not reached) and
+// raises storage.low or ends it.
+func (s *Sweeper) spaceDone(free, want int64, rep *Report) {
+	s.spaceActive.Store(free < want || rep.BySpace > 0)
+	if free < want {
+		s.log.Warn("storage low: nothing left to delete", "free", free, "want", want)
 		s.opts.OnStorageLow(free)
-		return nil
+		return
 	}
 	s.opts.OnStorageOK(free)
-	return nil
 }
 
 // remove deletes the file (a missing file is fine), the index row and logs it.

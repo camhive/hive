@@ -49,7 +49,20 @@ type Status struct {
 	Tracks        []string // codec names, e.g. "H264"
 	BytesReceived int64
 	Readers       int // current live viewers
+	Video         Track
 }
+
+// Track is a stream's video as the engine receives it; zero fields
+// are unknown.
+type Track struct {
+	Codec         string // e.g. "H264"
+	Width, Height int
+}
+
+// videoCodecs are the engine's names of video codecs; the others in a
+// stream's tracks are audio or metadata.
+var videoCodecs = map[string]bool{"H264": true, "H265": true, "AV1": true, "VP8": true, "VP9": true,
+	"M-JPEG": true, "MPEG-4 Video": true, "MPEG-1/2 Video": true}
 
 // ICEUpdater is implemented by engines that can change their advertised
 // STUN/TURN servers at runtime (the cloud pushes per-hive TURN credentials).

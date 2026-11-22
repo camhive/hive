@@ -18,7 +18,7 @@ import (
 // Seen on the dev stack: a camera with G.711 audio records an LPCM ("ipcm")
 // track, Chrome refused the whole answer ("Unsupported audio format") and the
 // archive never played. Playback sends the video tracks only.
-func TestPlaybackSendsOnlyTheVideoTracks(t *testing.T) {
+func TestPlaybackSendsOnlyTheTracks(t *testing.T) {
 	f, play, cam := newArchiveAPI(t)
 	play.body = videoWithLPCM(t)
 	req, _ := http.NewRequestWithContext(context.Background(), "GET", f.srv.URL+"/v0/cameras/"+string(cam.ID)+"/archive/play?stream=main&start=2026-11-09T10:00:00Z&duration=60", nil)

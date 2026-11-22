@@ -224,7 +224,7 @@ export function Timeline({ day, ranges, events, position, onSeek, activity, focu
             const b = Math.min(e.end ?? e.at, to);
             return <span key={e.id} className="absolute bottom-5 h-2 rounded-sm" style={{ left: pct(a), width: `max(2px, calc(${pct(b)} - ${pct(a)}))`, background: "var(--danger)" }} data-testid="event" data-kind={e.kind} title={title} />;
           }
-          if (e.kind === "storage.low") { // the whole hive: a line across the bar where it began
+          if (e.kind === "storage.low" || e.kind === "disk.failing" || e.kind === "disk.failed") { // the whole hive: a line across the bar where it began
             return <span key={e.id} className="absolute top-0 bottom-5 w-0.5" style={{ left: pct(Math.max(e.at, from)), background: "var(--danger)", opacity: 0.7 }} data-testid="event" data-kind={e.kind} title={title} />;
           }
           return <span key={e.id} className="absolute bottom-5 w-0.5 h-3 rounded-sm" style={{ left: pct(e.at), background: "var(--muted)" }} data-testid="event" data-kind={e.kind} title={title} />;

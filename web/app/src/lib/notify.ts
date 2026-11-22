@@ -7,8 +7,11 @@ export type NotifySettings = components["schemas"]["NotificationSettings"];
 export type CameraNotify = NotifySettings["cameras"][number];
 export type NotifyGroup = keyof NotifySettings["events"];
 export type NotifyChannel = "email" | "push";
+export type NotifyMode = NonNullable<NotifySettings["events"]["motion"]["mode"]>;
 
 export const GROUPS: NotifyGroup[] = ["offline", "storage", "motion"];
+/** When a group notifies (#157), in the order the select shows them. */
+export const MODES: NotifyMode[] = ["immediate", "hourly", "daily", "quiet"];
 export const COOLDOWNS = [1, 5, 10, 15, 30, 60] as const;
 const KEY = ["me", "notifications"];
 
@@ -21,7 +24,7 @@ export function useSaveNotifySettings() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (s: NotifySettings) => {
-      const { channels: _, ...rest } = s; // read-only
+      const { channels: _, counts: __, ...rest } = s; // read-only
       const body = { ...rest, time_zone: localZone() }; // times in mails and quiet hours follow this browser
       return unwrap(await api.PUT("/v1/me/notifications", { body }));
     },

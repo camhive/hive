@@ -10,23 +10,26 @@ import { resetCloudForTest } from "../src/lib/cloud";
 import { cacheSet } from "../src/lib/cache";
 import { writeLocal } from "../src/lib/localLogin";
 import { dayStart } from "../src/lib/archive";
+import { resetPresenceForTest } from "../src/lib/archiveAutolock";
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const LAN = "hv_1.h.camhive.app:16017";
+const RELAY = "hv_1.relay.camhive.app";
 const LOCAL_TOKEN = "v4.local.loc-tok";
 const hive = { id: "hv_1", name: "Home", status: "active", online: true, claimed_at: "2026-11-09T00:00:00Z", version: "0.1.7", capabilities: ["archive.encryption", "updates"],
   lan: { host: "hv_1.h.camhive.app", port: 16017, addrs: ["192.168.1.20"] }, relay_host: "hv_1.relay.camhive.app" };
 const me = { id: "acc_1", email: "anna@example.de", locale: "en", totp_enabled: false, created_at: "" };
 const camera = { id: "cam_1", name: "Door", group: "", enabled: true, source: { kind: "rtsp", address: "" }, streams: { main: { Codec: "H264" } }, created_at: "", updated_at: "" };
 
-type State = { state: "off" | "locked" | "unlocked"; sealing: boolean };
+type Autolock = { after: string; away: string; locks_at?: string; reason?: string };
+type State = { state: "off" | "locked" | "unlocked"; sealing: boolean; autolock?: Autolock };
 
 /**
  * A hive with archive encryption as PR #110 built it: owner requests, a
  * passphrase, five-strikes rate limit simplified to one magic passphrase,
  * and the cloud-only requests refused to a local session.
  */
-function fakeHive(start: State, opts: { role?: string; cloud?: boolean; h?: Record<string, unknown>; lockOnRead?: boolean } = {}) {
+function fakeHive(start: State, opts: { role?: string; cloud?: boolean; h?: Record<string, unknown>; lockOnRead?: boolean; lanDown?: boolean } = {}) {
   const h = opts.h ?? hive;
   let enc = { ...start };
   let failReads = false;
@@ -37,10 +40,12 @@ function fakeHive(start: State, opts: { role?: string; cloud?: boolean; h?: Reco
   };
   let passphrase = "correct horse battery";
   const calls: string[] = [];
+  const presence: boolean[] = [];
+  const patches: unknown[] = [];
   const cloudOnly = new Set(["POST /v0/archive/encryption", "POST /v0/archive/encryption/passphrase", "GET /v0/archive/encryption/key-file"]);
   async function onHive(req: Request, route: string): Promise<Response> {
     if (cloudOnly.has(route) && req.headers.get("Authorization") === `Bearer ${LOCAL_TOKEN}`) return json(403, { code: "forbidden", message: "" });
-    const body = req.method === "POST" ? ((await req.json().catch(() => ({}))) as { passphrase?: string; new_passphrase?: string }) : {};
+    const body = req.method === "POST" || req.method === "PATCH" ? ((await req.json().catch(() => ({}))) as { passphrase?: string; new_passphrase?: string; at_home?: boolean; after?: string; away?: string }) : {};
     switch (route) {
       case "GET /healthz": return json(200, {});
       case "GET /v0/archive/encryption": return failReads ? json(502, { code: "engine", message: "" }) : json(200, enc);
@@ -64,6 +69,18 @@ function fakeHive(start: State, opts: { role?: string; cloud?: boolean; h?: Reco
         passphrase = body.new_passphrase!;
         return new Response(null, { status: 204 });
       case "GET /v0/archive/encryption/key-file": return new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { "Content-Type": "application/octet-stream" } });
+      case "PATCH /v0/archive/encryption/autolock": {
+        // As the hive does: switching a lock off from outside the home network is refused.
+        if (new URL(req.url).host === RELAY && (body.after === "off" || body.away === "off")) return json(403, { code: "lan_only", message: "" });
+        patches.push(body);
+        const a = { ...enc.autolock!, ...body };
+        // As a hive whose timer now runs: 42 minutes left of it.
+        enc = { ...enc, autolock: a.after === "off" && a.away === "off" ? { after: a.after, away: a.away } : { after: a.after!, away: a.away!, locks_at: new Date(Date.now() + 42 * 60_000).toISOString(), reason: "inactivity" } };
+        return json(200, enc);
+      }
+      case "POST /v0/archive/encryption/presence":
+        presence.push(body.at_home!);
+        return new Response(null, { status: 204 });
       case "GET /v0/cameras": return json(200, [camera]);
       case "GET /v0/health/cameras": return json(200, [{ camera: "cam_1", enabled: true, online: true, streams: {} }]);
       case "GET /v0/cameras/cam_1/archive/calendar": return json(200, [{ day: "2026-11-09" }]);
@@ -79,7 +96,8 @@ function fakeHive(start: State, opts: { role?: string; cloud?: boolean; h?: Reco
     const req = new Request(input, init);
     const u = new URL(req.url);
     const route = `${req.method} ${u.pathname}`;
-    if (u.host === LAN) {
+    if (u.host === LAN || u.host === RELAY) {
+      if (opts.lanDown && u.host === LAN) throw new TypeError("Failed to fetch");
       calls.push(`${route} ${req.headers.get("Authorization") ?? ""}`.trim());
       return onHive(req, route);
     }
@@ -91,7 +109,7 @@ function fakeHive(start: State, opts: { role?: string; cloud?: boolean; h?: Reco
       default: return json(404, { error: { code: "not_found", message: "" } });
     }
   }) as typeof fetch);
-  return { calls, state: () => enc, set: (e: State) => { enc = { ...e }; }, failReads: (on: boolean) => { failReads = on; } };
+  return { calls, presence, patches, state: () => enc, set: (e: State) => { enc = { ...e }; }, failReads: (on: boolean) => { failReads = on; } };
 }
 
 const downloads: string[] = [];
@@ -122,7 +140,7 @@ async function openSettings(user: ReturnType<typeof userEvent.setup>) {
   return section;
 }
 
-beforeEach(() => { resetCloudForTest(); localStorage.clear(); sessionStorage.clear(); downloads.length = 0; });
+beforeEach(() => { resetCloudForTest(); resetPresenceForTest(); localStorage.clear(); sessionStorage.clear(); downloads.length = 0; });
 afterEach(async () => { cleanup(); await new Promise((r) => setTimeout(r, 30)); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe("switching archive encryption on (ADR-0019 §4)", () => {
@@ -359,5 +377,66 @@ describe("a locked archive on the hive page", () => {
     await waitFor(() => expect(hv.calls).toContain("GET /v0/cameras Bearer tok"));
     expect(hv.calls.some((c) => c.includes("/v0/archive/encryption"))).toBe(false);
     expect(screen.queryByTestId("archive-locked")).toBeNull();
+  });
+});
+
+describe("locking automatically (#147)", () => {
+  const autolockHive = { ...hive, version: "0.1.10", capabilities: ["archive.autolock", "archive.encryption", "updates"] };
+  const unlocked: State = { state: "unlocked", sealing: true, autolock: { after: "off", away: "off" } };
+
+  it("lets the owner choose when the archive locks itself, and says when it will", async () => {
+    const hv = fakeHive(unlocked, { h: autolockHive });
+    const user = mount("/hives/hv_1/settings");
+    const section = await openSettings(user);
+    const autolock = within(section).getByTestId("autolock");
+    expect(within(autolock).queryByTestId("locks-in")).toBeNull();
+    await user.selectOptions(within(autolock).getByLabelText("When nobody watched recordings for"), "8 hours");
+    await waitFor(() => expect(within(autolock).getByTestId("locks-in")).toHaveTextContent("Locks in 42 minutes unless someone watches recordings."));
+    expect(within(autolock).queryByText(/while the app is open/)).toBeNull();
+    await user.selectOptions(within(autolock).getByLabelText("When I leave home"), "After 10 minutes away");
+    await waitFor(() => expect(within(autolock).getByLabelText("When I leave home")).toHaveValue("10m"));
+    expect(hv.patches).toEqual([{ after: "8h" }, { away: "10m" }]);
+    expect(within(autolock).getByLabelText("When nobody watched recordings for")).toHaveValue("8h");
+    expect(within(autolock).getByText(/while the app is open/)).toBeInTheDocument();
+  }, 15_000);
+
+  it("tells the hive the app is at home when a page opens", async () => {
+    const hv = fakeHive(unlocked, { h: autolockHive });
+    mount("/hives/hv_1");
+    await waitFor(() => expect(hv.presence).toEqual([true]));
+  });
+
+  it("tells the hive the app left home when it reaches it through the relay", async () => {
+    const hv = fakeHive(unlocked, { h: autolockHive, lanDown: true });
+    const user = mount("/hives/hv_1/settings");
+    await openSettings(user);
+    await waitFor(() => expect(hv.presence).toEqual([false]));
+    expect(hv.calls).toContain("POST /v0/archive/encryption/presence Bearer tok");
+  });
+
+  it("explains that relaxing the lock from outside works only at home", async () => {
+    const hv = fakeHive({ ...unlocked, autolock: { after: "8h", away: "10m" } }, { h: autolockHive, lanDown: true });
+    const user = mount("/hives/hv_1/settings");
+    const section = await openSettings(user);
+    const autolock = within(section).getByTestId("autolock");
+    await user.selectOptions(within(autolock).getByLabelText("When I leave home"), "Never");
+    expect(await within(autolock).findByRole("alert")).toHaveTextContent("only on the hive's address in your home network");
+    expect(within(autolock).getByLabelText("When I leave home")).toHaveValue("10m");
+    expect(hv.patches).toEqual([]);
+  });
+
+  it("reports nothing for a member, and shows nothing on a hive without automatic locking", async () => {
+    const member = fakeHive(unlocked, { h: autolockHive, role: "viewer" });
+    mount("/hives/hv_1");
+    await waitFor(() => expect(member.calls).toContain("GET /v0/cameras Bearer tok"));
+    cleanup();
+
+    const older = fakeHive({ state: "unlocked", sealing: true });
+    const user = mount("/hives/hv_1/settings");
+    const section = await openSettings(user);
+    expect(within(section).queryByTestId("autolock")).toBeNull();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(member.presence).toEqual([]);
+    expect(older.presence).toEqual([]);
   });
 });

@@ -182,6 +182,32 @@ func (c *Client) StreamURI(ctx context.Context, profileToken string) (string, er
 	return strings.TrimSpace(out.URI), nil
 }
 
+// SystemDateAndTime reads the camera's clock (GetSystemDateAndTime) in
+// UTC. ONVIF lets anyone ask (clients set their WS-Security time from
+// it), so it asks without credentials first: a camera whose clock is off
+// may refuse a digest made with the hive's time. A camera that insists
+// gets the credentials.
+func (c *Client) SystemDateAndTime(ctx context.Context) (time.Time, error) {
+	var out struct {
+		Time struct{ Hour, Minute, Second int } `xml:"SystemDateAndTime>UTCDateTime>Time"`
+		Date struct{ Year, Month, Day int }     `xml:"SystemDateAndTime>UTCDateTime>Date"`
+	}
+	body := `<tds:GetSystemDateAndTime xmlns:tds="` + nsDevice + `"/>`
+	open := &Client{device: c.device, http: c.http, now: c.now}
+	err := open.call(ctx, c.device, body, "GetSystemDateAndTimeResponse", &out)
+	if errors.Is(err, ErrUnauthorized) && c.creds.Username != "" {
+		err = c.call(ctx, c.device, body, "GetSystemDateAndTimeResponse", &out)
+	}
+	if err != nil {
+		return time.Time{}, err
+	}
+	if out.Date.Year == 0 {
+		return time.Time{}, errors.New("onvif: the camera sent no UTC time")
+	}
+	d, t := out.Date, out.Time
+	return time.Date(d.Year, time.Month(d.Month), d.Day, t.Hour, t.Minute, t.Second, 0, time.UTC), nil
+}
+
 // SetSystemDateAndTime sets the camera clock to t (UTC, manual mode).
 func (c *Client) SetSystemDateAndTime(ctx context.Context, t time.Time) error {
 	t = t.UTC()

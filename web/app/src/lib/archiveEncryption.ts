@@ -10,6 +10,7 @@ import type { Hive } from "./hives";
 import { useHiveCapability } from "./capabilities";
 import { errorMessage } from "./errors";
 import { retryAfterSeconds, waitMessage } from "./retryAfter";
+import { autolockActions } from "./archiveAutolock";
 
 export type Encryption = hiveComponents["schemas"]["ArchiveEncryption"];
 
@@ -55,6 +56,7 @@ export function encryptionActions(client: HiveClient) {
     lock: async () => checked(await client.POST("/v0/archive/encryption/lock")),
     change: async (passphrase: string, next: string) => { checked(await client.POST("/v0/archive/encryption/passphrase", { body: { passphrase, new_passphrase: next } })); },
     keyFile: async (): Promise<Blob> => checked(await client.GET("/v0/archive/encryption/key-file", { parseAs: "blob" })) as Blob,
+    autolock: autolockActions(client).set,
   };
 }
 

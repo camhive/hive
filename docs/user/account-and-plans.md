@@ -1,5 +1,7 @@
 # Account and plans
 
+*[Deutsch](de/account-and-plans.md)*
+
 ## Account
 
 *Account* holds everything about you rather than your hives.
@@ -28,7 +30,7 @@ the plan's count. Cameras are never counted and traffic is never metered.
 | Price | 0 | 5 €/month · 50 €/year | 12 €/month · 120 €/year |
 | Hives | 1 | 3 | 10 (+2 €/month each beyond) |
 | Cameras, local viewing, local export | unlimited | unlimited | unlimited |
-| Members besides the owner | 2 | 4 | 14 |
+| Users of the account (incl. owner) | 3 | 5 | 15 |
 | Remote sessions at once | 2 | 4 | 10 |
 | Remote quality | sub stream | full | full |
 | Sharing recipients | 2 | 5 | 15 |
@@ -60,9 +62,57 @@ Camhive tells the owner of a hive when something needs attention. Open
 | A hive cannot be reached | when it has been disconnected from Camhive for 5 minutes (power cut, internet down) | e-mail and push |
 | Back online | after an offline notification, when the camera or hive is back, on the same channels | as the offline one |
 | Storage low | when the archive disk can no longer keep the free space you set; once each time this starts | e-mail and push |
-| Motion | when motion starts on a camera; then not again for that camera until its cooldown (10 minutes unless you change it) has passed | push (e-mail is off) |
+| Motion | when motion starts on a camera that had none for its cooldown (10 minutes unless you change it); after a push the camera stays silent until it has been quiet that long | push (e-mail is off) |
 
 Push needs a device first (below); until then you get e-mail only.
+
+The page shows what the last week brought, for example *This week: 5,600
+motion episodes, 312 push notifications.*, so you see the effect of each
+setting.
+
+### When notifications come
+
+Motion has a **When**:
+
+- *Each time* (the default): as in the table above.
+- *Hourly summary*: one notification at the end of each hour that had
+  motion, for example *14 motion episodes on 3 cameras, first 08:12, last
+  17:40*. Tapping it opens the hive's recordings of that day.
+- *Daily summary*: one notification at midnight for the day.
+- *Never*: no motion notifications; the episodes stay on the hive's
+  timeline and in the counts.
+
+Summaries are counted per hive and in your time zone. Offline and storage
+notifications always come as they happen, because they need you to act.
+
+### Why motion stays calm
+
+A camera that sees motion all day (a street, a tree in the wind) would
+otherwise notify you all day. Camhive keeps it down in four ways:
+
+- **Cooldown that waits for calm.** After a push the camera stays silent
+  until it has been quiet for its cooldown. A busy street camera pushes
+  once when the traffic starts and then goes quiet; a camera that was calm
+  for ten minutes notifies again at once. The episodes are all on the
+  timeline.
+- **At home.** While the owner has the hive open in the Camhive app at home
+  (on the hive's network, hives from v0.1.10), the hive marks its motion as
+  *quiet*: it is counted and on the timeline, but not pushed. Only the
+  owner's app reports, and only while it shows the hive; an app in the
+  background or closed stops reporting within a minute, and five minutes
+  later motion is pushed again. Members do not count yet.
+  The hive never tells the cloud who is at home. It does tell it, with each
+  episode, whether that episode is quiet: the cloud's event stream holds
+  that for up to 24 hours, and the notifier decides on it within minutes
+  and does not keep it (a quiet episode waiting for a summary is only a
+  number per hive).
+- **Quiet hours** (below) hold motion back until they end.
+- **Daily limit.** After 50 motion notifications in a day on your account
+  (all hives together), motion comes as one summary an hour per hive until
+  midnight. You get one notification saying so.
+
+On the hive itself, each camera has a **motion sensitivity** and calms
+itself on a windy day; see [Cameras](cameras.md#motion-sensitivity).
 
 - **Channels.** Every plan includes e-mail and push. Webhooks for Pro are
   planned (#111).
@@ -84,20 +134,26 @@ Push needs a device first (below); until then you get e-mail only.
 - **Blocked notifications.** If you once refused, the browser does not ask
   again: allow notifications for the Camhive site in the browser's site
   settings, then enable push again.
-- **Quiet hours** stop motion notifications in a daily window, for example
-  while you are at home in the evening. Offline and storage notifications
-  still come, because they need you to act.
+- **Quiet hours** hold motion notifications in a daily window, for example
+  at night: motion in the window is not pushed, and one summary comes when
+  the window ends (*while you slept: 14 motion episodes …*). A summary that
+  would fall into the window waits for its end too. Offline and storage
+  notifications still come at once, because they need you to act.
 - **Per camera.** Open the camera on its hive page and choose
   *Notifications* to switch motion notifications off for that camera or to
-  change how often it may notify you (every 1 to 60 minutes).
+  change its cooldown, how long it must be quiet before it may notify you
+  again (1 to 60 minutes).
 - **Motion that happens while the hive is offline** is not notified later;
   it is on the hive's timeline. A notification about motion arrives within
   seconds or not at all.
 - **What the cloud keeps.** For each notification: which hive and camera,
   the camera's name, what kind of event, when, how much space was free
   (storage low only), how motion was seen (camera or picture), and whether
-  it was delivered. Never a picture or video. These records are deleted
-  after 30 days.
+  it was delivered; for each motion episode it heard of: which hive and
+  camera, when, and the summary it waits for, so it can count them and keep
+  the cooldown; for quiet episodes waiting for a summary only their number
+  per hive. Never a picture or video, never who is at home. These records
+  are deleted after 30 days.
 - **Times** in notifications are in your time zone. The app saves your
   browser's zone each time you change these settings; until you do, German
   accounts get German time and all others UTC.
@@ -110,7 +166,7 @@ Push needs a device first (below); until then you get e-mail only.
 
 *Activity* lists what happened on your account and on each of your hives:
 sign-ins, claims, grants, exports, plan changes, with who did it and when.
-*Export* downloads all data we hold about you as JSON.
+*Download my data (JSON)* downloads all data we hold about you as JSON.
 
 ### A hive's own activity
 

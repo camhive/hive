@@ -48,6 +48,7 @@ type CameraHealth struct {
 	Enabled bool                    `json:"enabled"`
 	Online  bool                    `json:"online"`
 	Streams map[string]StreamHealth `json:"streams"`
+	Care    *CareSummary            `json:"care,omitempty"` // camera care (#163), filled by the API
 }
 
 // Options tune the monitor.
@@ -56,7 +57,10 @@ type Options struct {
 	OfflineAfter int           // consecutive bad polls before offline; default 2
 	Now          func() time.Time
 	OnEvent      func(Event)
-	Logger       *slog.Logger
+	// OnSample sees every poll of every stream (camera care, #163). It
+	// runs under the Monitor's lock: keep it short, never call back.
+	OnSample func(Sample)
+	Logger   *slog.Logger
 }
 
 // Monitor polls and remembers.
@@ -94,6 +98,9 @@ func New(store CameraLister, engine video.Engine, opts Options) *Monitor {
 	}
 	if opts.OnEvent == nil {
 		opts.OnEvent = func(Event) {}
+	}
+	if opts.OnSample == nil {
+		opts.OnSample = func(Sample) {}
 	}
 	if opts.Logger == nil {
 		opts.Logger = slog.New(slog.DiscardHandler)
@@ -165,6 +172,7 @@ func (m *Monitor) pollStream(ctx context.Context, cs *camState, cam, stream stri
 	}
 	st, err := m.engine.Status(ctx, video.CameraID(cam), video.Stream(stream))
 	ok := err == nil && st.Ready
+	m.opts.OnSample(Sample{Camera: cam, Stream: stream, At: now, Ready: ok, Status: st, Err: err})
 	if err != nil {
 		ss.LastError = err.Error()
 	} else {

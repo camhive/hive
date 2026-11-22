@@ -116,7 +116,8 @@
     "push_not_configured": "Push notifications are not set up on this server.",
     "push_endpoint": "This browser's push service is not supported.",
     "grant_end_past": "The end must lie in the future.",
-    "grant_end_far": "The end may lie at most 10 years ahead. Make the share permanent instead."
+    "grant_end_far": "The end may lie at most 10 years ahead. Make the share permanent instead.",
+    "moving": "The hive is moving to a new disk; changes wait until the move ends."
   },
   "account": {
     "title": "Account",
@@ -313,7 +314,9 @@
         "camera_offline": "Camera offline",
         "camera_online": "Camera online",
         "camera_address_changed": "Camera address changed",
-        "camera_identity_changed": "Different device at the camera's address"
+        "camera_identity_changed": "Different device at the camera's address",
+        "disk_failing": "Disk failing",
+        "disk_failed": "Disk cannot be written"
       },
       "source": {
         "camera": "seen by the camera",
@@ -380,7 +383,15 @@
       "routed": "This camera is in another network than the hive: if its address changes, the hive cannot find it. Reserve its address in the router."
     },
     "replaceCamera": "It is a new camera, use it",
-    "loading": "Loading cameras…"
+    "loading": "Loading cameras…",
+    "sensitivity": "Motion sensitivity",
+    "sensitivityLevels": {
+      "low": "Low",
+      "normal": "Normal",
+      "high": "High"
+    },
+    "sensitivityHint": "Low ignores small and short movement (trees, light, rain); high also catches small movement far away.",
+    "calmedSince": "Calmed since {{time}}: this camera saw more than 20 motion episodes in an hour, so the hive reacts one step less until an hour passes without one."
   },
   "members": {
     "title": "Members",
@@ -688,7 +699,42 @@
     "rateLimited_other": "Too many wrong passphrases. Try again in {{count}} minutes.",
     "rateLimitedUnknown": "Too many wrong passphrases. The hive blocks unlocking for up to 15 minutes; try again later.",
     "lockedOwner": "The recordings on this hive are locked: the hive restarted or you locked them. Unlock them to play and export footage. Recording and live view go on.",
-    "lockedMember": "The recordings on this hive are locked by its owner. Live view still works."
+    "lockedMember": "The recordings on this hive are locked by its owner. Live view still works.",
+    "autolockTitle": "Lock automatically",
+    "autolockHelp": "The hive can lock the recordings by itself, so the key does not stay in its memory for weeks. You unlock them with your passphrase as after a restart. Away from home you can make it stricter; switching a lock off or making it later works only at home.",
+    "autolockAfter": "When nobody watched recordings for",
+    "autolockAfterChoice": {
+      "off": "Never",
+      "1h": "1 hour",
+      "8h": "8 hours",
+      "24h": "24 hours",
+      "7d": "7 days"
+    },
+    "autolockAway": "When I leave home",
+    "autolockAwayChoice": {
+      "off": "Never",
+      "10m": "After 10 minutes away",
+      "1h": "After 1 hour away"
+    },
+    "autolockAwayNote": "The app tells the hive when it no longer reaches it on your network, while the app is open. If you leave with the app closed, only the first setting applies.",
+    "autolockLocksIn": {
+      "inactivity": {
+        "minutes_one": "Locks in {{count}} minute unless someone watches recordings.",
+        "minutes_other": "Locks in {{count}} minutes unless someone watches recordings.",
+        "hours_one": "Locks in {{count}} hour unless someone watches recordings.",
+        "hours_other": "Locks in {{count}} hours unless someone watches recordings.",
+        "days_one": "Locks in {{count}} day unless someone watches recordings.",
+        "days_other": "Locks in {{count}} days unless someone watches recordings."
+      },
+      "away": {
+        "minutes_one": "You left home: locks in {{count}} minute unless you come back.",
+        "minutes_other": "You left home: locks in {{count}} minutes unless you come back.",
+        "hours_one": "You left home: locks in {{count}} hour unless you come back.",
+        "hours_other": "You left home: locks in {{count}} hours unless you come back.",
+        "days_one": "You left home: locks in {{count}} day unless you come back.",
+        "days_other": "You left home: locks in {{count}} days unless you come back."
+      }
+    }
   },
   "notify": {
     "title": "Notifications",
@@ -701,17 +747,17 @@
     },
     "group": {
       "offline": "Camera or hive offline",
-      "storage": "Storage low",
+      "storage": "Storage low or disk failing",
       "motion": "Motion"
     },
     "groupHelp": {
       "offline": "After 3 minutes for a camera, 5 for a hive; and when it is back.",
-      "storage": "The archive disk can no longer keep its free-space target; once each time this starts.",
-      "motion": "When motion starts on a camera; at most once per camera cooldown."
+      "storage": "The archive disk can no longer keep its free-space target, or it is failing; once each time this starts.",
+      "motion": "When motion starts on a camera. After a push the camera stays silent until it has been quiet for its cooldown (10 minutes unless set per camera), so a busy street camera pushes once and then goes quiet. Nothing while you have the hive open in the app at home; after 50 in a day on your account, one summary an hour per hive until midnight."
     },
     "perCamera": "Motion per camera: open the camera on its hive page and choose Notifications.",
     "quiet": "Quiet hours",
-    "quietHelp": "No motion notifications in this window. Offline and storage notifications still come.",
+    "quietHelp": "Motion in this window is not pushed: one summary comes when it ends. Offline and storage notifications still come at once.",
     "from": "From",
     "until": "Until",
     "save": "Save",
@@ -719,10 +765,20 @@
     "cameraButton": "Notifications",
     "cameraTitle": "Notifications for this camera",
     "cameraMotion": "Motion notifications for this camera",
-    "cooldown": "At most every",
+    "cooldown": "After a push, silent until quiet for",
     "minutes_one": "{{count}} minute",
     "minutes_other": "{{count}} minutes",
-    "motionOffEverywhere": "Motion notifications are switched off on the Notifications page."
+    "motionOffEverywhere": "Motion notifications are switched off on the Notifications page.",
+    "mode": "When",
+    "modeLabel": "{{group}}: when",
+    "modes": {
+      "immediate": "Each time",
+      "hourly": "Hourly summary",
+      "daily": "Daily summary",
+      "quiet": "Never"
+    },
+    "modesHelp": "Motion can come as a summary: one notification per hour or day with the number of episodes, the cameras and the first and last time. Never keeps the episodes on the hive's timeline only. Offline and storage notifications always come as they happen.",
+    "counts": "This week: {{episodes}} motion episodes, {{pushes}} push notifications."
   },
   "push": {
     "title": "Push on your devices",
@@ -813,7 +869,9 @@
       "local_login.success": "Signed in locally",
       "local_login.failure": "Local sign-in failed",
       "local_login.locked": "Local sign-in locked after failures",
-      "archive.encryption.key_file": "Recovery key file downloaded"
+      "archive.encryption.key_file": "Recovery key file downloaded",
+      "motion.calmed": "Motion detection calmed: too many episodes in an hour",
+      "motion.calm_ended": "Motion detection back to its sensitivity"
     }
   },
   "install": {
@@ -836,5 +894,140 @@
     "available": "A new version is available.",
     "update": "Update",
     "updating": "Updating…"
+  },
+  "storage": {
+    "title": "Storage",
+    "help": "How much footage this hive holds, how fast the cameras fill its disk, and how long the disk lasts at that rate.",
+    "helpMember": "How many days of footage the hive holds for your cameras.",
+    "open": "Show storage…",
+    "diskTotal": "Disk size",
+    "archive": "Footage",
+    "exports": "Exports",
+    "free": "Free",
+    "forecast": {
+      "nothing": "Nothing recorded yet: the forecast starts with the first recordings.",
+      "fits": "At {{rate}} per day this disk holds {{days}} days; retention is {{retention}} days, which fits.",
+      "short": "At {{rate}} per day this disk holds {{days}} days; retention is {{retention}} days, so it will effectively be {{effective}}.",
+      "unlimited": "At {{rate}} per day this disk holds {{days}} days; footage is kept until space runs out, about {{effective}} days.",
+      "fitsOwn": "At {{rate}} per day this disk holds {{days}} days for every camera alike; retention is {{retention}} days, which fits because {{camera}} keeps only {{own}} days.",
+      "unlimitedPlain": "At {{rate}} per day this disk holds {{days}} days; footage is kept until space runs out."
+    },
+    "short": "The disk cannot hold {{retention}} days at this rate: that needs {{needed}} of space. Lower the retention, record less (a lower bitrate, no sub stream) or use a bigger disk.",
+    "shortOwn": "The disk cannot hold {{retention}} days at this rate, and a camera keeps footage until space runs out. Lower the retention, record less or use a bigger disk.",
+    "fillsIn_one": "In about {{count}} day the hive starts deleting the oldest footage for space.",
+    "fillsIn_other": "In about {{count}} days the hive starts deleting the oldest footage for space.",
+    "fillsNow": "The hive is deleting the oldest footage now to keep {{floor}} GiB free.",
+    "cameras": "Footage per camera",
+    "cameraLine_one": "{{days}} day held, {{size}}, {{rate}} per day",
+    "cameraLine_other": "{{days}} days held, {{size}}, {{rate}} per day",
+    "keeps": "keeps {{retention}} days",
+    "keepsShort": "keeps {{effective}} of {{retention}} days",
+    "keepsUnlimited": "keeps until space runs out, about {{effective}} days",
+    "removed": "Removed camera",
+    "noFootage": "No footage yet.",
+    "memberLine_one": "{{name}}: {{days}} day of footage, {{size}}",
+    "memberLine_other": "{{name}}: {{days}} days of footage, {{size}}",
+    "settings": "Settings",
+    "retention": "Keep footage for (days)",
+    "retentionHelp": "0 keeps footage until space runs out. A camera's own retention overrides this.",
+    "floor": "Keep free on the disk (GiB)",
+    "floorHelp": "The hive deletes the oldest footage to keep this much free: 1 to {{max}}.",
+    "invalid": {
+      "retention_days": "Enter whole days from 0 to 3650.",
+      "min_free_gb": "Enter a whole number of GiB from 1 to {{max}}."
+    },
+    "confirmDelete": "With these settings the hive deletes footage within 5 minutes, and deleted footage cannot be recovered. Save anyway?",
+    "save": "Save",
+    "saved": "Saved. The hive applies the settings at its next sweep, within 5 minutes.",
+    "fillsSoon": "Within a day the hive starts deleting the oldest footage for space.",
+    "keepsUnlimitedPlain": "keeps until space runs out",
+    "cap": "Your plan keeps footage at most {{cap}} days, so the cameras on this setting keep {{cap}}."
+  },
+  "cameraCare": {
+    "title": "Camera health",
+    "ok": "No problems seen.",
+    "degraded": "Needs attention",
+    "degradedSince": "Needs attention since {{time}}",
+    "badge": "Needs attention: {{reasons}}",
+    "and": "and",
+    "stream": {
+      "main": "main",
+      "sub": "sub"
+    },
+    "reason": {
+      "bitrate_drop": "bitrate drop",
+      "frame_loss": "footage missing",
+      "reconnects": "reconnects",
+      "clock_drift": "clock drift",
+      "offline_pattern": "offline pattern",
+      "night_picture": "night picture",
+      "stream_changed": "stream changed"
+    },
+    "fact": {
+      "bitrate_drop": "The {{stream}} stream sent {{pct}} % of its usual bitrate in the last hour.",
+      "frame_loss": "{{seconds}} s of footage went missing in the last hour.",
+      "late_one": "New footage has been late for {{count}} minute.",
+      "late_other": "New footage has been late for {{count}} minutes.",
+      "reconnects_one": "Reconnected {{count}} time in the last 24 hours.",
+      "reconnects_other": "Reconnected {{count}} times in the last 24 hours.",
+      "clock_drift": "The camera's clock is {{seconds}} s off.",
+      "offline_pattern": "Offline around {{hours}} on several days.",
+      "night_picture": "At night the {{stream}} stream drops to {{pct}} % of its daytime bitrate.",
+      "stream_changed": "The {{stream}} stream changed from {{from}} to {{to}}."
+    },
+    "advice": {
+      "bitrate_drop": "A quieter scene also lowers the bitrate; if the picture looks wrong, check the cable or the PoE budget.",
+      "frame_loss": "Check the cable, then update the camera's firmware.",
+      "reconnects": "Check the cable or the PoE budget.",
+      "clock_drift": "Set the camera's NTP server.",
+      "offline_pattern": "Check what switches the camera's power or network off at those hours.",
+      "night_picture": "The IR illuminator may have failed.",
+      "stream_changed": "Check the camera's video settings, and update the camera's firmware if it reset them."
+    }
+  },
+  "disk": {
+    "theDisk": "the archive disk",
+    "failingTitle": "The disk {{device}} is failing: replace it soon",
+    "failingBody": "The hive still records, but the disk shows signs of failing. Save the hive's files now, while they can still be read, and move the hive to a new disk.",
+    "failedTitle": "The hive cannot write to {{device}}: recording has stopped",
+    "failedBody": "Save what can still be read and move the hive to a new disk.",
+    "signal": {
+      "smart": "SMART",
+      "kernel": "System log",
+      "writes": "Failed writes",
+      "probe": "Test write"
+    },
+    "saveFirst": "First copy these files to another place (a USB stick will do); without archive-key/ an encrypted archive cannot be opened:",
+    "thenRun": "Then connect a new disk and run on the hive's computer:",
+    "guided": "Move to a new disk step by step",
+    "moveTitle": "Move to a new disk",
+    "moveHelp": "Copies the hive's keys, settings, database and the newest footage to a new disk and runs the hive from there. Nothing is deleted from the old disk.",
+    "moveOpen": "Move the data…",
+    "moveUnsupported": "The guided move works for a hive that runs as a systemd service on Linux. Copy these files by hand and see the documentation, \"Replace the disk\":",
+    "step1": "Copy these files to another place first:",
+    "step2": "Connect the new disk and mount it, for example at /mnt/newdisk.",
+    "target": "New data directory on that disk",
+    "targetError": {
+      "absolute": "Give the full path, starting with /.",
+      "overlaps": "Choose a directory on the new disk, not inside or around {{dir}}.",
+      "characters": "Use a plain path without spaces or any of % \\ \" ' $ ; & | ( ) < > * ? # ` ! ~ { } [ ]: the hive's service definition and the shell would change them."
+    },
+    "step3": "Run this on the hive's computer:",
+    "copy": "Copy the command",
+    "copied": "Copied",
+    "step4": "While it copies, the hive answers but does not record and refuses changes; this page shows the progress.",
+    "copying": "Moving to {{to}}: {{step}}",
+    "progress": "Progress of the move",
+    "copiedOf": "{{copied}} of {{planned}} ({{pct}} %)",
+    "stuck": "The move stopped: {{error}}. Run the same command again to go on, or `sudo hive move-data --cancel` to record from the old disk again.",
+    "notRecording": "The hive does not record until the move ends.",
+    "done": "The hive was moved from {{from}} to {{to}} and runs from the new disk. The old disk was not changed.",
+    "cancelled": "The move was given up; the hive records from {{from}}.",
+    "skipped_one": "{{count}} segment ({{size}}) did not fit on the new disk; footage up to {{newest}} stays on the old disk.",
+    "skipped_other": "{{count}} segments ({{size}}) did not fit on the new disk; footage up to {{newest}} stays on the old disk.",
+    "switching": "Everything is copied; the hive is being started from {{to}}.",
+    "switchStuck": "Everything is copied, but the hive did not start from {{to}}: {{error}}. Run the same command again, or `sudo hive move-data --cancel` to go back.",
+    "unreadable_one": "{{count}} segment ({{size}}) could not be read from the old disk and was left there.",
+    "unreadable_other": "{{count}} segments ({{size}}) could not be read from the old disk and were left there."
   }
 }

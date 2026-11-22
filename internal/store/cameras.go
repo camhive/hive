@@ -19,7 +19,7 @@ type Cameras struct {
 	s *Store
 }
 
-const cameraColumns = `id, name, grp, source_kind, source_addr, username, password_enc, streams_json, enabled, created_at, updated_at, record_audio, identity_json, network, retention_days`
+const cameraColumns = `id, name, grp, source_kind, source_addr, username, password_enc, streams_json, enabled, created_at, updated_at, record_audio, identity_json, network, retention_days, sensitivity`
 
 // Put inserts or replaces a camera (idempotent on ID).
 func (r *Cameras) Put(ctx context.Context, c camera.Camera) error {
@@ -36,15 +36,15 @@ func (r *Cameras) Put(ctx context.Context, c camera.Camera) error {
 		pw = r.s.seal(c.Credentials.Password)
 	}
 	_, err = r.s.db.ExecContext(ctx, `
-		INSERT INTO camera (`+cameraColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		INSERT INTO camera (`+cameraColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(id) DO UPDATE SET
 		  name=excluded.name, grp=excluded.grp, source_kind=excluded.source_kind, source_addr=excluded.source_addr,
 		  username=excluded.username, password_enc=excluded.password_enc, streams_json=excluded.streams_json,
 		  enabled=excluded.enabled, updated_at=excluded.updated_at, record_audio=excluded.record_audio,
-		  identity_json=excluded.identity_json, network=excluded.network, retention_days=excluded.retention_days`,
+		  identity_json=excluded.identity_json, network=excluded.network, retention_days=excluded.retention_days, sensitivity=excluded.sensitivity`,
 		string(c.ID), c.Name, c.Group, string(c.Source.Kind), c.Source.Address, c.Credentials.Username, pw, string(streams),
 		boolInt(c.Enabled), c.CreatedAt.UTC().Format(time.RFC3339Nano), c.UpdatedAt.UTC().Format(time.RFC3339Nano), boolInt(c.RecordAudio),
-		string(identity), string(c.Network), c.Retention.Days)
+		string(identity), string(c.Network), c.Retention.Days, c.Sensitivity.String())
 	if err != nil {
 		return fmt.Errorf("store: put camera: %w", err)
 	}
@@ -120,8 +120,9 @@ func (r *Cameras) scan(row scanner) (camera.Camera, error) {
 		created, updated     string
 		identityRaw, network string
 		retention            sql.NullInt64
+		sensitivity          string
 	)
-	if err := row.Scan(&id, &c.Name, &c.Group, &kind, &c.Source.Address, &c.Credentials.Username, &pw, &streamsRaw, &enabled, &created, &updated, &audio, &identityRaw, &network, &retention); err != nil {
+	if err := row.Scan(&id, &c.Name, &c.Group, &kind, &c.Source.Address, &c.Credentials.Username, &pw, &streamsRaw, &enabled, &created, &updated, &audio, &identityRaw, &network, &retention, &sensitivity); err != nil {
 		return camera.Camera{}, err
 	}
 	if retention.Valid {
@@ -129,6 +130,10 @@ func (r *Cameras) scan(row scanner) (camera.Camera, error) {
 		c.Retention.Days = &days
 	}
 	c.Network = camera.Network(network)
+	var err error
+	if c.Sensitivity, err = camera.ParseSensitivity(sensitivity); err != nil {
+		return camera.Camera{}, fmt.Errorf("store: camera %s: %w", id, err)
+	}
 	if err := json.Unmarshal([]byte(identityRaw), &c.Identity); err != nil {
 		return camera.Camera{}, fmt.Errorf("store: camera %s identity: %w", id, err)
 	}
@@ -143,7 +148,6 @@ func (r *Cameras) scan(row scanner) (camera.Camera, error) {
 	if err := json.Unmarshal([]byte(streamsRaw), &c.Streams); err != nil {
 		return camera.Camera{}, fmt.Errorf("store: camera %s streams: %w", id, err)
 	}
-	var err error
 	if c.CreatedAt, err = time.Parse(time.RFC3339Nano, created); err != nil {
 		return camera.Camera{}, err
 	}

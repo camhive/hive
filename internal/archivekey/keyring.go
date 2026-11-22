@@ -36,7 +36,9 @@ const (
 // (a hash to compare, not a key). 2^17 takes 128 MiB, only while a
 // passphrase is checked, and about 0.56 s on a laptop core (Ryzen 7 3700U;
 // 2^16: 0.27 s, 2^18: 1.0 s and 256 MiB, too much beside the engine on a
-// 1 GB Raspberry Pi). The key file is meant to be kept apart from the hive,
+// 1 GB Raspberry Pi). On a Raspberry Pi 4 with the hive running (#113):
+// 2^16 0.47 s, 2^17 0.94 s, 2^18 2.0 s, peaks of 68, 132 and 261 MiB; the
+// memory, not the time, keeps it at 2^17. The key file is meant to be kept apart from the hive,
 // and a guess on the hive is rate-limited. A keyring written with another
 // cost still opens (age reads it from the file); the next passphrase change
 // writes this one. Tests lower it.

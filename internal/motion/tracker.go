@@ -14,8 +14,10 @@ type Tracker struct {
 	cfg Config
 	det detector
 
-	cameraLive bool // the camera's event subscription works
-	cameraOn   bool // and the camera reports motion
+	cameraLive bool      // the camera's event subscription works
+	cameraOn   bool      // and the camera reports motion
+	cameraFrom time.Time // since when, while no episode is open
+	cameraOff  time.Time // when it last reported no motion
 
 	on    bool      // an episode is open
 	start time.Time // of the open episode
@@ -25,6 +27,13 @@ type Tracker struct {
 // NewTracker creates a Tracker with no episode open.
 func NewTracker(cfg Config) *Tracker {
 	return &Tracker{cfg: cfg, det: detector{cfg: cfg}}
+}
+
+// SetLevel changes the threshold and the minimum episode length; the
+// baseline and an open episode stay.
+func (t *Tracker) SetLevel(l Level) {
+	t.cfg.Level = l
+	t.det.cfg.Level = l
 }
 
 // Frame reads one frame of the analysed Stream. Frames keep the baseline
@@ -46,12 +55,24 @@ func (t *Tracker) CameraSource(live bool) {
 }
 
 // CameraMotion is the camera reporting motion on or off at `at`.
+// Pulses less than pulseGap apart count as one lasting report.
 func (t *Tracker) CameraMotion(on bool, at time.Time) []Change {
-	t.cameraOn = on
-	if !on && !t.on {
-		return nil
+	if on && !t.cameraOn && (t.cameraOff.IsZero() || at.Sub(t.cameraOff) >= pulseGap) {
+		t.cameraFrom = at
 	}
-	return t.active(at, at, SourceCamera)
+	if !on {
+		t.cameraOff = at
+	}
+	t.cameraOn = on
+	switch {
+	case t.on:
+		return t.active(at, at, SourceCamera)
+	case !on, at.Sub(t.cameraFrom) < t.cfg.CameraMin: // a report shorter than CameraMin is no episode
+		return nil
+	case t.cfg.CameraMin == 0:
+		return t.active(at, at, SourceCamera)
+	}
+	return t.active(t.cameraFrom, at, SourceCamera)
 }
 
 // Tick runs once a second: it ends an episode that reached MaxEpisode,
@@ -59,14 +80,17 @@ func (t *Tracker) CameraMotion(on bool, at time.Time) []Change {
 // quiet for Hold, at its last activity.
 func (t *Tracker) Tick(now time.Time) []Change {
 	if t.on && now.Sub(t.start) >= t.cfg.MaxEpisode {
-		t.on, t.cameraOn = false, false
+		t.on, t.cameraOn, t.cameraOff = false, false, time.Time{}
 		return []Change{{At: t.start.Add(t.cfg.MaxEpisode)}}
 	}
 	if t.cameraLive && t.cameraOn {
-		return t.active(now, now, SourceCamera)
+		if !t.on && now.Sub(t.cameraFrom) < t.cfg.CameraMin {
+			return nil
+		}
+		return t.active(t.cameraFrom, now, SourceCamera)
 	}
 	if t.on && now.Sub(t.last) >= t.cfg.Hold {
-		t.on = false
+		t.on, t.cameraOff = false, time.Time{} // pulses before the end do not carry into the next episode
 		return []Change{{At: t.last}}
 	}
 	return nil

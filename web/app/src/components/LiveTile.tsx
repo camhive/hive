@@ -5,6 +5,7 @@ import { LiveSession, type LiveState, type PeerFactory, type Signalling } from "
 import { backoffMs } from "@/lib/reconnect";
 import { useOnScreen } from "@/lib/useOnScreen";
 import { useLiveSound } from "@/lib/liveSound";
+import { CareBadge } from "@/components/CameraCare";
 
 export interface LiveTileProps {
   /** The hive the camera belongs to; the remembered sound choice is per hive and camera. */
@@ -96,6 +97,7 @@ export function LiveTile({ hiveId, camera, health, stream, signal, iceServers, p
         <span className="flex min-w-0 items-center gap-2">
           {live && <span className="dot" style={{ color: "var(--accent)" }} aria-hidden="true" />}
           <span className="font-medium truncate">{camera.name}</span>
+          <CareBadge health={health} onTile />
         </span>
         <span className="flex items-center gap-2">
           {kbps !== undefined && live && <span className="opacity-70 tabular-nums">{kbps} kbit/s</span>}

@@ -12,6 +12,7 @@ const RULES: [string, ActionGroup][] = [
   ["archive.delete", "recordings"],
   ["export.", "recordings"],
   ["camera.", "cameras"],
+  ["motion.", "cameras"], // auto-calm (#157)
   ["update.", "updates"],
   ["local_login.", "access"],
   ["session.revoke", "access"],

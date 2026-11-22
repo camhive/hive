@@ -1,0 +1,4 @@
+2026/11/21 22:13:00 WAR [path cam_a_main] [record] segment closed
+2026/11/21 22:14:12 ERR [path cam_a_main] [record] write /mnt/cameras/camhive/archive/cam_a/main/2026-11-21_22-10-00-000000.mp4: input/output error
+2026/11/21 22:14:13 ERR [path cam_b_main] [record] open /mnt/cameras/camhive/archive/cam_b/main/x.mp4: read-only file system
+2026/11/21 22:15:00 ERR [path cam_b_main] [record] write x.mp4: no space left on device

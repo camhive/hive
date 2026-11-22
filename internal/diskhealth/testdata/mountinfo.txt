@@ -1,0 +1,6 @@
+22 1 8:2 / / rw,relatime shared:1 - ext4 /dev/sda2 rw
+28 22 0:26 / /proc rw,nosuid,nodev,noexec,relatime shared:5 - proc proc rw
+61 22 8:17 / /mnt/cameras rw,relatime shared:30 - ext4 /dev/sdb1 rw
+62 61 0:44 / /mnt/cameras/tmp rw,relatime shared:31 - tmpfs tmpfs rw
+70 22 253:2 / /srv/lvm rw,relatime shared:43 - ext4 /dev/mapper/dataVG-root rw
+71 22 0:45 / /mnt/with\040space rw,relatime shared:44 - ext4 /dev/sdc1 rw
