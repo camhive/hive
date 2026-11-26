@@ -37,7 +37,9 @@ type Hooks struct {
 	OnHello   func(id pki.HiveID, hello protocol.Hello) error
 	OnOnline  func(id pki.HiveID)
 	OnOffline func(id pki.HiveID)
-	OnEvent   func(id pki.HiveID, event protocol.Event)
+	// OnEvent takes a hive's event; an event the hive sent with an id is
+	// acknowledged when it returns nil (#172).
+	OnEvent func(id pki.HiveID, event protocol.Event) error
 }
 
 // GatewayConfig configures a Gateway.
@@ -154,16 +156,17 @@ func (g *Gateway) handleHive(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	welcome := protocol.Welcome{ServerTime: time.Now().UTC(), PingInterval: g.cfg.PingInterval, MinProtocolVersion: protocol.Version}
+	welcome := protocol.Welcome{ServerTime: time.Now().UTC(), PingInterval: g.cfg.PingInterval, MinProtocolVersion: protocol.Version, Acks: true}
 	if err := write(ctx, ws, protocol.KindWelcome, "", welcome); err != nil {
 		return
 	}
 
 	hc := newHiveConn(ws, g.log.With("hive", id))
-	hc.onEvent = func(e protocol.Event) {
+	hc.onEvent = func(e protocol.Event) error {
 		if g.cfg.Hooks.OnEvent != nil {
-			g.cfg.Hooks.OnEvent(id, e)
+			return g.cfg.Hooks.OnEvent(id, e)
 		}
+		return nil
 	}
 	g.register(id, hc)
 	g.log.Info("hive online", "hive", id, "version", hello.Version)
@@ -230,7 +233,7 @@ type hiveConn struct {
 	mu      sync.Mutex
 	pending map[string]chan protocol.Result
 	lastRx  atomic.Int64 // unix nanos of last message received
-	onEvent func(protocol.Event)
+	onEvent func(protocol.Event) error
 }
 
 func newHiveConn(ws *websocket.Conn, log *slog.Logger) *hiveConn {
@@ -297,8 +300,15 @@ func (hc *hiveConn) dispatch(ctx context.Context, env protocol.Envelope) {
 			hc.log.Warn("bad event", "err", err)
 			return
 		}
+		var err error
 		if hc.onEvent != nil {
-			hc.onEvent(e)
+			err = hc.onEvent(e)
+		}
+		switch {
+		case err != nil:
+			hc.log.Warn("event not taken", "event", e.Name, "err", err)
+		case env.ID != "": // the hive waits for this one (#172)
+			_ = write(ctx, hc.ws, protocol.KindAck, env.ID, nil)
 		}
 	default:
 		hc.log.Warn("unexpected kind from hive", "kind", env.Kind)

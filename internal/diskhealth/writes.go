@@ -28,7 +28,7 @@ func Classify(err error) Class {
 	switch {
 	case err == nil:
 		return None
-	case errors.Is(err, syscall.EIO):
+	case errors.Is(err, syscall.EIO), errors.Is(err, syscall.ESTALE): // ESTALE: a file on a mount that is gone (#172)
 		return IO
 	case errors.Is(err, syscall.EROFS):
 		return ReadOnly
@@ -39,13 +39,17 @@ func Classify(err error) Class {
 }
 
 // classifyText reads the class from an error's or a log line's words: the
-// engine's log and SQLite's errors carry no errno.
+// engine's log and SQLite's errors carry no errno. SQLite's I/O
+// (SQLITE_IOERR), corruption (SQLITE_CORRUPT, SQLITE_NOTADB) and
+// read-only (SQLITE_READONLY) errors are what a database on a vanished
+// or broken disk answers (#172).
 func classifyText(s string) Class {
 	s = strings.ToLower(s)
 	switch {
-	case strings.Contains(s, "input/output error"), strings.Contains(s, "disk i/o error"):
+	case strings.Contains(s, "input/output error"), strings.Contains(s, "disk i/o error"),
+		strings.Contains(s, "database disk image is malformed"), strings.Contains(s, "file is not a database"):
 		return IO
-	case strings.Contains(s, "read-only file system"):
+	case strings.Contains(s, "read-only file system"), strings.Contains(s, "readonly database"):
 		return ReadOnly
 	case strings.Contains(s, "no space left on device"), strings.Contains(s, "database or disk is full"):
 		return NoSpace

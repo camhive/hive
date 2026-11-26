@@ -75,9 +75,11 @@ Tage beginnen.
 Auf ihrer Startseite erscheint Ihr Hive unter *Für mich freigegeben*. Sie
 bekommen Livebild und Aufnahmen der freigegebenen Kameras, und PTZ und Export,
 wenn sie Bediener sind. Sie können keine Kameras hinzufügen oder ändern und
-Ihre Freigaben nicht sehen, und der Reiter *Verbindung* zeigt ihnen nur, wie
-die App den Hive erreicht, ohne Ihre Bereiche (Updates, lokale Anmeldung,
-Verschlüsselung, Aufnahmen löschen, Hive entfernen). Eine ihrer Freigaben, die
+Ihre Freigaben nicht sehen, und der Reiter *Einstellungen* zeigt ihnen nur, wie
+die App den Hive erreicht, die Version des Hives und den Speicher ihrer
+Kameras, ohne Ihre Zeilen (Zustand der Festplatte, Verschlüsselung, Aufnahmen
+löschen, Umzug auf eine neue Festplatte, lokale Anmeldung, Updates, Hive
+entfernen). Eine ihrer Freigaben, die
 innerhalb der nächsten drei Tage endet oder vor weniger als drei Tagen geendet
 hat, erscheint als
 Hinweis auf ihrer Startseite; um den Zugriff zu behalten, bitten sie Sie, sie

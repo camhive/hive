@@ -5,17 +5,22 @@ import { Link } from "@tanstack/react-router";
 import { unwrapHive, type HiveClient } from "@camhive/api";
 import { errorMessage } from "@/lib/errors";
 import { useGrant } from "@/lib/useGrant";
-import { useHiveClient } from "@/lib/hiveApi";
+import { useHiveClient, useStorage } from "@/lib/hiveApi";
 import { useHiveCapability } from "@/lib/capabilities";
 import { formatSize } from "@/lib/storage";
 import { filesToSave, moveCommand, moveProgress, moveTargetError, needsAttention, type DataMove, type DiskHealth, type MoveFile } from "@/lib/diskHealth";
 import type { Hive } from "@/lib/hives";
+import type { Fact } from "@/lib/hiveSettings";
+import { Facts, PanelRow, SettingsRow } from "@/components/SettingsLayout";
 
-function useMove(hive: Hive, client: HiveClient | null, enabled: boolean) {
+/** The data move's note (#155), polled while a copy runs. */
+export function useMove(hive: Hive, client: HiveClient | null, enabled: boolean) {
   return useQuery({
     queryKey: ["hive", hive.id, "move"],
     queryFn: async () => unwrapHive(await client!.GET("/v0/hive/move")),
     enabled: !!client && enabled,
+    staleTime: 60_000,
+    retry: false,
     refetchInterval: (q) => (q.state.data?.state === "copying" ? 3000 : false), // the command writes its note every two seconds
   });
 }
@@ -38,12 +43,7 @@ function FilesToSave({ files }: { files?: MoveFile[] }) {
 export function DiskHealthNotice({ hive, client, owner }: { hive: Hive; client: HiveClient | null; owner: boolean }) {
   const { t } = useTranslation();
   const cap = useHiveCapability(hive, "disk.health");
-  const storage = useQuery({
-    queryKey: ["hive", hive.id, "storage"],
-    queryFn: async () => unwrapHive(await client!.GET("/v0/storage")),
-    enabled: !!client && owner && cap.has,
-    staleTime: 5 * 60_000,
-  });
+  const storage = useStorage(hive, client, owner && cap.has, 5 * 60_000); // the banner's cadence since #155
   const health: DiskHealth | undefined = storage.data?.disk?.health;
   const attention = needsAttention(health);
   const move = useMove(hive, client, attention);
@@ -63,29 +63,48 @@ export function DiskHealthNotice({ hive, client, owner }: { hive: Hive; client: 
       {move.data?.supported === false ? <p>{t("disk.moveUnsupported")}</p> : <>
         <p>{t("disk.thenRun")}</p>
         <code className="block text-xs" data-testid="disk-command">{moveCommand("")}</code>
-        <Link to="/hives/$id/settings" params={{ id: hive.id }} className="link">{t("disk.guided")}</Link>
+        <Link to="/hives/$id/settings" params={{ id: hive.id }} hash="settings-move-data" className="link">{t("disk.guided")}</Link>
       </>}
     </section>
   );
 }
 
 /**
- * The guided replacement in the Connection card (#155): the steps, the
- * command for the directory the owner types, and the progress of a move
- * the command runs on the hive's computer.
+ * The disk's health as a settings row (#155, #174): the state the page read
+ * and, when the disk needs attention, what the hive saw.
  */
-export function MoveDataSettings({ hive, owner }: { hive: Hive; owner: boolean }) {
+export function DiskHealthRow({ hive, state, health }: { hive: Hive; state: Fact[]; health?: DiskHealth }) {
+  const { t, i18n } = useTranslation();
+  const cap = useHiveCapability(hive, "disk.health");
+  const checked = health?.checked_at && t("settings.diskChecked", { date: new Date(health.checked_at).toLocaleString(i18n.language) });
+  return (
+    <SettingsRow id="disk-health" testId="disk-health-row" title={t("settings.diskHealth")}
+      state={<><Facts facts={state} sentence />{cap.has && health?.device && ` · ${health.device}`}{checked && ` · ${checked}`}</>}>
+      {needsAttention(health) && (
+        <div className="text-sm space-y-2">
+          <p>{t(health!.state === "failed" ? "disk.failedBody" : "disk.failingBody")}</p>
+          {health!.evidence.length > 0 && (
+            <ul className="list-disc pl-5 muted">
+              {health!.evidence.map((e, i) => <li key={i}>{t(`disk.signal.${e.signal}`)}: {e.detail}</li>)}
+            </ul>
+          )}
+        </div>
+      )}
+    </SettingsRow>
+  );
+}
+
+/**
+ * The guided replacement (#155): the steps, the command for the directory
+ * the owner types, and the progress of a move the command runs on the
+ * hive's computer. A hive without disk.health says which version brings it.
+ */
+export function MoveDataSettings({ hive, state }: { hive: Hive; state: Fact[] }) {
   const { t } = useTranslation();
   const cap = useHiveCapability(hive, "disk.health");
-  const [open, setOpen] = useState(false);
-  if (!owner || !cap.has) return null;
   return (
-    <div className="mt-4 border-t pt-4" style={{ borderColor: "var(--border)" }} data-testid="move-data">
-      <h3 className="font-medium mb-1">{t("disk.moveTitle")}</h3>
-      <p className="muted text-sm mb-3">{t("disk.moveHelp")}</p>
-      {open ? <MovePanel hive={hive} />
-        : <button type="button" className="btn btn-secondary" disabled={!hive.online} onClick={() => setOpen(true)}>{t("disk.moveOpen")}</button>}
-    </div>
+    <PanelRow id="move-data" testId="move-data" title={t("disk.moveTitle")} state={<Facts facts={state} sentence />} help={t("disk.moveHelp")}
+      openLabel={cap.has ? t("disk.moveOpen") : undefined} disabled={!hive.online} panel={() => <MovePanel hive={hive} />} />
   );
 }
 

@@ -253,6 +253,12 @@
     height: 2px;
     background: var(--accent);
   }
+  /* Phones: the four German tab names fit in 360 px without scrolling the bar. */
+  @media (max-width: 639px) {
+    .tabs { gap: 0; }
+    .tab { padding-inline: .4375rem; }
+    .tab[aria-current="page"]::after { left: .4375rem; right: .4375rem; }
+  }
 
   /* Header nav link */
   .nav-link {

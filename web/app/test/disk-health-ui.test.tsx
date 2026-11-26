@@ -73,7 +73,7 @@ describe("a failing archive disk (#155)", () => {
     const listed = within(banner).getByTestId("files-to-save").querySelectorAll("li");
     expect([...listed].map((f) => f.textContent)).toEqual(["/var/lib/camhive/hive.key", "/var/lib/camhive/cloud.json", "/etc/camhive/hive.yaml", "/var/lib/camhive/archive-key/", "/var/lib/camhive/hive.db"]);
     expect(within(banner).getByTestId("disk-command")).toHaveTextContent("sudo hive move-data /mnt/newdisk/camhive");
-    expect(within(banner).getByRole("link", { name: "Move to a new disk step by step" })).toHaveAttribute("href", "/hives/hv_1/settings");
+    expect(within(banner).getByRole("link", { name: "Move to a new disk step by step" })).toHaveAttribute("href", "/hives/hv_1/settings#settings-move-data");
   });
 
   it("names no command for a hive the command cannot move", async () => {
@@ -99,7 +99,7 @@ describe("a failing archive disk (#155)", () => {
   });
 });
 
-describe("the guided move in the Connection card (#155)", () => {
+describe("the guided move in the settings' Recordings and disk group (#155)", () => {
   it("builds the command for the new directory and refuses one inside the data directory", async () => {
     stub("owner", {});
     const user = mount("/hives/hv_1/settings");

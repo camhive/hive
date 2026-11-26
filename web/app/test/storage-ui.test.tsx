@@ -115,8 +115,8 @@ describe("storage on the hive page (#150)", () => {
     stub(baseHive, "viewer", { cameras: [{ id: "cam_yard", name: "Yard", bytes: 144 * GB, days_held: 7.965 }] });
     const user = mount();
     const section = await screen.findByRole("region", { name: "Storage" });
-    expect(within(section).getByText("How many days of footage the hive holds for your cameras.")).toBeInTheDocument();
     await user.click(within(section).getByRole("button", { name: "Show storage…" }));
+    expect(within(section).getByText("How many days of footage the hive holds for your cameras.")).toBeInTheDocument();
     expect(await within(section).findByTestId("storage-member")).toHaveTextContent("Yard: 7.9 days of footage, 144 GB");
     expect(within(section).queryByLabelText("Keep footage for (days)")).toBeNull();
   });

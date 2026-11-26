@@ -185,17 +185,15 @@
     "online": "The hive is online.",
     "toHives": "Go to hives",
     "later": "I will finish this later",
-    "settings": "Connection",
-    "settingsFor": "Connection settings for {{name}}",
+    "settings": "Settings",
+    "settingsFor": "Settings for {{name}}",
     "pages": "Hive pages",
     "cameras": "Cameras",
     "sharing": "Sharing",
     "activity": "Activity"
   },
   "transport": {
-    "title": "Connection",
     "liveNote": "Live video always travels peer to peer over WebRTC (through our TURN relay only when your network blocks direct connections). This path is for recordings, exports and settings.",
-    "httpPath": "Recordings path",
     "path": {
       "lan": "Direct on your network",
       "address": "Direct on your network, by address",
@@ -204,7 +202,6 @@
     },
     "probing": "Checking…",
     "reprobe": "Check again",
-    "reasonLabel": "Why",
     "reason": {
       "lan_ok": "The hive answered on its local name.",
       "address_ok": "The local name did not answer; the hive answered at its local address.",
@@ -226,7 +223,7 @@
     "rebindHelp": "Many routers (Fritz!Box, pfSense, Pi-hole) refuse public names that point to local addresses. Everything works through the relay; for direct access add this domain to your router's DNS rebind exceptions:",
     "lnaNote": "Chrome asks once for permission to reach devices on your local network; allow it to keep the direct path.",
     "removeTitle": "Remove this hive",
-    "removeHelp": "Frees the hive slot of your plan at once. The hive is disconnected from the cloud and cannot reconnect; recordings stay on it. To use it again, run `hive claim` on it and claim it anew.",
+    "removeHelp": "Frees the hive slot of your plan at once. The hive is disconnected from the cloud and cannot reconnect; recordings stay on it. To use it again, run <code>hive claim</code> on it and claim it anew.",
     "remove": "Remove hive",
     "confirmRemove": "Remove hive “{{name}}” from your account? Its recordings stay on the device."
   },
@@ -603,7 +600,8 @@
     "locked_one": "Too many failed sign-ins. Try again in {{count}} minute.",
     "locked_other": "Too many failed sign-ins. Try again in {{count}} minutes.",
     "lockedUnknown": "Too many failed sign-ins. The hive blocks local sign-ins for up to 15 minutes; try again later.",
-    "unreachable": "The hive does not answer on your network right now. Make sure this device is on the same network as the hive."
+    "unreachable": "The hive does not answer on your network right now. Make sure this device is on the same network as the hive.",
+    "manage": "Manage local sign-in"
   },
   "lanAddress": {
     "title": "Open your hive by its address",
@@ -871,7 +869,9 @@
       "local_login.locked": "Local sign-in locked after failures",
       "archive.encryption.key_file": "Recovery key file downloaded",
       "motion.calmed": "Motion detection calmed: too many episodes in an hour",
-      "motion.calm_ended": "Motion detection back to its sensitivity"
+      "motion.calm_ended": "Motion detection back to its sensitivity",
+      "recording.stopped": "Recording stopped",
+      "recording.resumed": "Recording again"
     }
   },
   "install": {
@@ -1029,5 +1029,110 @@
     "switchStuck": "Everything is copied, but the hive did not start from {{to}}: {{error}}. Run the same command again, or `sudo hive move-data --cancel` to go back.",
     "unreadable_one": "{{count}} segment ({{size}}) could not be read from the old disk and was left there.",
     "unreadable_other": "{{count}} segments ({{size}}) could not be read from the old disk and were left there."
+  },
+  "recording": {
+    "stopped": "Recording stopped at {{time}}: {{reason}}.",
+    "hint": "Nothing is recorded until this is fixed. Check that the hive's disk is connected and mounted; the recordings made so far stay on it.",
+    "restart": "The disk is back, but the hive still holds the old one. Restart the hive (hive restart on its computer, as root or administrator) to record again.",
+    "lastWord": "This is as the hive last told Camhive; the app cannot reach the hive right now.",
+    "reason": {
+      "disk_not_mounted": "the disk the hive records to is not mounted",
+      "archive_missing": "the folder the hive records into is gone (the disk was unplugged or its mount was lost)",
+      "archive_changed": "the folder the hive records into is on another disk than when the hive started",
+      "archive_unwritable": "the hive cannot write into the folder it records into",
+      "database": "its database reports disk errors",
+      "engine_stalled": "cameras are online but no new recording started",
+      "unknown": "the hive did not say why"
+    }
+  },
+  "settings": {
+    "strip": "This hive at a glance",
+    "index": "On this page",
+    "close": "Close",
+    "label": {
+      "version": "Version",
+      "path": "Path",
+      "disk": "Disk",
+      "footage": "Footage",
+      "encryption": "Encryption",
+      "updates": "Updates"
+    },
+    "group": {
+      "connection": "Connection",
+      "recordings": "Recordings and disk",
+      "access": "Access",
+      "software": "Software",
+      "danger": "Danger zone"
+    },
+    "pathTitle": "Path for recordings and settings",
+    "details": "Details",
+    "videoTitle": "How video travels",
+    "diskHealth": "Disk health",
+    "diskChecked": "Checked {{date}}",
+    "version": "Running version",
+    "hiveId": "Hive id",
+    "fact": {
+      "version": "{{version}}",
+      "unknownVersion": "unknown",
+      "notReported": "not reported by this hive (needs {{since}})",
+      "checking": "checking…",
+      "unknown": "not known right now",
+      "path": {
+        "direct": "direct",
+        "relay": "through the relay",
+        "none": "unreachable"
+      },
+      "disk": {
+        "ok": "healthy",
+        "failing": "failing",
+        "failed": "failed",
+        "unknown": "health not readable"
+      },
+      "held_one": "{{size}} over {{count}} day",
+      "held_other": "{{size}} over {{count}} days",
+      "heldToday": "{{size}}, less than a day",
+      "noFootage": "no footage yet",
+      "fullNow": "full, the oldest footage is being deleted",
+      "fillsSoon": "full within a day",
+      "fillsIn_one": "full in about {{count}} day",
+      "fillsIn_other": "full in about {{count}} days",
+      "keeps_one": "keeps {{count}} day",
+      "keeps_other": "keeps {{count}} days",
+      "encryption": {
+        "off": "off",
+        "locked": "on, locked",
+        "unlocked": "on, unlocked",
+        "notSealing": "new footage is not encrypted"
+      },
+      "updates": {
+        "automatic": "automatic",
+        "manual": "manual",
+        "unsupported": "this build does not update itself",
+        "window": "window {{from}}–{{to}}",
+        "available": "{{version}} available"
+      },
+      "localLogin": {
+        "on": "on for {{username}}",
+        "off": "off"
+      },
+      "move": {
+        "ready": "possible on this hive",
+        "unsupported": "not supported on this hive",
+        "copying": "moving now, {{pct}} %",
+        "switching": "switching to the new disk",
+        "done": "moved to {{to}}",
+        "failed": "the last move was cancelled"
+      },
+      "offline": "hive offline",
+      "keepsOwn_one": "keeps {{count}} day ({{camera}}: {{own}})",
+      "keepsOwn_other": "keeps {{count}} days ({{camera}}: {{own}})",
+      "keepsShort_one": "keeps about {{count}} of {{retention}} days",
+      "keepsShort_other": "keeps about {{count}} of {{retention}} days",
+      "keepsUntilFull_one": "keeps until the disk is full, about {{count}} day",
+      "keepsUntilFull_other": "keeps until the disk is full, about {{count}} days",
+      "keepsUntilFullPlain": "keeps until the disk is full",
+      "recordingStopped": "recording stopped since {{time}}: $t(recording.reason.{{reason}})"
+    },
+    "noAnswer": "The hive did not answer, so what it reports is not known right now."
   }
 }

@@ -346,6 +346,30 @@ type RunOptions struct {
 	// current connection (tunnel.ErrNotConnected while offline). The hive
 	// agent uses it for heartbeats and forwarded events.
 	OnEmitter func(emit func(ctx context.Context, e protocol.Event) error)
+	// OnAckedEmitter receives, once, a function that sends an event and
+	// returns nil only once the gateway acknowledged it (#172): the hive
+	// agent's alarm lane.
+	OnAckedEmitter func(emit func(ctx context.Context, e protocol.Event) error)
+}
+
+// offerEmitters hands the agent's senders over the current connection to
+// the options that asked for them.
+func offerEmitters(opt RunOptions, current *atomic.Pointer[tunnel.Agent]) {
+	over := func(send func(*tunnel.Agent, context.Context, protocol.Event) error) func(context.Context, protocol.Event) error {
+		return func(ctx context.Context, e protocol.Event) error {
+			ag := current.Load()
+			if ag == nil {
+				return tunnel.ErrNotConnected
+			}
+			return send(ag, ctx, e)
+		}
+	}
+	if opt.OnEmitter != nil {
+		opt.OnEmitter(over((*tunnel.Agent).Emit))
+	}
+	if opt.OnAckedEmitter != nil {
+		opt.OnAckedEmitter(over((*tunnel.Agent).EmitAcked))
+	}
 }
 
 // Run keeps the tunnel to the gateway open and renews the certificate on
@@ -365,15 +389,7 @@ func Run(ctx context.Context, p hiveconfig.Paths, key ed25519.PrivateKey, opt Ru
 		return err
 	}
 	var current atomic.Pointer[tunnel.Agent]
-	if opt.OnEmitter != nil {
-		opt.OnEmitter(func(ctx context.Context, e protocol.Event) error {
-			ag := current.Load()
-			if ag == nil {
-				return tunnel.ErrNotConnected
-			}
-			return ag.Emit(ctx, e)
-		})
-	}
+	offerEmitters(opt, &current)
 	for ctx.Err() == nil {
 		st, err = renewIfDue(ctx, p, st, key, opt)
 		if err != nil {

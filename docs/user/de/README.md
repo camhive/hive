@@ -41,7 +41,7 @@ Aufnahme, Ansehen im eigenen Netz und lokaler Export von Clips.
 | Startseite | Ihre Hives und die für Sie freigegebenen Hives, mit Online-Status |
 | Hive → Kameras | Live-Kacheln oder Liste; die geöffnete Kamera mit Zeitleiste, Wiedergabe, Export und PTZ; Kameras hinzufügen, bearbeiten, ausschalten, entfernen (nur Besitzer) |
 | Hive → Freigabe | Wer welche Kameras dieses Hives sieht (nur Besitzer) |
-| Hive → Verbindung | Wie die App den Hive erreicht; Hive entfernen |
+| Hive → Einstellungen | Der Hive auf einen Blick (Version, Weg, Festplatte, Aufnahmen, Verschlüsselung, Updates); wie die App den Hive erreicht; Speicher, Zustand der Festplatte, Verschlüsselung, Aufnahmen löschen, Umzug auf eine neue Festplatte; lokale Anmeldung; Updates; Hive entfernen (das meiste nur für den Besitzer) |
 | Mitglieder | Personen, die Sie eingeladen haben; offene Einladungen |
 | Konto | Passwort, Zwei-Faktor, angemeldete Geräte |
 | Tarif | Ihr Tarif und seine Limits, Promo-Codes |

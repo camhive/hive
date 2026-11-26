@@ -1170,6 +1170,13 @@ export interface components {
             relay_host?: string;
             /** @description What the hive's software can do, from its heartbeat (ADR-0022). Absent: the last heartbeat had no list (v0.1.6 or older), assume the v0.1.6 baseline. */
             capabilities?: string[];
+            /** @description The hive's last word (#172): it stopped recording and has not said it records again. Kept while the hive is offline, so the app can say so when it cannot reach the hive; the hive's own GET /v0/hive not_recording is fresher when it can. Absent: recording, or never reported (hives before 0.1.11). */
+            recording_stopped?: {
+                /** Format: date-time */
+                since: string;
+                /** @enum {string} */
+                reason: "disk_not_mounted" | "archive_missing" | "archive_changed" | "archive_unwritable" | "database" | "engine_stalled" | "unknown";
+            };
         };
         AccessGrant: {
             /** @description PASETO v4.public; send to the hive as Bearer */
@@ -1231,6 +1238,7 @@ export interface components {
             time_zone: string;
             events: {
                 offline: components["schemas"]["NotifyToggle"];
+                /** @description storage.low, disk.failing, disk.failed (hives before 0.1.11), and recording.stopped with recording.resumed (#172): the hive stopped recording, told at once and never in a digest; recording again on the channels the stop went out on */
                 storage: components["schemas"]["NotifyToggle"];
                 motion: components["schemas"]["NotifyToggle"];
             };

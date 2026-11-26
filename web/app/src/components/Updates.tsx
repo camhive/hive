@@ -1,13 +1,15 @@
 import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { unwrapHive, type hiveComponents } from "@camhive/api";
 import { errorMessage } from "@/lib/errors";
 import { useGrant } from "@/lib/useGrant";
-import { useHiveClient } from "@/lib/hiveApi";
+import { useHiveClient, useUpdateStatus } from "@/lib/hiveApi";
 import { useHiveCapability } from "@/lib/capabilities";
 import { NeedsUpdate } from "@/components/NeedsUpdate";
+import { Facts, PanelRow } from "@/components/SettingsLayout";
+import type { Fact } from "@/lib/hiveSettings";
 import type { Hive } from "@/lib/hives";
 
 type UpdateStatus = hiveComponents["schemas"]["UpdateStatus"];
@@ -16,21 +18,15 @@ type UpdateSettings = hiveComponents["schemas"]["UpdateSettings"];
 /**
  * The owner's update settings and status (#82, ADR-0018 §6): mode, window,
  * channel, the version on offer with "Update now", the last update or
- * rollback. It asks the hive for access only once opened: a remote
- * session counts against the plan.
+ * rollback. The row shows the state the page read; the panel opens below.
  */
-export function UpdatesSettings({ hive }: { hive: Hive }) {
+export function UpdatesSettings({ hive, state }: { hive: Hive; state: Fact[] }) {
   const { t } = useTranslation();
   const cap = useHiveCapability(hive, "updates");
-  const [open, setOpen] = useState(false);
   return (
-    <section className="card max-w-3xl" aria-labelledby="updates-title">
-      <h2 id="updates-title" className="text-lg font-semibold mb-1">{t("updates.title")}</h2>
-      <p className="muted text-sm mb-3">{t("updates.help")}</p>
-      {!cap.has ? <NeedsUpdate hive={hive} since={cap.since} owner />
-        : open ? <UpdatesPanel hive={hive} />
-        : <button type="button" className="btn btn-secondary" disabled={!hive.online} onClick={() => setOpen(true)}>{t("updates.open")}</button>}
-    </section>
+    <PanelRow id="updates" title={t("updates.title")} state={cap.has && <Facts facts={state} sentence />} help={t("updates.help")}
+      openLabel={cap.has ? t("updates.open") : undefined} disabled={!hive.online}
+      notice={!cap.has && <NeedsUpdate hive={hive} since={cap.since} owner />} panel={() => <UpdatesPanel hive={hive} />} />
   );
 }
 
@@ -38,11 +34,7 @@ function UpdatesPanel({ hive }: { hive: Hive }) {
   const { t } = useTranslation();
   const { grant, access } = useGrant(hive);
   const client = useHiveClient(hive, grant);
-  const status = useQuery({
-    queryKey: ["hive", hive.id, "updates"],
-    queryFn: async () => unwrapHive(await client!.GET("/v0/hive/updates")),
-    enabled: !!client,
-  });
+  const status = useUpdateStatus(hive, client);
   if (access.error) return <p role="alert" className="error text-sm">{errorMessage(t, access.error)}</p>;
   if (!client || !status.data) return <p className="muted text-sm">…</p>;
   return <UpdatesForm hive={hive} status={status.data} save={async (body) => unwrapHive(await client.PUT("/v0/hive/updates", { body }))}

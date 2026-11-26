@@ -187,6 +187,9 @@ func StillWriting(seg Segment, modified, now time.Time) bool {
 // segments it sealed.
 func (i *Index) Seal(ctx context.Context, root string, to age.Recipient, now time.Time) (int, error) {
 	all, err := listFiles(root)
+	if errors.Is(err, ErrRootMissing) {
+		return 0, nil // no archive yet, or its disk is gone: the reconcile reports that
+	}
 	if err != nil {
 		return 0, err
 	}

@@ -18,6 +18,7 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -88,11 +89,23 @@ func run(args []string, stdout, stderr *os.File) int {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
+		afterInstall(cmd, paths, stderr)
 		fmt.Fprintf(stdout, "%s: %s ok\n", serviceName, cmd)
 		return 0
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\nusage: hive [run|claim|install|uninstall|start|stop|restart|status|update|diag|local-login|move-data|version|--version]\n", cmd)
 		return 2
+	}
+}
+
+// afterInstall tells an installed systemd service to wait for its disks
+// (#172): the hive's own drop-in.
+func afterInstall(cmd string, paths hiveconfig.Paths, stderr io.Writer) {
+	if cmd != "install" || !systemdHere() {
+		return
+	}
+	if err := installMounts(systemdUnit, runSystemctl, paths); err != nil {
+		fmt.Fprintln(stderr, "the service could not be told to wait for its disks:", err)
 	}
 }
 
@@ -159,6 +172,25 @@ type program struct {
 }
 
 func (p *program) Start(_ service.Service) error {
+	ctx, cancel := context.WithCancel(context.Background())
+	p.cancel, p.done = cancel, make(chan struct{})
+	if err := identityGuard(os.Getenv("CAMHIVE_DATA_DIR"), systemdUnit, otherFS); err != nil {
+		// #172: not a new, unclaimed hive beside a missing disk, and no exit
+		// hive-updater would read as a failed update: wait for the disk.
+		p.log.Error("waiting for the data directory's disk", "err", err)
+		go p.waitForDisk(ctx, err)
+		return nil
+	}
+	if err := p.start(ctx); err != nil {
+		cancel()
+		return err
+	}
+	return nil
+}
+
+// start loads the configuration and the identity, assembles the hive and
+// serves it until ctx ends.
+func (p *program) start(ctx context.Context) error {
 	cfg, firstRun, err := hiveconfig.Load(p.paths)
 	if err != nil {
 		return err
@@ -180,13 +212,10 @@ func (p *program) Start(_ service.Service) error {
 		p.log.Info("first run", "hive_id", id, "data_dir", p.paths.Data, "config", p.paths.Config)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	p.cancel = cancel
-	p.done = make(chan struct{})
 	log := p.log.With("hive_id", id)
+	p.waitForDisksNextTime(cfg, log)
 	parts, err := assemble(ctx, cfg, p.paths, key, string(id), version.Current().String(), log)
 	if err != nil {
-		cancel()
 		return err
 	}
 	appCfg := hiveapp.Config{ListenAddr: cfg.ListenAddr, Version: version.Current().String(), Logger: log, Handler: parts.handler}
@@ -232,7 +261,7 @@ func (p *program) serve(ctx context.Context, app *hiveapp.App, parts *runtimePar
 			}
 		}()
 		go parts.index.Run(ctx, parts.archive, recordcheck.IndexInterval)
-		go sealLoop(ctx, parts.vault, parts.index, parts.archive, parts.exports, parts.disk.RecordWrite, log.With("component", "archivekey"))
+		go sealLoop(ctx, parts.vault, parts.index, parts.archive, parts.exports, parts.failedWrite, log.With("component", "archivekey"))
 		go parts.disk.Run(ctx) // #155: at start and every 30 minutes
 		go parts.sweeper.Run(ctx, 5*time.Minute)
 		go parts.health.Run(ctx)
@@ -244,6 +273,7 @@ func (p *program) serve(ctx context.Context, app *hiveapp.App, parts *runtimePar
 		defer func() { stopMotion(); <-motionDone }() // it ends open episodes before the store closes
 		go parts.cameras.Run(ctx)
 	}
+	go parts.recording.Run(ctx)                            // #172: once a minute, with or without the video engine
 	go hiveapp.RunAutolock(ctx, parts.deps, autolockEvery) // #147: works without the video engine too
 	go reportUpdates(ctx, journal.DefaultDir(), parts.store, parts.agent, log)
 	if err := app.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {

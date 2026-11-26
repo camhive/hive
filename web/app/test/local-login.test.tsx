@@ -288,7 +288,7 @@ describe("local login settings", () => {
 
     const section = await screen.findByTestId("local-login-settings");
     await user.click(within(section).getByRole("button", { name: "Set up local sign-in" }));
-    expect(await within(section).findByText("Off")).toBeInTheDocument();
+    expect(await within(section).findByTestId("local-login-state")).toHaveTextContent("Off");
     await user.type(within(section).getByLabelText("Local username"), "anna");
     await user.type(within(section).getByLabelText("Local password"), "short");
     await user.click(within(section).getByRole("button", { name: "Save local sign-in" }));
@@ -297,10 +297,12 @@ describe("local login settings", () => {
     await user.clear(within(section).getByLabelText("Local password"));
     await user.type(within(section).getByLabelText("Local password"), "correct horse battery");
     await user.click(within(section).getByRole("button", { name: "Save local sign-in" }));
-    expect(await within(section).findByText(/On for anna/)).toBeInTheDocument();
+    await waitFor(() => expect(within(section).getByTestId("local-login-state")).toHaveTextContent(/On for anna/));
+    expect(within(section).getByTestId("local-login-row-state")).toHaveTextContent("On for anna"); // the row follows the panel (#174)
+    expect(within(section).getByRole("button", { name: "Close" })).toBeInTheDocument();
     expect(puts.at(-1)).toEqual({ username: "anna", password: "correct horse battery" });
 
     await user.click(within(section).getByRole("button", { name: "Turn off local sign-in" }));
-    expect(await within(section).findByText("Off")).toBeInTheDocument();
+    await waitFor(() => expect(within(section).getByTestId("local-login-state")).toHaveTextContent("Off"));
   }, 15_000);
 });

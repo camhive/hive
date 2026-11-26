@@ -17,6 +17,7 @@ import (
 	"github.com/camhive/hive/internal/hiveagent"
 	"github.com/camhive/hive/internal/hiveapp"
 	"github.com/camhive/hive/internal/hiveconfig"
+	"github.com/camhive/hive/internal/recording"
 	"github.com/camhive/hive/internal/store"
 	"github.com/camhive/hive/internal/version"
 )
@@ -217,5 +218,26 @@ func TestStatusPrintsTheHivesLANAddresses(t *testing.T) {
 	}
 	if len(addrs) == 0 && strings.Contains(out.String(), "lan: ") {
 		t.Errorf("no private address, yet a LAN line:\n%s", out.String())
+	}
+}
+
+// #172: `hive status` says the running hive does not record, since when
+// and why, right after the version.
+func TestStatusSaysTheHiveDoesNotRecord(t *testing.T) {
+	since := time.Date(2026, 11, 24, 10, 30, 0, 0, time.UTC)
+	srv := httptest.NewServer(hiveapp.NewAPI(hiveapp.Deps{Version: "0.1.11", Recording: func() recording.State {
+		return recording.State{Since: since, Reason: recording.ArchiveMissing, Detail: "stat /media/disk/camhive/archive: no such file or directory"}
+	}}))
+	t.Cleanup(srv.Close)
+	paths := hiveconfig.Paths{}.WithDataDir(t.TempDir())
+	if err := os.WriteFile(paths.Config, []byte("listen_addr: "+strings.TrimPrefix(srv.URL, "http://")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	runStatus(running, version.Info{Version: "0.1.11"}, paths, &out, io.Discard)
+	want := "hive: 0.1.11\nNOT RECORDING since " + since.Local().Format("2006-01-02 15:04 -07:00") +
+		": archive_missing (stat /media/disk/camhive/archive: no such file or directory)\n"
+	if !strings.Contains(out.String(), want) {
+		t.Fatalf("status =\n%s\nwant it to contain\n%s", out.String(), want)
 	}
 }

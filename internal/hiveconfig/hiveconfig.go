@@ -116,6 +116,10 @@ type Config struct {
 	// (0 = no cap). Old exports go before any footage is deleted for space.
 	ExportDays  int `yaml:"export_days"`
 	ExportMaxGB int `yaml:"export_max_gb"`
+	// RecordingStallMinutes: while a camera is online and no segment
+	// started for this long plus a segment's length, the hive counts as
+	// not recording (#172). 0 turns the check off.
+	RecordingStallMinutes int `yaml:"recording_stall_minutes"`
 	// ICEServers are STUN/TURN URLs the video engine advertises for WebRTC
 	// (ADR-0010). Empty means host candidates only, enough on the LAN.
 	// Example: ["stun:stun.camhive.app:3478"].
@@ -152,7 +156,7 @@ const DefaultListenAddr = "127.0.0.1:16016"
 const DefaultTLSListenAddr = "0.0.0.0:16443"
 
 func defaults(p Paths) Config {
-	return Config{ListenAddr: DefaultListenAddr, TLSListenAddr: DefaultTLSListenAddr, ArchiveDir: p.Archive, LogLevel: "info", SegmentMinutes: 10, RetentionDays: 30, MinFreeGB: 10, ExportDays: 7, ExportMaxGB: 10,
+	return Config{ListenAddr: DefaultListenAddr, TLSListenAddr: DefaultTLSListenAddr, ArchiveDir: p.Archive, LogLevel: "info", SegmentMinutes: 10, RetentionDays: 30, MinFreeGB: 10, ExportDays: 7, ExportMaxGB: 10, RecordingStallMinutes: 10,
 		EngineAPIPort: 9997, EngineWebRTCPort: 8889, EngineWebRTCUDPPort: 8890,
 		UpdateURL: "https://updates.dev.camhive.app", UpdateChannel: "stable", UpdateWindow: "02:00-05:00", Updates: "automatic"}
 }
@@ -251,6 +255,9 @@ func (c Config) validateStorage() error {
 	}
 	if c.ExportDays < 0 || c.ExportMaxGB < 0 {
 		return errors.New("hiveconfig: export_days and export_max_gb must not be negative")
+	}
+	if c.RecordingStallMinutes < 0 || c.RecordingStallMinutes > 1440 {
+		return errors.New("hiveconfig: recording_stall_minutes must be between 0 and 1440")
 	}
 	return nil
 }

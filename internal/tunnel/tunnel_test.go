@@ -229,7 +229,7 @@ func TestGatewayHooksGateHelloAndReportPresenceAndEvents(t *testing.T) {
 		},
 		OnOnline:  func(id pki.HiveID) { rec("online:" + string(id)) },
 		OnOffline: func(id pki.HiveID) { rec("offline:" + string(id)) },
-		OnEvent:   func(id pki.HiveID, e protocol.Event) { rec("event:" + string(id) + ":" + e.Name) },
+		OnEvent:   func(id pki.HiveID, e protocol.Event) error { rec("event:" + string(id) + ":" + e.Name); return nil },
 	}})
 	go func() { _ = gw.Serve(ln) }()
 	t.Cleanup(func() { _ = gw.Close() })

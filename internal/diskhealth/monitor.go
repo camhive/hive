@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -48,6 +49,7 @@ type Options struct {
 	Mountinfo   string // default /proc/self/mountinfo
 	SysDevBlock string // default /sys/dev/block
 	Probe       func(dir string) error
+	StatDev     func(dir string) (uint64, error) // the device number of the file system holding dir
 	Tick        func(time.Duration) (<-chan time.Time, func())
 }
 
@@ -63,6 +65,9 @@ type Monitor struct {
 	logAt    int64      // how far the engine's log was read
 	dmesg    int        // kernel errors dmesg showed at the previous check
 	ep       episodes
+	found    bool   // the device lookup has worked once
+	rootSeen bool   // the archive directory existed at a check
+	rootDev  uint64 // its device number then
 }
 
 // New makes a Monitor.
@@ -88,6 +93,9 @@ func (o *Options) defaults() {
 	}
 	if o.Probe == nil {
 		o.Probe = probe
+	}
+	if o.StatDev == nil {
+		o.StatDev = StatDev
 	}
 	if o.Tick == nil {
 		o.Tick = func(d time.Duration) (<-chan time.Time, func()) { t := time.NewTicker(d); return t.C, t.Stop }
@@ -145,7 +153,7 @@ func (m *Monitor) Check(ctx context.Context) Report {
 	m.report = rep
 	m.mu.Unlock()
 	var changes []change
-	m.ep, changes = m.ep.step(st, now)
+	m.ep, changes = m.ep.step(verdict{state: st, kernelOnly: kernelOnly(ev), clean: s.clean()}, now)
 	for _, c := range changes {
 		m.apply(ctx, c, rep)
 	}
@@ -178,7 +186,11 @@ func (m *Monitor) sample(ctx context.Context, now time.Time) (Sample, string, *i
 	if m.o.GOOS == "linux" {
 		if d, err := findDevice(m.o.Mountinfo, m.o.SysDevBlock, m.o.ArchiveDir); err != nil {
 			m.o.Logger.Debug("archive device", "err", err)
+			if m.found {
+				s.Lost = append(s.Lost, "the archive's device can no longer be found: "+err.Error())
+			}
 		} else {
+			m.found = true
 			s.SMART, dev, temp = m.smart(ctx, d)
 			s.Kernel = m.kernel(ctx, d, now)
 			if dev == "" && len(d.Disks) > 0 {
@@ -190,11 +202,37 @@ func (m *Monitor) sample(ctx context.Context, now time.Time) (Sample, string, *i
 	s.Writes, m.writes = m.writes, Writes{}
 	m.mu.Unlock()
 	m.engineLog(&s.Writes)
+	if lost := m.root(); lost != "" {
+		s.Lost = append(s.Lost, lost)
+	}
 	if err := m.o.Probe(m.o.ArchiveDir); err != nil {
-		s.Probe = Classify(err)
+		s.Probe, s.ProbeFailed = Classify(err), true
 		s.Writes.add(s.Probe, "probe: "+err.Error())
 	}
 	return s, dev, temp
+}
+
+// root checks the archive directory against what the first check that
+// found it saw (#172): gone, or on another device, is a lost archive. A
+// directory that never existed is no archive yet.
+func (m *Monitor) root() string {
+	dev, err := m.o.StatDev(m.o.ArchiveDir)
+	switch {
+	case err == nil && !m.rootSeen:
+		m.rootSeen, m.rootDev = true, dev
+	case err == nil && dev != m.rootDev:
+		return fmt.Sprintf("the archive directory is on another device (%#x) than when it was first seen (%#x)", dev, m.rootDev)
+	case err != nil && (m.rootSeen && Gone(err) || Classify(err).disk()):
+		return "the archive directory vanished: " + err.Error()
+	}
+	return ""
+}
+
+// Gone says an error is a path that is not there (any more): ENOENT,
+// ENOTDIR, or ESTALE from a mount that went away. Alone it says nothing
+// about a disk; on a path that existed before it does (#172).
+func Gone(err error) bool {
+	return errors.Is(err, syscall.ENOENT) || errors.Is(err, syscall.ENOTDIR) || errors.Is(err, syscall.ESTALE)
 }
 
 // smart asks smartctl about every disk under the archive (several for
@@ -303,11 +341,16 @@ func (m *Monitor) engineLog(w *Writes) {
 }
 
 // probe writes, syncs and removes a small file in the archive directory.
-func probe(dir string) error {
+func probe(dir string) error { return WriteProbe(dir, ".diskhealth-probe") }
+
+// WriteProbe writes, syncs and removes the small file name in dir; nil
+// when dir does not exist (nothing to say about the disk). Each caller
+// uses its own name, so two probes never remove each other's file.
+func WriteProbe(dir, name string) error {
 	if _, err := os.Stat(dir); err != nil {
 		return nil //nolint:nilerr // no archive directory yet: nothing to say about the disk
 	}
-	path := filepath.Join(dir, ".diskhealth-probe")
+	path := filepath.Join(dir, name)
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600) //nolint:gosec // our archive directory
 	if err != nil {
 		return err

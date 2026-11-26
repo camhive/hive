@@ -1,14 +1,16 @@
 import { useState, type FormEvent } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { CamhiveError, unwrapHive } from "@camhive/api";
 import type { Hive } from "@/lib/hives";
 import { LocalLoginLocked, clearLocal, signInLocally, writeLocal } from "@/lib/localLogin";
 import { useGrant } from "@/lib/useGrant";
-import { useHiveClient } from "@/lib/hiveApi";
+import { useHiveClient, useLocalLoginStatus } from "@/lib/hiveApi";
 import { errorMessage } from "@/lib/errors";
 import { waitMessage } from "@/lib/retryAfter";
 import { Field } from "@/components/Field";
+import { Facts, PanelRow } from "@/components/SettingsLayout";
+import type { Fact } from "@/lib/hiveSettings";
 
 /** The local error texts: the local login has a username, not an e-mail, and a lock says how long it lasts. */
 export function localError(t: ReturnType<typeof useTranslation>["t"], err: unknown): string {
@@ -58,16 +60,12 @@ export function LocalSessionBanner({ hive }: { hive: Hive }) {
   );
 }
 
-/** Owner settings for the local login: status, set username and password, turn off. Asks the hive for access only once opened. */
-export function LocalLoginSettings({ hive }: { hive: Hive }) {
+/** Owner settings for the local login: the row with its state, the form below once opened. */
+export function LocalLoginSettings({ hive, state, enabled }: { hive: Hive; state: Fact[]; enabled?: boolean }) {
   const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
   return (
-    <section className="card max-w-3xl" aria-labelledby="local-login-title" data-testid="local-login-settings">
-      <h2 id="local-login-title" className="text-lg font-semibold mb-1">{t("localLogin.settingsTitle")}</h2>
-      <p className="muted text-sm mb-3">{t("localLogin.settingsHelp")}</p>
-      {open ? <LocalLoginForm hive={hive} /> : <button type="button" className="btn btn-secondary" disabled={!hive.online} onClick={() => setOpen(true)}>{t("localLogin.open")}</button>}
-    </section>
+    <PanelRow id="local-login" testId="local-login-settings" title={t("localLogin.settingsTitle")} state={<Facts facts={state} sentence />} help={t("localLogin.settingsHelp")}
+      openLabel={t(enabled ? "localLogin.manage" : "localLogin.open")} disabled={!hive.online} panel={() => <LocalLoginForm hive={hive} />} />
   );
 }
 
@@ -76,11 +74,7 @@ function LocalLoginForm({ hive }: { hive: Hive }) {
   const qc = useQueryClient();
   const { grant, access } = useGrant(hive);
   const client = useHiveClient(hive, grant);
-  const status = useQuery({
-    queryKey: ["hive", hive.id, "local-login"],
-    queryFn: async () => unwrapHive(await client!.GET("/v0/local-login")),
-    enabled: !!client,
-  });
+  const status = useLocalLoginStatus(hive, client);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);

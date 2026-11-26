@@ -19,26 +19,23 @@ import { useReportPresence } from "@/lib/usePresence";
 import { useTransport } from "@/lib/useTransport";
 import { NeedsUpdate } from "@/components/NeedsUpdate";
 import { Field } from "@/components/Field";
+import { Facts, PanelRow } from "@/components/SettingsLayout";
+import type { Fact } from "@/lib/hiveSettings";
 
 /**
  * The owner's encryption settings (#93, ADR-0019): switch on, unlock and
- * lock, the key file and the passphrase. It asks the hive for access only
- * once opened: a remote session counts against the plan.
+ * lock, the key file and the passphrase. The row shows the state the page
+ * read; the panel opens below.
  */
-export function EncryptionSettings({ hive }: { hive: Hive }) {
+export function EncryptionSettings({ hive, state }: { hive: Hive; state: Fact[] }) {
   const { t } = useTranslation();
   const cap = useHiveCapability(hive, "archive.encryption");
-  const [open, setOpen] = useState(false);
   // The emergency case is a hive the cloud cannot reach with a local session (or offline grant) on the LAN.
   const reachable = hive.online || !!useLocalSession(hive.id) || !!readOffline(hive.id);
   return (
-    <section className="card max-w-3xl" aria-labelledby="encryption-title">
-      <h2 id="encryption-title" className="text-lg font-semibold mb-1">{t("encryption.title")}</h2>
-      <p className="muted text-sm mb-3">{t("encryption.help")}</p>
-      {!cap.has ? <NeedsUpdate hive={hive} since={cap.since} owner />
-        : open ? <EncryptionPanel hive={hive} />
-        : <button type="button" className="btn btn-secondary" disabled={!reachable} onClick={() => setOpen(true)}>{t("encryption.open")}</button>}
-    </section>
+    <PanelRow id="encryption" title={t("encryption.title")} state={cap.has && <Facts facts={state} sentence />} help={t("encryption.help")}
+      openLabel={cap.has ? t("encryption.open") : undefined} disabled={!reachable}
+      notice={!cap.has && <NeedsUpdate hive={hive} since={cap.since} owner />} panel={() => <EncryptionPanel hive={hive} />} />
   );
 }
 
@@ -169,7 +166,7 @@ function Backup({ hive, saved, dispatch, actions }: { hive: Hive; saved: boolean
   useEffect(() => heading.current?.focus(), []);
   return (
     <div className="space-y-3 text-sm" data-testid="encryption-backup">
-      <h3 ref={heading} tabIndex={-1} className="font-medium outline-none">{t("encryption.backupTitle")}</h3>
+      <h4 ref={heading} tabIndex={-1} className="font-medium outline-none">{t("encryption.backupTitle")}</h4>
       <p>{t("encryption.backup")}</p>
       <KeyFileButton hive={hive} actions={actions} onSaved={() => dispatch("saved")} />
       <button type="button" className="btn" disabled={!saved} onClick={() => dispatch("finish")}>{t("encryption.finish")}</button>

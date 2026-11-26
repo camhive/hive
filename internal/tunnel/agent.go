@@ -4,9 +4,11 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math/rand/v2"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -40,8 +42,11 @@ type Agent struct {
 	log     *slog.Logger
 	handler Handler
 
-	mu sync.Mutex
-	ws *websocket.Conn // current connection, nil while disconnected
+	mu    sync.Mutex
+	ws    *websocket.Conn          // current connection, nil while disconnected
+	ackOK bool                     // the current gateway acknowledges events sent with an id
+	acks  map[string]chan struct{} // EmitAcked calls waiting for their ack, by envelope id
+	ackID uint64
 }
 
 // ErrNotConnected is returned by Emit while the agent has no connection.
@@ -56,6 +61,55 @@ func (a *Agent) Emit(ctx context.Context, e protocol.Event) error {
 		return ErrNotConnected
 	}
 	return write(ctx, ws, protocol.KindEvent, "", e)
+}
+
+// EmitAcked sends an event the cloud must take and waits until the
+// gateway acknowledges it (#172) or ctx ends. An error means it may not
+// have arrived: send it again. A gateway whose welcome announced no acks
+// (older than the ack) gets the event plain, as Emit sends it.
+func (a *Agent) EmitAcked(ctx context.Context, e protocol.Event) error {
+	a.mu.Lock()
+	ws := a.ws
+	if ws == nil {
+		a.mu.Unlock()
+		return ErrNotConnected
+	}
+	if !a.ackOK {
+		a.mu.Unlock()
+		return write(ctx, ws, protocol.KindEvent, "", e)
+	}
+	a.ackID++
+	id := "e" + strconv.FormatUint(a.ackID, 10)
+	ch := make(chan struct{})
+	if a.acks == nil {
+		a.acks = map[string]chan struct{}{}
+	}
+	a.acks[id] = ch
+	a.mu.Unlock()
+	defer func() {
+		a.mu.Lock()
+		delete(a.acks, id)
+		a.mu.Unlock()
+	}()
+	if err := write(ctx, ws, protocol.KindEvent, id, e); err != nil {
+		return err
+	}
+	select {
+	case <-ch:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("tunnel: event %s not acknowledged: %w", e.Name, ctx.Err())
+	}
+}
+
+// acked releases the EmitAcked call waiting for id.
+func (a *Agent) acked(id string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if ch, ok := a.acks[id]; ok {
+		close(ch)
+		delete(a.acks, id)
+	}
 }
 
 // Connected reports whether a session is currently established.
@@ -130,7 +184,7 @@ func (a *Agent) session(ctx context.Context) error {
 	}
 	a.log.Info("connected", "server_time", welcome.ServerTime, "ping_interval", welcome.PingInterval)
 	a.mu.Lock()
-	a.ws = ws
+	a.ws, a.ackOK = ws, welcome.Acks
 	a.mu.Unlock()
 	if a.cfg.OnConnect != nil {
 		go a.cfg.OnConnect()
@@ -163,6 +217,8 @@ func (a *Agent) handle(ctx context.Context, ws *websocket.Conn, env protocol.Env
 			return write(ctx, ws, protocol.KindResult, env.ID, protocol.Result{Error: "bad command: " + err.Error()})
 		}
 		return write(ctx, ws, protocol.KindResult, env.ID, a.handler(ctx, cmd))
+	case protocol.KindAck:
+		a.acked(env.ID)
 	case protocol.KindPong:
 	default:
 		a.log.Warn("unexpected kind from gateway", "kind", env.Kind)

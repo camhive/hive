@@ -81,6 +81,8 @@ export interface paths {
                             version?: string;
                             /** @description Cameras recording now; only to programs on this machine (the updater, ADR-0018): loopback, not relayed, no Origin header */
                             recording?: number;
+                            /** @description Present while the hive does not record (#172), with the detail; only to programs on this machine (`hive status`). The status stays ok: liveness is not recording. */
+                            not_recording?: components["schemas"]["NotRecording"];
                             /** @description What hive-updater did and offers; only to programs on this machine (`hive status`, #109): loopback, not relayed, no Origin header, so never to a web page. Absent when the activity log cannot be read within a second. */
                             updates?: components["schemas"]["UpdateReports"];
                         };
@@ -2632,12 +2634,32 @@ export interface components {
             code: "token_missing" | "token_invalid" | "token_expired" | "clock_skew" | "wrong_hive" | "license_required" | "forbidden" | "not_found" | "invalid" | "bad_json" | "not_ready" | "engine" | "unsupported" | "camera" | "camera_auth" | "plan_limit" | "internal" | "lan_only" | "local_login_disabled" | "local_login_rate_limited" | "invalid_credentials" | "weak_password" | "invalid_update_window" | "updates_unavailable" | "archive_locked" | "encryption_on" | "encryption_off" | "wrong_passphrase" | "unlock_rate_limited" | "moving";
             message: string;
         };
+        /** @description The hive does not record (#172, ADR-0024 amendment): since when and why, from the hive's
+         *     recording watchdog, which checks once a minute. disk_not_mounted: the mount point (fstab) that
+         *     holds the archive is not mounted, or, from a hive waiting at start, the data directory's disk is
+         *     missing (the hive then answers only /healthz); archive_missing: the archive directory is
+         *     gone (its disk's mount vanished); archive_changed: it is on another disk than when the hive
+         *     started (restart the hive once the disk is back); archive_unwritable: it cannot be read, or a
+         *     test write into it failed, at two checks in a row; database: the hive's database answered with
+         *     I/O, corruption or read-only errors twice in a row; engine_stalled: a camera is online but no
+         *     new segment for recording_stall_minutes plus a segment's length, at two checks.
+         *      */
+        NotRecording: {
+            /** Format: date-time */
+            since: string;
+            /** @enum {string} */
+            reason: "disk_not_mounted" | "archive_missing" | "archive_changed" | "archive_unwritable" | "database" | "engine_stalled";
+            /** @description What was seen (paths, errors); only in /healthz to programs on this machine */
+            detail?: string;
+        };
         HiveInfo: {
             /**
              * @description The running hive version
              * @example 0.1.6
              */
             version: string;
+            /** @description Present while the hive does not record (#172); absent while it records, and from hives older than 0.1.11 */
+            not_recording?: components["schemas"]["NotRecording"];
             /**
              * @description Archive encryption (ADR-0019), as GET /v0/archive/encryption answers it: locked means playback and exports wait for the owner
              * @enum {string}

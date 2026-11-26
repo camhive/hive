@@ -25,16 +25,17 @@ const (
 	KindPong    Kind = "pong"    // reply to ping
 	KindCommand Kind = "command" // cloud → hive, needs an id
 	KindResult  Kind = "result"  // hive → cloud, same id as the command
-	KindEvent   Kind = "event"   // hive → cloud, fire and forget
+	KindEvent   Kind = "event"   // hive → cloud; with an id the cloud acknowledges it
+	KindAck     Kind = "ack"     // cloud → hive, the id of an event the cloud has taken (#172)
 )
 
 var kinds = map[Kind]bool{
 	KindHello: true, KindWelcome: true, KindPing: true, KindPong: true,
-	KindCommand: true, KindResult: true, KindEvent: true,
+	KindCommand: true, KindResult: true, KindEvent: true, KindAck: true,
 }
 
 // requiresID lists kinds that must carry a correlation id.
-var requiresID = map[Kind]bool{KindCommand: true, KindResult: true}
+var requiresID = map[Kind]bool{KindCommand: true, KindResult: true, KindAck: true}
 
 // Errors.
 var (
@@ -111,6 +112,9 @@ type Welcome struct {
 	ServerTime         time.Time     `json:"server_time"`
 	PingInterval       time.Duration `json:"ping_interval"`
 	MinProtocolVersion int           `json:"min_protocol_version"`
+	// Acks: the gateway answers an event sent with an id with an ack
+	// (#172). Older gateways do not; a hive then sends such events plain.
+	Acks bool `json:"acks,omitempty"`
 }
 
 // Command asks the hive to do something; the hive answers with a Result of

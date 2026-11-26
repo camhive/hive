@@ -33,6 +33,7 @@ const (
 	SignalKernel Signal = "kernel" // I/O errors in the kernel log on the archive's device
 	SignalWrites Signal = "writes" // the hive's and the engine's own write errors
 	SignalProbe  Signal = "probe"  // a test write into the archive directory failed
+	SignalDevice Signal = "device" // the archive directory or its device vanished or changed (#172)
 )
 
 // Evidence is one reason for the verdict, with the numbers behind it.
@@ -61,18 +62,23 @@ const (
 
 // Sample is what one check read. A nil reading was not available.
 type Sample struct {
-	SMART  *SMART
-	Kernel *Kernel
-	Writes Writes
-	Probe  Class // the probe write's failure; None when it worked or told nothing
+	SMART       *SMART
+	Kernel      *Kernel
+	Writes      Writes
+	Probe       Class    // the probe write's failure; None when it worked or told nothing
+	ProbeFailed bool     // the probe write failed for any reason
+	Lost        []string // the archive directory or its device vanished or changed since it was seen (#172)
 }
 
-// Evaluate is the verdict on one check. Failed when the probe could not
-// write for a reason of the disk; failing on any evidence; ok only when
-// SMART or the kernel log could be read and showed nothing; unknown
-// otherwise.
+// Evaluate is the verdict on one check. Failed when the archive's
+// directory or device was lost or the probe could not write for a reason
+// of the disk; failing on any evidence; ok only when SMART or the kernel
+// log could be read and showed nothing; unknown otherwise.
 func Evaluate(s Sample) (State, []Evidence) {
 	var ev []Evidence
+	for _, l := range s.Lost {
+		ev = append(ev, Evidence{Signal: SignalDevice, Detail: l})
+	}
 	if s.SMART != nil {
 		ev = append(ev, s.SMART.evidence()...)
 	}
@@ -84,6 +90,8 @@ func Evaluate(s Sample) (State, []Evidence) {
 	}
 	if s.Probe.disk() {
 		ev = append(ev, Evidence{Signal: SignalProbe, Detail: "a test write into the archive failed: " + string(s.Probe)})
+	}
+	if s.Probe.disk() || len(s.Lost) > 0 {
 		return Failed, ev
 	}
 	switch {
@@ -98,10 +106,36 @@ func Evaluate(s Sample) (State, []Evidence) {
 // Healthy is how long a disk must look healthy before disk.failing ends.
 const Healthy = 24 * time.Hour
 
+// clean says a check read everything a kernel-only episode needs to end
+// (#172): SMART answered without evidence, the kernel log was read and
+// had no new line, nothing failed to write and the probe worked.
+func (s Sample) clean() bool {
+	return s.SMART != nil && len(s.SMART.evidence()) == 0 && s.Kernel != nil && s.Kernel.Errors == 0 &&
+		!s.Writes.bad() && !s.ProbeFailed && len(s.Lost) == 0
+}
+
+// kernelOnly says every piece of evidence came from the kernel log.
+func kernelOnly(ev []Evidence) bool {
+	for _, e := range ev {
+		if e.Signal != SignalKernel {
+			return false
+		}
+	}
+	return len(ev) > 0
+}
+
+// verdict is one check's result as the episodes see it.
+type verdict struct {
+	state      State
+	kernelOnly bool // the evidence came from the kernel log only
+	clean      bool // Sample.clean
+}
+
 // episodes is which conditions are open and when the disk last looked bad.
 type episodes struct {
 	failing, failed bool
 	lastBad         time.Time
+	kernelOnly      bool // the open failing episode has had kernel lines only
 }
 
 // change is one episode beginning or ending.
@@ -111,28 +145,31 @@ type change struct {
 }
 
 // step applies one verdict: failing begins on failing or failed and ends
-// after Healthy without either; failed lasts as long as the verdict does.
-func (e episodes) step(st State, now time.Time) (episodes, []change) {
-	bad := st == Failing || st == Failed
+// after Healthy without either, or at the first clean check when it
+// rested on kernel lines only; failed lasts as long as the verdict does.
+func (e episodes) step(v verdict, now time.Time) (episodes, []change) {
+	bad := v.state == Failing || v.state == Failed
 	if bad {
 		e.lastBad = now
 	}
 	var out []change
-	if c, ok := e.stepFailing(bad, now); ok {
+	if c, ok := e.stepFailing(bad, v, now); ok {
 		out = append(out, c)
 	}
-	if c, ok := e.stepFailed(st == Failed); ok {
+	if c, ok := e.stepFailed(v.state == Failed); ok {
 		out = append(out, c)
 	}
 	return e, out
 }
 
-func (e *episodes) stepFailing(bad bool, now time.Time) (change, bool) {
+func (e *episodes) stepFailing(bad bool, v verdict, now time.Time) (change, bool) {
 	switch {
 	case bad && !e.failing:
-		e.failing = true
+		e.failing, e.kernelOnly = true, v.kernelOnly
 		return change{begin: true}, true
-	case !bad && e.failing && now.Sub(e.lastBad) >= Healthy:
+	case bad:
+		e.kernelOnly = e.kernelOnly && v.kernelOnly
+	case e.failing && (now.Sub(e.lastBad) >= Healthy || e.kernelOnly && v.clean):
 		e.failing = false
 		return change{}, true
 	}

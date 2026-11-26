@@ -147,7 +147,7 @@ Downgrading a plan never deletes anything.
 
 ### How long the disk lasts
 
-**Hive → Connection → Storage → Show storage…** shows what the hive holds
+**Hive → Settings → Storage → Show storage…** shows what the hive holds
 (from v0.1.10; an older hive shows which version brings it):
 
 - the disk's size, the footage on it, the exports and the free space;
@@ -186,7 +186,7 @@ The owner can remove footage from the hive's disk at once, for example when
 someone who was filmed asks for it to be erased (GDPR Art. 17). Members,
 operators included, cannot. It works on the home network without the cloud.
 
-- **Hive → Connection → Delete recordings** picks the cameras (or *all
+- **Hive → Settings → Delete recordings** picks the cameras (or *all
   cameras*, which also covers footage of cameras removed since) and what to
   delete: *everything*, *a time range*, or footage *older than* a number of
   days. *Also delete exports of this footage* removes exports that overlap
@@ -215,7 +215,7 @@ operators included, cannot. It works on the home network without the cloud.
 The owner can have the hive encrypt its recordings, so that whoever takes
 the box or its disk cannot play them. It is off until the owner switches it
 on, and it cannot be switched off again. The owner finds it on the hive's
-**Connection** tab under **Encrypted recordings** → **Manage
+**Settings** tab under **Encrypted recordings** → **Manage
 encryption…** (it needs hive version 0.1.7 or later).
 
 - **Switching it on.** The app first says what it means: without the
@@ -236,7 +236,7 @@ encryption…** (it needs hive version 0.1.7 or later).
   The hive page says so: the owner taps **Unlock**, types the passphrase and
   the recordings play again; members read that the archive is locked by its
   owner. The same notice sits under an opened camera, where the sound and
-  export buttons are greyed out while it is locked. On the Connection tab
+  export buttons are greyed out while it is locked. On the Settings tab
   the owner can also **Lock recordings** again at any time. Five wrong
   passphrases in 15 minutes block unlocking for 15 minutes; with a hive
   newer than 0.1.7 the app says how long is left, with 0.1.7 itself only
@@ -257,7 +257,7 @@ encryption…** (it needs hive version 0.1.7 or later).
     hive when it no longer reaches it on your network and goes through the
     Camhive relay instead, and when it reaches it at home again; coming back
     within the time cancels the lock, so a Wi-Fi hiccup does not lock. The
-    app can tell only while it is open on a hive page or on the Connection
+    app can tell only while it is open on a hive page or on the Settings
     tab (it reminds the hive once a minute): if you leave with the app closed, or your phone stays at home, only
     the first setting applies. With several devices, the one that reported
     last counts. If you unlock from outside, you get the full time again.

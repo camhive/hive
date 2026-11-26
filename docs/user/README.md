@@ -36,7 +36,7 @@ watching on your own network, and exporting clips locally.
 | Home | Your hives and hives shared with you, with online state |
 | Hive → Cameras | Live tiles or list; the opened camera with timeline, playback, export and PTZ; add, edit, switch off, remove cameras (owner only) |
 | Hive → Sharing | Who sees which cameras of this hive (owner only) |
-| Hive → Connection | How the app reaches the hive; remove the hive |
+| Hive → Settings | The hive at a glance (version, path, disk, footage, encryption, updates); how the app reaches the hive; storage, disk health, encryption, deleting recordings, moving to a new disk; local sign-in; updates; remove the hive (most of it owner only) |
 | Members | People you invited; pending invitations |
 | Account | Password, two-factor, signed-in devices |
 | Plan | Your plan and limits, promo codes |

@@ -18,6 +18,7 @@ import (
 	"github.com/camhive/hive/internal/domain/camera"
 	"github.com/camhive/hive/internal/entitlements"
 	"github.com/camhive/hive/internal/export"
+	"github.com/camhive/hive/internal/recording"
 	"github.com/camhive/hive/internal/store"
 	"github.com/camhive/hive/internal/video"
 )
@@ -80,6 +81,8 @@ type Deps struct {
 	// Motion says which cameras the hive calmed (#157, motion.Hub); nil:
 	// none.
 	Motion CalmReader
+	// Recording is the recording watchdog's verdict (#172); nil: recording.
+	Recording func() recording.State
 }
 
 // CalmReader tells since when the hive calmed a camera's motion detection
@@ -605,18 +608,46 @@ func (a *api) internal(w http.ResponseWriter, err error) {
 // an update with them (ADR-0018), and `hive status` reports the running
 // hive, which may be newer than the package's binary (#109).
 type Health struct {
-	Status    string         `json:"status"`
-	Version   string         `json:"version"`
-	Recording *int           `json:"recording,omitempty"`
-	Updates   *UpdateReports `json:"updates,omitempty"`
+	Status       string         `json:"status"`
+	Version      string         `json:"version"`
+	Recording    *int           `json:"recording,omitempty"`
+	NotRecording *NotRecording  `json:"not_recording,omitempty"`
+	Updates      *UpdateReports `json:"updates,omitempty"`
+}
+
+// NotRecording says since when and why the hive does not record (#172).
+// Detail, what was seen (paths, errors), goes only to programs on this
+// machine.
+type NotRecording struct {
+	Since  time.Time        `json:"since"`
+	Reason recording.Reason `json:"reason"`
+	Detail string           `json:"detail,omitempty"`
+}
+
+// notRecording is the watchdog's verdict when the hive does not record.
+func (a *api) notRecording(detail bool) *NotRecording {
+	if a.d.Recording == nil {
+		return nil
+	}
+	s := a.d.Recording()
+	if s.Recording() {
+		return nil
+	}
+	nr := &NotRecording{Since: s.Since.UTC(), Reason: s.Reason}
+	if detail {
+		nr.Detail = s.Detail
+	}
+	return nr
 }
 
 // health answers liveness and version; to a local tool also how many
-// cameras record and what the updater reported.
+// cameras record, whether the hive records at all and what the updater
+// reported. Not recording leaves the status ok: hive-updater must not
+// roll an update back because a disk vanished.
 func (a *api) health(w http.ResponseWriter, r *http.Request) {
 	out := Health{Status: "ok", Version: a.d.Version}
 	if localTool(r) {
-		out.Recording, out.Updates = a.recording(), a.healthUpdates(r)
+		out.Recording, out.NotRecording, out.Updates = a.recording(), a.notRecording(true), a.healthUpdates(r)
 	}
 	writeJSON(w, http.StatusOK, out)
 }

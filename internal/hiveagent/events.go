@@ -16,7 +16,11 @@ const (
 	EventHeartbeat   = "hive.heartbeat"
 	EventStorageLow  = "storage.low"
 	EventDiskFailing = "disk.failing" // #155: replace the archive disk soon
-	EventDiskFailed  = "disk.failed"  // #155: the archive cannot be written
+	EventDiskFailed  = "disk.failed"  // #155: the archive cannot be written; kept on the timeline, not sent (#172)
+	// The recording state (#172), on the alarm lane: the hive stopped
+	// recording, and records again.
+	EventRecordingStopped = "recording.stopped"
+	EventRecordingResumed = "recording.resumed"
 )
 
 // Heartbeat is the periodic health summary (ADR-0008).

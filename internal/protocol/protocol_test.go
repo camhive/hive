@@ -62,6 +62,12 @@ func TestEnvelopeRequiresIDForRequestKinds(t *testing.T) {
 	if _, err := protocol.NewEnvelope(protocol.KindPing, "", nil); err != nil {
 		t.Fatalf("ping needs no id: %v", err)
 	}
+	if _, err := protocol.NewEnvelope(protocol.KindAck, "", nil); !errors.Is(err, protocol.ErrMissingID) {
+		t.Fatalf("ack without id: %v", err) // #172: an ack names the event it takes
+	}
+	if _, err := protocol.Decode([]byte(`{"v":1,"kind":"ack","id":"e1"}`)); err != nil {
+		t.Fatalf("ack with id: %v", err)
+	}
 }
 
 func TestHelloWelcomeAndResultShapes(t *testing.T) {

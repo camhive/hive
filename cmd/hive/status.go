@@ -51,6 +51,9 @@ func reportHive(ctx context.Context, w, stderr io.Writer, self version.Info, pat
 		return
 	}
 	fmt.Fprintln(w, "hive:", h.Version)
+	if nr := h.NotRecording; nr != nil { // #172
+		fmt.Fprintf(w, "NOT RECORDING since %s: %s (%s)\n", nr.Since.Local().Format("2006-01-02 15:04 -07:00"), nr.Reason, nr.Detail)
+	}
 	if u := h.Updates; u != nil {
 		printUpdates(w, *u)
 	}

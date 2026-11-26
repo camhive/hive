@@ -182,3 +182,11 @@ func (s *Store) Checkpoint(ctx context.Context) (err error) {
 		}
 	}
 }
+
+// Probe rewrites one row (#172): the recording watchdog's check that the
+// database still takes a write. Its error is SQLite's, for the watchdog
+// to classify.
+func (s *Store) Probe(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO probe (id, at) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET at = excluded.at`, ts(time.Now()))
+	return err
+}

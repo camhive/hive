@@ -1,35 +1,32 @@
 import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { unwrapHive } from "@camhive/api";
 import { errorMessage } from "@/lib/errors";
 import { useGrant } from "@/lib/useGrant";
-import { useHiveClient } from "@/lib/hiveApi";
+import { useHiveClient, useStorage } from "@/lib/hiveApi";
 import { useHiveCapability } from "@/lib/capabilities";
 import { appliedRetention, cameraRate, deletesFootage, fillsLine, forecastLine, formatDays, formatSize, maxFloorGB, validateStorage, type CameraStorage, type StorageOverview, type StorageValues } from "@/lib/storage";
 import { NeedsUpdate } from "@/components/NeedsUpdate";
+import { Facts, PanelRow } from "@/components/SettingsLayout";
+import type { Fact } from "@/lib/hiveSettings";
 import type { Hive } from "@/lib/hives";
 
 /**
  * The storage overview and forecast (#150, ADR-0024): the owner sees the
  * disk, every camera's footage and rate, what the disk holds and what
  * retention becomes, and changes retention and the floor; a member sees
- * the days held of their cameras. It asks the hive for access only once
- * opened: a remote session counts against the plan.
+ * the days held of their cameras. The row shows what the page read; the
+ * panel opens below.
  */
-export function StorageSettings({ hive, owner }: { hive: Hive; owner: boolean }) {
+export function StorageSettings({ hive, owner, state }: { hive: Hive; owner: boolean; state: Fact[] }) {
   const { t } = useTranslation();
   const cap = useHiveCapability(hive, "storage");
-  const [open, setOpen] = useState(false);
   return (
-    <section className="card max-w-3xl" aria-labelledby="storage-title">
-      <h2 id="storage-title" className="text-lg font-semibold mb-1">{t("storage.title")}</h2>
-      <p className="muted text-sm mb-3">{t(owner ? "storage.help" : "storage.helpMember")}</p>
-      {!cap.has ? <NeedsUpdate hive={hive} since={cap.since} owner={owner} />
-        : open ? <StoragePanel hive={hive} owner={owner} />
-        : <button type="button" className="btn btn-secondary" disabled={!hive.online} onClick={() => setOpen(true)}>{t("storage.open")}</button>}
-    </section>
+    <PanelRow id="storage" title={t("storage.title")} state={cap.has && <Facts facts={state} sentence />} help={t(owner ? "storage.help" : "storage.helpMember")}
+      openLabel={cap.has ? t("storage.open") : undefined} disabled={!hive.online}
+      notice={!cap.has && <NeedsUpdate hive={hive} since={cap.since} owner={owner} />} panel={() => <StoragePanel hive={hive} owner={owner} />} />
   );
 }
 
@@ -37,11 +34,7 @@ function StoragePanel({ hive, owner }: { hive: Hive; owner: boolean }) {
   const { t } = useTranslation();
   const { grant, access } = useGrant(hive);
   const client = useHiveClient(hive, grant);
-  const overview = useQuery({
-    queryKey: ["hive", hive.id, "storage"],
-    queryFn: async () => unwrapHive(await client!.GET("/v0/storage")),
-    enabled: !!client,
-  });
+  const overview = useStorage(hive, client);
   if (access.error) return <p role="alert" className="error text-sm">{errorMessage(t, access.error)}</p>;
   if (overview.error) return <p role="alert" className="error text-sm">{errorMessage(t, overview.error)}</p>;
   if (!client || !overview.data) return <p className="muted text-sm">…</p>;
@@ -143,7 +136,7 @@ function StorageForm({ hive, o, save }: FormProps) {
   }
   return (
     <form onSubmit={(e) => void submit(e)} noValidate>
-      <h3 className="font-semibold mb-2">{t("storage.settings")}</h3>
+      <h4 className="font-semibold mb-2">{t("storage.settings")}</h4>
       <div className="grid gap-3 sm:grid-cols-2 mb-3">
         <div>
           <label className="block"><span className="block mb-1 font-medium">{t("storage.retention")}</span>

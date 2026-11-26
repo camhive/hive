@@ -10,9 +10,12 @@ verschiedene Wege.
 | Livebild | WebRTC vom Hive in Ihren Browser, direkt (Peer-to-Peer). Zu Hause tauscht die App das Verbindungsangebot direkt mit dem Hive aus; unterwegs reicht die Cloud es weiter. Blockieren die Netze einen direkten Weg, leitet das Camhive-TURN-Relay die Medien weiter. |
 | Alles andere: Aufnahmen, Exporte, Kameraeinstellungen | HTTPS zum lokalen Namen des Hives, wenn Sie im selben Netz sind (zu seiner lokalen Adresse, wenn der Name nicht aufgelöst werden kann, siehe [unten](#ohne-internet-den-hive-über-seine-adresse-öffnen)), sonst über das Camhive-Relay |
 
-Hive → *Verbindung* zeigt, welcher Weg genutzt wird ("Direkt in Ihrem Netz",
+Hive → *Einstellungen* → *Verbindung* zeigt, welcher Weg genutzt wird ("Direkt in Ihrem Netz",
 "Direkt in Ihrem Netz, über die Adresse" oder "Über das Camhive-Relay") und
-warum, mit einer Schaltfläche *Erneut prüfen*.
+warum, mit einer Schaltfläche *Erneut prüfen*; die Leiste oben in
+*Einstellungen* wiederholt das als *Weg: direkt*, *über das Relay* oder *nicht
+erreichbar*. *Details* nennt den lokalen Namen, die lokalen Adressen, das
+Zertifikat und das Relay.
 
 ## Der lokale Name
 
@@ -23,8 +26,8 @@ die Antwort zehn Minuten lang. Auf dem lokalen Weg verlässt nichts Ihr Haus,
 und die Qualität wird nie reduziert.
 
 Manche Router lehnen DNS-Antworten ab, die auf private Adressen zeigen
-("DNS-Rebind-Schutz"). Das erkennen Sie daran, dass die
-Verbindungsseite meldet, der lokale Name habe nicht geantwortet, obwohl lokale
+("DNS-Rebind-Schutz"). Das erkennen Sie daran, dass der
+Reiter *Einstellungen* meldet, der lokale Name habe nicht geantwortet, obwohl lokale
 Adressen aufgeführt sind. Erlauben Sie die Domain `h.camhive.app` im Router
 (Fritz!Box: Heimnetz → Netzwerk → Netzwerkeinstellungen → DNS-Rebind-Schutz;
 OpenWrt: `rebind_domain`), oder nutzen Sie das Relay.
@@ -39,8 +42,8 @@ Relay-Namen. Direkt nach der Installation ist es **selbstsigniert**; Browser
 vertrauen ihm nicht, deshalb funktioniert der Weg für Aufnahmen noch nicht.
 Wenige Minuten nach der ersten Verbindung besorgt die Cloud ein
 **Let's Encrypt**-Zertifikat für den Hive und übergibt es; der private
-Schlüssel des Hives verlässt nie das Gerät. *Verbindung* zeigt den aktuellen
-Aussteller. Bleibt es länger als eine halbe Stunde selbstsigniert, siehe
+Schlüssel des Hives verlässt nie das Gerät. *Einstellungen* → *Verbindung* →
+*Details* zeigt den aktuellen Aussteller. Bleibt es länger als eine halbe Stunde selbstsigniert, siehe
 [Fehlerbehebung](troubleshooting.md).
 
 ## Wenn die Cloud nicht erreichbar ist
@@ -68,8 +71,8 @@ funktioniert nur in Ihrem Heimnetz.
 
 Richten Sie sie ein, solange Camhive erreichbar ist:
 
-1. Öffnen Sie den Hive → *Verbindung* → *Lokale Anmeldung für Notfälle* →
-   *Lokale Anmeldung einrichten*.
+1. Öffnen Sie den Hive → *Einstellungen* → *Zugang* → *Lokale Anmeldung für
+   Notfälle* → *Lokale Anmeldung einrichten*.
 2. Wählen Sie einen Benutzernamen und ein Passwort mit 10 bis 256 Zeichen
    (nicht der Benutzername) und drücken Sie *Lokale Anmeldung speichern*. Der
    Hive speichert nur einen Hash des Passworts; Camhive sieht es nie.

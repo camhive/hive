@@ -62,8 +62,58 @@ sudo CAMHIVE_DATA_DIR=/media/usb/camhive hive claim --api https://api.camhive.ap
 sudo hive start
 ```
 
-Add the disk to `/etc/fstab` so it is mounted before the service starts;
-otherwise the hive starts with an empty directory and a new identity.
+#### An external disk: mount it from fstab, by UUID
+
+Mount the disk from `/etc/fstab` **before** `hive install`, by its UUID and
+with `nofail`, never through the desktop's automount (the folders under
+`/media/<user>/` that appear when you plug a disk in): the automount comes
+only after someone logs in, and a USB disk that drops out and comes back
+gets another device name and a fresh mount the hive does not know. Prefer
+ext4; NTFS works but marks the whole disk dirty after one lost write and
+then refuses to mount it for writing until it is repaired on Windows.
+
+```bash
+sudo blkid /dev/sda1
+```
+
+Note the `UUID="…"`, create the mount point and add one line to `/etc/fstab`
+(here for ext4 at `/mnt/cameras`):
+
+```bash
+sudo mkdir -p /mnt/cameras
+```
+
+```
+UUID=0a1b2c3d-…  /mnt/cameras  ext4  defaults,nofail,x-systemd.device-timeout=30s  0  2
+```
+
+```bash
+sudo mount -a
+```
+
+Then install with `CAMHIVE_DATA_DIR=/mnt/cameras/camhive`. When the data
+directory, or `archive_dir` in `hive.yaml`, is on another disk than the
+system, the service gets `RequiresMountsFor=` for it, and once the hive has
+its identity there also `ConditionPathExists=…/hive.key`. The hive keeps
+these lines in `/etc/systemd/system/camhive-hive.service.d/mounts.conf`:
+`hive install` writes it, `hive move-data` rewrites it for the new disk,
+and every start of the service brings it up to date, effective from the
+start after. So a hive installed before version 0.1.11 is covered after
+its second start on 0.1.11; to cover it at once, run `hive install` again
+with the same `CAMHIVE_DATA_DIR` after updating.
+systemd then never starts the hive while the disk is missing. A hive that
+finds its data directory empty on the system disk while the service expects
+a disk there does not become a new, unclaimed hive: it waits, `hive status`
+says `NOT RECORDING … disk_not_mounted`, and it starts by itself within 30
+seconds once the disk is mounted. (The cloud cannot hear from it meanwhile
+and reports it offline; and since `hive.yaml` is on that disk, it answers
+`hive status` on the default address 127.0.0.1:16016 until then.) After a boot without the disk, mount it and run
+`sudo hive start`.
+
+If the disk goes away while the hive runs, the hive notices within a
+minute, says **Recording stopped** (a notification at once, a red banner in
+the app, `hive status`) and keeps running. When the disk is back, restart
+the hive (`sudo hive restart`): it still holds the files of the old mount.
 
 Everything the hive owns is under the data directory: `hive.yaml`
 (configuration), `hive.key` (its identity, never share it), `hive.db`,
@@ -84,8 +134,10 @@ hive cannot be restored:
 4. `archive-key/`: the keyring; without it an encrypted archive is lost
 5. `hive.db`: cameras, the index, sharing and the activity log
 
-Then connect and mount the new disk (add it to `/etc/fstab`; ext4 or
-another Linux file system, not FAT, exFAT or NTFS) and run, with a plain
+Then connect and mount the new disk (in `/etc/fstab` by UUID with `nofail`,
+as in [An external disk](#an-external-disk-mount-it-from-fstab-by-uuid), not
+through the desktop's automount; ext4 or another Linux file system, not FAT,
+exFAT or NTFS) and run, with a plain
 directory name (letters, digits, `/ . - _`; no spaces, no shell characters
 such as `; & | $ * ?`):
 
@@ -104,13 +156,14 @@ and you can sign in and unlock the archive, but changes (cameras,
 settings, the local login, new exports) are refused with "The hive is
 moving to a new disk" until the move ends; `hive.db` is copied again at the
 end with the events and sign-ins of that time. Then it points the service at the new directory (a
-drop-in, `/etc/systemd/system/camhive-hive.service.d/data-dir.conf`),
+drop-in, `/etc/systemd/system/camhive-hive.service.d/data-dir.conf`, with
+`RequiresMountsFor=` and `ConditionPathExists=` for the new disk),
 starts the hive there and waits until it answers; if it does not start,
 the old definition comes back and the hive runs from the old disk again.
 It prints what did not fit or could not be read and never deletes or
 changes anything on the old disk. `archive/` or `archive-key/` may be links
 to another disk: their targets are copied. The app's **Settings →
-Connection → Move to a new disk** shows the same steps and the progress.
+Recordings and disk → Move to a new disk** shows the same steps and the progress.
 
 If the command is cut off (power, a full disk), run it again with the same
 directory: it goes on where it stopped and does not copy again what is
@@ -158,7 +211,7 @@ sudo hive restart
 ```
 
 A hive can be claimed once. To move it to another account, remove it in the
-app (Hive → *Connection* → *Remove this hive* → **Remove hive**), delete
+app (Hive → *Settings* → *Remove this hive* → **Remove hive**), delete
 `cloud.json` from the data directory and claim again. Recordings stay on
 disk.
 
@@ -204,7 +257,7 @@ updater goes back to the old version on its own and never tries that one
 again. How it is secured: [Hive updates](../security/updates.md) in the
 developer documentation.
 
-**In the app:** Hive → *Connection* → *Updates* (owner only) shows the running
+**In the app:** Hive → *Settings* → *Updates* (owner only) shows the running
 version, an update that is waiting, and the last update or rollback. There
 you choose automatic or manual updates, the update window and the
 channel, and **Update now** installs a waiting update at once, whatever

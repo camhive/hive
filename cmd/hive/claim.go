@@ -63,6 +63,9 @@ func runClaim(paths hiveconfig.Paths, args []string, stdout, stderr *os.File) in
 // heartbeatInterval is how often the hive reports its health summary.
 const heartbeatInterval = 30 * time.Second
 
+// alarmRetry is how often an unacknowledged alarm is sent again (#172).
+const alarmRetry = 10 * time.Second
+
 // startLink runs the cloud tunnel when the hive is claimed; an unclaimed
 // hive keeps working on the LAN and logs how to claim.
 func startLink(ctx context.Context, paths hiveconfig.Paths, key ed25519.PrivateKey, agent *hiveagent.Agent, relay *hiveapp.RelayListener, log *slog.Logger) {
@@ -89,8 +92,14 @@ func startLink(ctx context.Context, paths hiveconfig.Paths, key ed25519.PrivateK
 				go agent.Run(ctx, emit, heartbeatInterval)
 				go agent.CertLoop(ctx, 6*time.Hour) // asks the cloud for a public certificate, renews in time
 			},
+			OnAckedEmitter: func(emit func(context.Context, protocol.Event) error) {
+				go agent.RunAlarms(ctx, emit, alarmRetry) // #172: recording stopped, until acknowledged
+			},
 			ReconnectMin: time.Second, ReconnectMax: time.Minute,
-			OnConnect:     agent.RequestCertIfNeeded, // a redeployed cloud may issue differently
+			OnConnect: func() {
+				agent.RequestCertIfNeeded() // a redeployed cloud may issue differently
+				agent.WakeAlarms()          // #172: an alarm waiting for its ack is sent at once
+			},
 			OnStateChange: func(st hivelink.State) { log.Info("device certificate renewed", "not_after", st.Cert.NotAfter) },
 		})
 		if err != nil && !errors.Is(err, context.Canceled) {

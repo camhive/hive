@@ -145,7 +145,7 @@ func newOSService(t *testing.T, sd *systemd) *osService {
 			return nil
 		}
 		return errors.New("not answering")
-	}, wait: 50 * time.Millisecond}
+	}, wait: 50 * time.Millisecond, otherFS: func(string) bool { return false }}
 }
 
 // #155 review B3/B4: the new directory is written quoted into a drop-in,

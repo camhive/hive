@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/camhive/hive/internal/store"
@@ -260,19 +261,38 @@ type Report struct {
 	Removed int
 }
 
+// ErrRootMissing is a reconcile's error when the archive root is missing
+// or not a directory while the index has rows: the archive disk's mount
+// vanished, or the hive runs beside it (#172). The rows stay.
+var ErrRootMissing = errors.New("archive: the archive root is missing or not a directory")
+
 // Reconcile walks root and makes the index match the files: new files are
 // indexed (duration parsed from the fMP4), rows without files are removed,
 // the newest file of each stream is marked incomplete. It is idempotent.
+// A missing root is an empty archive only while the index is empty too;
+// otherwise it is ErrRootMissing and nothing is removed, and so is a root
+// without a single segment under an index with rows (an empty mount point).
 func (i *Index) Reconcile(ctx context.Context, root string) (Report, error) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
-	found, err := scan(root)
-	if err != nil {
-		return Report{}, err
+	found, scanErr := scan(root)
+	if scanErr != nil && !errors.Is(scanErr, ErrRootMissing) {
+		return Report{}, scanErr
 	}
 	existing, err := i.repo.All(ctx)
 	if err != nil {
 		return Report{}, err
+	}
+	switch {
+	case scanErr != nil && len(existing) == 0:
+		return Report{}, nil // nothing recorded yet: no archive yet
+	case scanErr != nil:
+		return Report{}, scanErr // the disk is gone, not the footage (#172)
+	case len(found) == 0 && len(existing) > 0:
+		// An empty mount point where the disk should be: nothing empties the
+		// archive behind the index (retention and deletions remove their
+		// rows, a disk change goes through move-data).
+		return Report{}, fmt.Errorf("%w: %s holds no segment while the index has %d", ErrRootMissing, root, len(existing))
 	}
 	byKey := make(map[string]store.SegmentRow, len(existing))
 	for _, r := range existing {
@@ -374,11 +394,14 @@ func scan(root string) ([]Segment, error) {
 
 // listFiles lists every segment file under root with its size.
 func listFiles(root string) ([]Segment, error) {
+	if st, err := os.Stat(root); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrRootMissing, err)
+	} else if !st.IsDir() {
+		return nil, fmt.Errorf("%w: %s: %w", ErrRootMissing, root, syscall.ENOTDIR)
+	}
 	var out []Segment
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		switch {
-		case err != nil && errors.Is(err, os.ErrNotExist) && path == root:
-			return filepath.SkipAll // no archive yet
 		case err != nil:
 			return err
 		case d.IsDir():
@@ -412,4 +435,39 @@ func markIncomplete(segs []Segment) {
 	for k := range segs {
 		segs[k].Complete = segs[k].Sealed() || newest[segs[k].Camera+"/"+segs[k].Stream] != k
 	}
+}
+
+// Newest is the latest segment start under root, read from the file
+// names of each stream directory (#172: the recording watchdog's sign
+// that the engine still starts segments); zero when there is none.
+func Newest(root string) (time.Time, error) {
+	cams, err := os.ReadDir(root)
+	if err != nil {
+		return time.Time{}, err
+	}
+	var newest time.Time
+	for _, c := range cams {
+		if !c.IsDir() {
+			continue
+		}
+		streams, _ := os.ReadDir(filepath.Join(root, c.Name()))
+		for _, s := range streams {
+			if t := newestIn(root, filepath.Join(root, c.Name(), s.Name())); t.After(newest) {
+				newest = t
+			}
+		}
+	}
+	return newest, nil
+}
+
+// newestIn is the latest segment start in one stream directory.
+func newestIn(root, dir string) time.Time {
+	files, _ := os.ReadDir(dir)
+	var newest time.Time
+	for _, f := range files {
+		if seg, ok := ParsePath(root, filepath.Join(dir, f.Name())); ok && seg.Start.After(newest) {
+			newest = seg.Start
+		}
+	}
+	return newest
 }

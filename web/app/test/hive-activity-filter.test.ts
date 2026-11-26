@@ -6,7 +6,7 @@ describe("hive activity kinds (#125)", () => {
   it("puts every kind the hive writes in its group; unknown kinds are other", () => {
     const groups: Record<string, string[]> = {
       cameras: ["camera.add", "camera.update", "camera.move", "camera.remove", "camera.address_changed", "camera.identity_changed"],
-      recordings: ["archive.delete", "export.done", "export.failed", "export.running"],
+      recordings: ["archive.delete", "export.done", "export.failed", "export.running", "recording.stopped", "recording.resumed"],
       updates: ["update.available", "update.requested", "update.applied", "update.rolled_back", "update.needs_package", "update.settings_changed"],
       access: ["local_login.enable", "local_login.disable", "local_login.success", "local_login.failure", "local_login.locked", "session.revoke", "diag.bundle"],
       encryption: ["archive.encryption.enable", "archive.encryption.enable_failed", "archive.encryption.unlock", "archive.encryption.unlock_failed",

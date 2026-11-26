@@ -50,7 +50,7 @@ Auf der Startseite zeigt der Hive einen grauen Punkt.
 Live und Archiv nehmen verschiedene Wege (siehe [Verbindung](connection.md)).
 Wenn Live funktioniert und das Archiv meldet, der Hive habe nicht geantwortet:
 
-- Hive → *Verbindung*: Ist das Zertifikat noch *selbstsigniert*? Browser
+- Hive → *Einstellungen* → *Verbindung* → *Details*: Ist das Zertifikat noch *selbstsigniert*? Browser
   lehnen es auf dem Relay-Weg ab. Warten Sie auf das von Let's Encrypt; es
   wird bei jeder Neuverbindung und alle zehn Minuten angefordert.
 - Weg "Nicht erreichbar" mit aufgeführten lokalen Adressen: Ihr Router
@@ -79,6 +79,44 @@ Wenn Live funktioniert und das Archiv meldet, der Hive habe nicht geantwortet:
 anderer Hive-Prozess läuft, typischerweise ein `hive run` im Vordergrund neben
 dem Dienst. Beenden Sie einen davon.
 
+## Aufnahme gestoppt
+
+Der Hive prüft einmal pro Minute, ob er aufnimmt: ob der Ordner, in den er
+aufnimmt, da ist, auf derselben Festplatte wie beim Start liegt und einen
+kleinen Schreibvorgang annimmt; ob seine Datenbank ohne Festplattenfehler
+antwortet; und, solange eine Kamera online ist, ob innerhalb von
+`recording_stall_minutes` (Standard 10) plus einer Segmentlänge eine neue
+Aufnahme begonnen hat. Eine fehlende, gewechselte oder nicht eingebundene
+Festplatte zählt sofort; ein fehlgeschlagener Schreibvorgang, Datenbankfehler
+und ein Stillstand erst, wenn auch die nächste Prüfung sie findet. Schlägt
+eines davon fehl, bekommt der Eigentümer sofort eine Benachrichtigung (Gruppe
+„Speicher“, nie in einer Zusammenfassung; ein weiterer Stopp innerhalb von 15
+Minuten nach dem letzten wird gemeldet, wenn diese vorbei sind, außer der
+Hive nimmt bis dahin wieder auf), die
+App zeigt einen roten Hinweis **Aufnahme gestoppt am <Zeit>: <Grund>** auf der
+Hive-Seite und über den Aufnahmen einer Kamera, und `hive status` schreibt
+`NOT RECORDING since …`. Der Hive meldet das der Cloud direkt, ohne seine
+Festplatte, und wiederholt es, bis die Cloud es bestätigt; erreicht die App
+den Hive nicht, zeigt sie, was der Hive zuletzt gemeldet hat. Nimmt er wieder
+auf, bekommt der Eigentümer „nimmt wieder auf“ auf denselben Wegen.
+
+| Grund | Was passiert ist | Was zu tun ist |
+|---|---|---|
+| die Festplatte ist nicht eingebunden | der Einhängepunkt der Festplatte (aus `/etc/fstab`) ist ein leerer Ordner auf der Systemfestplatte: die Festplatte fehlte beim Start | Festplatte anschließen, `sudo mount -a`, Hive neu starten |
+| der Ordner ist weg | die Festplatte wurde abgezogen oder ihre Einbindung ging verloren (eine USB-Festplatte, die wegfiel) | Festplatte anschließen, einbinden (`sudo mount -a` mit der fstab-Zeile aus [Eine externe Festplatte](install-hive.md#eine-externe-festplatte-über-fstab-einbinden-per-uuid)), Hive neu starten |
+| auf einer anderen Festplatte | die Festplatte wurde als neues Gerät wieder eingebunden, oder der Ordner liegt jetzt auf der Systemfestplatte | Hive neu starten (`sudo hive restart`) |
+| kann nicht schreiben | die Festplatte ist voll, nach Fehlern nur noch lesbar, oder die Rechte des Ordners haben sich geändert | siehe [Die Festplatte versagt](#die-festplatte-versagt) und `hive status` |
+| Datenbankfehler | `hive.db` antwortet mit E/A- oder Beschädigungsfehlern | Hive neu starten; bleibt es, versagt die Festplatte |
+| keine neue Aufnahme | Kameras sind online, aber die Video-Engine schreibt nichts | `hive diag`, dann Hive neu starten |
+
+Die Aufnahmen vor dem Stopp bleiben auf der Festplatte; der Hive vergisst sie
+nicht, weil die Festplatte eine Weile fehlte. Die Kehrseite: Leeren Sie den
+Archivordner von Hand, oder formatieren Sie die Festplatte und binden sie ohne
+`hive move-data` wieder ein, zeigt die App die alten Aufnahmen weiter an (sie
+lassen sich nicht mehr abspielen), bis eine Kamera die erste neue schreibt;
+das Log des Hives meldet bis dahin jede Minute
+`archive reconcile … holds no segment`.
+
 ## Die Festplatte versagt
 
 Der Hive prüft die Festplatte, auf die er aufnimmt, beim Start und alle 30
@@ -102,7 +140,12 @@ Was zu tun ist: Sichern Sie `hive.key`, `cloud.json`, `hive.yaml`,
 mit vollem Pfad) und ersetzen Sie die Festplatte mit
 `sudo hive move-data <neues-verzeichnis>` wie unter
 [Die Festplatte ersetzen](install-hive.md#die-festplatte-ersetzen). Die
-Benachrichtigung endet, wenn die Festplatte einen Tag lang gesund aussah.
+Benachrichtigung endet, wenn die Festplatte einen Tag lang gesund aussah, oder
+bei der ersten Prüfung mit gesundem SMART-Bericht und gelungenem
+Testschreibvorgang, wenn nur Kernel-Fehler sie ausgelöst hatten und keine neuen
+kamen (eine Festplatte, die nach einem Ausfall wieder eingebunden wurde). Eine
+ausgefallene Festplatte stoppt auch die Aufnahme: siehe
+[Aufnahme gestoppt](#aufnahme-gestoppt).
 
 Ohne `smartctl` und ohne Zugriff auf das Kernel-Protokoll ist der Zustand
 *unbekannt*, ebenso auf Dateisystemen, deren Festplatte der Hive nicht

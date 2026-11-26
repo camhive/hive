@@ -72,6 +72,7 @@ type Agent struct {
 	notify chan struct{}
 	relay  *Relay   // tunnel.open target; nil until SetRelay
 	tls    *TLSInfo // LAN TLS listener; nil until SetTLS
+	alarms *alarmLane
 }
 
 // MaxQueuedEvents bounds the offline event buffer; oldest are dropped.
@@ -91,7 +92,7 @@ func New(d Deps) *Agent {
 	if d.Protocol == 0 {
 		d.Protocol = protocol.Version
 	}
-	return &Agent{d: d, log: d.Logger, started: d.Now(), binHash: ExecutableHash(), notify: make(chan struct{}, 1)}
+	return &Agent{d: d, log: d.Logger, started: d.Now(), binHash: ExecutableHash(), notify: make(chan struct{}, 1), alarms: newAlarmLane()}
 }
 
 // SetEngine attaches the video engine once it runs (signal.* commands).

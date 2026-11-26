@@ -58,3 +58,36 @@ export function useCameraCare(hive: Hive, client: HiveClient | null, cameraId: s
     retry: false,
   });
 }
+
+/** The storage overview (#150): the owner's disk, health and forecast, or a member's cameras. One try: a hive that does not answer says so at once. */
+export function useStorage(hive: Hive, client: HiveClient | null, enabled = true, staleTime = 60_000) {
+  return useQuery({
+    queryKey: ["hive", hive.id, "storage"],
+    queryFn: async () => unwrapHive(await client!.GET("/v0/storage")),
+    enabled: enabled && !!client,
+    staleTime,
+    retry: false,
+  });
+}
+
+/** The owner's update settings and status (#82). */
+export function useUpdateStatus(hive: Hive, client: HiveClient | null, enabled = true) {
+  return useQuery({
+    queryKey: ["hive", hive.id, "updates"],
+    queryFn: async () => unwrapHive(await client!.GET("/v0/hive/updates")),
+    enabled: enabled && !!client,
+    staleTime: 60_000,
+    retry: false,
+  });
+}
+
+/** Whether the hive holds a local credential (#57). */
+export function useLocalLoginStatus(hive: Hive, client: HiveClient | null, enabled = true) {
+  return useQuery({
+    queryKey: ["hive", hive.id, "local-login"],
+    queryFn: async () => unwrapHive(await client!.GET("/v0/local-login")),
+    enabled: enabled && !!client,
+    staleTime: 60_000,
+    retry: false,
+  });
+}

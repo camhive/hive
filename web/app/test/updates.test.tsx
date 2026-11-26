@@ -64,9 +64,11 @@ describe("updates in the hive settings (#82)", () => {
     const calls = stub({ ...baseHive, capabilities: ["updates", "archive.delete"] }, { ...status, available: "0.1.7", updates: "manual" });
     const user = mount();
     const section = await screen.findByRole("region", { name: "Updates" });
+    // #174: the row says what runs, how it updates and what waits before it is opened.
+    await waitFor(() => expect(within(section).getByTestId("updates-row-state")).toHaveTextContent("0.1.6, manual, 0.1.7 available"));
     await user.click(within(section).getByRole("button", { name: "Manage updates…" }));
 
-    expect(await within(section).findByText("0.1.6")).toBeInTheDocument();
+    expect(await within(section).findByTestId("update-last")).toBeInTheDocument();
     expect(within(section).getByTestId("update-last")).toHaveTextContent("Updated from 0.1.5 to 0.1.6");
     expect(within(section).getByTestId("update-available")).toHaveTextContent("Version 0.1.7 is available.");
 
@@ -84,6 +86,7 @@ describe("updates in the hive settings (#82)", () => {
     await user.click(within(section).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(calls).toContain(`PUT /v0/hive/updates {"updates":"automatic","update_window":"22:00-23:30","update_channel":"beta"}`));
     await waitFor(() => expect(within(section).queryByRole("alert")).toBeNull());
+    expect(within(section).getByTestId("updates-row-state")).toHaveTextContent("0.1.6, automatic, window 22:00–23:30");
 
     await user.click(within(section).getByRole("button", { name: "Update now" }));
     await waitFor(() => expect(calls).toContain("POST /v0/hive/updates/install"));

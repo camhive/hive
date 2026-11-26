@@ -9,9 +9,11 @@ The web app has two kinds of traffic to a hive, and they take different roads.
 | Live video | WebRTC from the hive to your browser, peer to peer. At home the app exchanges the connection offer with the hive directly; away from home the cloud passes it along. If the networks block a direct path, the Camhive TURN relay forwards the media. |
 | Everything else: recordings, exports, camera settings | HTTPS to the hive's local name when you are on the same network (to its local address when the name cannot be looked up, see [below](#without-internet-opening-the-hive-by-its-address)), otherwise through the Camhive relay |
 
-Hive → *Connection* shows which road is in use ("Direct on your network",
+Hive → *Settings* → *Connection* shows which road is in use ("Direct on your network",
 "Direct on your network, by address" or "Through the Camhive relay") and
-why, with a *Check again* button.
+why, with a *Check again* button; the strip at the top of *Settings* repeats
+it as *Path: direct*, *through the relay* or *unreachable*. *Details* lists the
+local name, the local addresses, the certificate and the relay.
 
 ## The local name
 
@@ -22,7 +24,7 @@ for ten minutes. On the local road nothing leaves your house, and quality is
 never reduced.
 
 Some routers refuse DNS answers that point at private addresses ("DNS
-rebinding protection"). The symptom is a settings page that says the local
+rebinding protection"). The symptom is a *Settings* tab that says the local
 name did not answer although local addresses are listed. Allow the domain
 `h.camhive.app` in the router (Fritz!Box: Home Network → Network → Network
 Settings → DNS Rebind Protection; OpenWrt: `rebind_domain`), or live with the
@@ -37,8 +39,8 @@ The hive serves TLS with a certificate for its local and relay names. Right
 after installation it is **self-signed**, which browsers do not trust, so the
 recordings road does not work yet. Within minutes of the first connection the
 cloud obtains a **Let's Encrypt** certificate for the hive and hands it over;
-the hive's private key never leaves the device. *Connection* shows the current
-issuer. If it stays self-signed for more than half an hour, see
+the hive's private key never leaves the device. *Settings* → *Connection* →
+*Details* shows the current issuer. If it stays self-signed for more than half an hour, see
 [Troubleshooting](troubleshooting.md).
 
 ## When the cloud is unreachable
@@ -64,8 +66,8 @@ off until you set it up, and it works only on your home network.
 
 Set it up while Camhive is reachable:
 
-1. Open the hive → *Connection* → *Local sign-in for emergencies* → *Set up
-   local sign-in*.
+1. Open the hive → *Settings* → *Access* → *Local sign-in for emergencies* →
+   *Set up local sign-in*.
 2. Choose a username and a password of 10 to 256 characters (not the
    username) and press *Save local sign-in*. The hive stores only a hash of
    the password; Camhive never sees it.

@@ -163,7 +163,7 @@ Ein Wechsel in einen kleineren Tarif löscht nie etwas.
 
 ### Wie lange die Festplatte reicht
 
-**Hive → Verbindung → Speicher → Speicher anzeigen…** zeigt, was der Hive
+**Hive → Einstellungen → Speicher → Speicher anzeigen…** zeigt, was der Hive
 hält (ab v0.1.10; ein älterer Hive zeigt, welche Version es bringt):
 
 - die Größe der Festplatte, die Aufnahmen darauf, die Exporte und den freien
@@ -208,7 +208,7 @@ Beispiel wenn eine gefilmte Person die Löschung verlangt (DSGVO Art. 17).
 Mitglieder, auch Bediener, können das nicht. Es funktioniert im Heimnetz ohne
 die Cloud.
 
-- **Hive → Verbindung → Aufnahmen löschen** wählt die Kameras (oder *Alle
+- **Hive → Einstellungen → Aufnahmen löschen** wählt die Kameras (oder *Alle
   Kameras, auch entfernte*, was auch Aufnahmen inzwischen entfernter Kameras
   umfasst) und was gelöscht wird: *Alles*, *Ein Zeitraum* oder Aufnahmen
   *Älter als* eine Anzahl Tage. *Auch Exporte dieser Aufnahmen löschen*
@@ -239,7 +239,7 @@ die Cloud.
 Der Besitzer kann den Hive seine Aufnahmen verschlüsseln lassen, sodass
 niemand, der das Gerät oder seine Festplatte mitnimmt, sie abspielen kann. Die
 Verschlüsselung ist aus, bis der Besitzer sie einschaltet, und lässt sich nicht
-wieder ausschalten. Der Besitzer findet sie im Reiter **Verbindung** des Hives
+wieder ausschalten. Der Besitzer findet sie im Reiter **Einstellungen** des Hives
 unter **Verschlüsselte Aufnahmen** → **Verschlüsselung verwalten…** (dafür
 braucht es Hive-Version 0.1.7 oder neuer).
 
@@ -263,7 +263,7 @@ braucht es Hive-Version 0.1.7 oder neuer).
   die Passphrase ein, und die Aufnahmen spielen wieder; Mitglieder lesen, dass
   das Archiv von seinem Besitzer gesperrt ist. Derselbe Hinweis steht unter
   einer geöffneten Kamera, wo die Schaltflächen für Ton und Export ausgegraut
-  sind, solange es gesperrt ist. Im Reiter Verbindung kann der Besitzer die
+  sind, solange es gesperrt ist. Im Reiter Einstellungen kann der Besitzer die
   Aufnahmen auch jederzeit wieder sperren (**Aufnahmen sperren**). Fünf falsche
   Passphrasen in 15 Minuten blockieren das Entsperren für 15 Minuten; bei einem
   Hive neuer als 0.1.7 sagt die App, wie lange es noch dauert, bei 0.1.7
@@ -286,7 +286,7 @@ braucht es Hive-Version 0.1.7 oder neuer).
     und stattdessen über das Camhive-Relay geht, und wenn sie ihn zu Hause
     wieder erreicht; wer innerhalb der Zeit zurückkommt, hebt die Sperre auf,
     damit ein WLAN-Aussetzer nicht sperrt. Melden kann die App das nur,
-    solange sie auf einer Hive-Seite oder im Reiter Verbindung geöffnet ist
+    solange sie auf einer Hive-Seite oder im Reiter Einstellungen geöffnet ist
     (sie erinnert den Hive einmal pro Minute daran):
     Gehen Sie mit geschlossener App oder bleibt Ihr Telefon zu Hause, gilt nur
     die erste Einstellung. Bei mehreren Geräten zählt das, das zuletzt

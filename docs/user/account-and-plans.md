@@ -39,6 +39,10 @@ the plan's count. Cameras are never counted and traffic is never metered.
 | Analytics | motion | + object detection (planned) | + faces/plates, search (planned) |
 | Early access to updates | | | yes |
 
+A remote session is one device using a hive through Camhive: opening a hive's
+*Cameras* or *Settings* tab uses one of them, even at home, and the offline
+access the app keeps for an owner uses another.
+
 *Plan* shows your current plan, add-ons and the comparison table as served by
 the cloud, so the numbers there are authoritative if this page lags behind.
 
@@ -196,7 +200,7 @@ page's address, so a reload or a shared link opens with the same filter.
 
 ## Removing a hive
 
-Hive → *Connection* → *Remove this hive* → **Remove hive**. The hive is revoked in the cloud, stops
+Hive → *Settings* → *Danger zone* → *Remove this hive* → **Remove hive**. The hive is revoked in the cloud, stops
 being reachable remotely and frees its slot in your plan. Recordings stay on
 the device. To use the computer again, delete `cloud.json` from its data
 directory and run `hive claim`.

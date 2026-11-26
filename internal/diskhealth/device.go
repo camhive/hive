@@ -126,3 +126,23 @@ func findDevice(mountinfoPath, sysDevBlock, archive string) (Device, error) {
 	names, disks := resolve(sysDevBlock, devno)
 	return Device{Mount: point, Source: source, Names: names, Disks: disks}, nil
 }
+
+// IsMountPoint reports whether mp is a mount point in the mountinfo file
+// at path (/proc/self/mountinfo): a bind mount counts, whatever device it
+// shares with its parent (#172 review 2).
+func IsMountPoint(path, mp string) (bool, error) {
+	raw, err := os.ReadFile(path) //nolint:gosec // the kernel's file, or a test's
+	if err != nil {
+		return false, err
+	}
+	mp = filepath.Clean(mp)
+	if real, err := filepath.EvalSymlinks(mp); err == nil {
+		mp = real // the kernel lists the resolved path (#172 review 3)
+	}
+	for line := range strings.Lines(string(raw)) {
+		if f := strings.Fields(line); len(f) > 4 && filepath.Clean(unescape(f[4])) == mp {
+			return true, nil
+		}
+	}
+	return false, nil
+}

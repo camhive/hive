@@ -185,17 +185,15 @@
     "online": "Der Hive ist online.",
     "toHives": "Zu den Hives",
     "later": "Ich mache später weiter",
-    "settings": "Verbindung",
-    "settingsFor": "Verbindungseinstellungen für {{name}}",
+    "settings": "Einstellungen",
+    "settingsFor": "Einstellungen für {{name}}",
     "pages": "Hive-Seiten",
     "cameras": "Kameras",
     "sharing": "Freigabe",
     "activity": "Aktivität"
   },
   "transport": {
-    "title": "Verbindung",
     "liveNote": "Livebild läuft immer direkt per WebRTC (nur wenn Ihr Netz direkte Verbindungen blockiert, über unser TURN-Relay). Dieser Pfad gilt für Aufnahmen, Exporte und Einstellungen.",
-    "httpPath": "Pfad für Aufnahmen",
     "path": {
       "lan": "Direkt in Ihrem Netz",
       "address": "Direkt in Ihrem Netz, über die Adresse",
@@ -204,7 +202,6 @@
     },
     "probing": "Prüfe…",
     "reprobe": "Erneut prüfen",
-    "reasonLabel": "Grund",
     "reason": {
       "lan_ok": "Der Hive hat unter seinem lokalen Namen geantwortet.",
       "address_ok": "Der lokale Name hat nicht geantwortet; der Hive hat unter seiner lokalen Adresse geantwortet.",
@@ -226,7 +223,7 @@
     "rebindHelp": "Viele Router (Fritz!Box, pfSense, Pi-hole) lehnen öffentliche Namen ab, die auf lokale Adressen zeigen. Über das Relay funktioniert alles; für den direkten Weg tragen Sie diese Domain in die DNS-Rebind-Ausnahmen Ihres Routers ein:",
     "lnaNote": "Chrome fragt einmal um Erlaubnis, Geräte in Ihrem lokalen Netz zu erreichen; erlauben Sie es, um den direkten Weg zu behalten.",
     "removeTitle": "Diesen Hive entfernen",
-    "removeHelp": "Gibt den Hive-Platz Ihres Tarifs sofort frei. Der Hive wird von der Cloud getrennt und kann sich nicht erneut verbinden; Aufnahmen bleiben auf ihm. Für eine erneute Nutzung `hive claim` darauf ausführen und neu anmelden.",
+    "removeHelp": "Gibt den Hive-Platz Ihres Tarifs sofort frei. Der Hive wird von der Cloud getrennt und kann sich nicht erneut verbinden; Aufnahmen bleiben auf ihm. Für eine erneute Nutzung <code>hive claim</code> darauf ausführen und neu anmelden.",
     "remove": "Hive entfernen",
     "confirmRemove": "Hive „{{name}}“ aus Ihrem Konto entfernen? Die Aufnahmen bleiben auf dem Gerät."
   },
@@ -603,7 +600,8 @@
     "locked_one": "Zu viele fehlgeschlagene Anmeldungen. Versuchen Sie es in {{count}} Minute erneut.",
     "locked_other": "Zu viele fehlgeschlagene Anmeldungen. Versuchen Sie es in {{count}} Minuten erneut.",
     "lockedUnknown": "Zu viele fehlgeschlagene Anmeldungen. Der Hive sperrt lokale Anmeldungen für bis zu 15 Minuten; versuchen Sie es später erneut.",
-    "unreachable": "Der Hive antwortet gerade nicht in Ihrem Netz. Prüfen Sie, ob dieses Gerät im selben Netz wie der Hive ist."
+    "unreachable": "Der Hive antwortet gerade nicht in Ihrem Netz. Prüfen Sie, ob dieses Gerät im selben Netz wie der Hive ist.",
+    "manage": "Lokale Anmeldung verwalten"
   },
   "lanAddress": {
     "title": "Hive über seine Adresse öffnen",
@@ -871,7 +869,9 @@
       "local_login.locked": "Lokale Anmeldung nach Fehlversuchen gesperrt",
       "archive.encryption.key_file": "Wiederherstellungs-Schlüsseldatei heruntergeladen",
       "motion.calmed": "Bewegungserkennung beruhigt: zu viele Bewegungen in einer Stunde",
-      "motion.calm_ended": "Bewegungserkennung wieder auf ihrer Empfindlichkeit"
+      "motion.calm_ended": "Bewegungserkennung wieder auf ihrer Empfindlichkeit",
+      "recording.stopped": "Aufnahme gestoppt",
+      "recording.resumed": "Aufnahme läuft wieder"
     }
   },
   "install": {
@@ -1029,5 +1029,110 @@
     "switchStuck": "Alles ist kopiert, aber der Hive ist nicht von {{to}} gestartet: {{error}}. Führen Sie denselben Befehl erneut aus oder `sudo hive move-data --cancel`, um zurückzugehen.",
     "unreadable_one": "{{count}} Segment ({{size}}) ließ sich von der alten Festplatte nicht lesen und blieb dort.",
     "unreadable_other": "{{count}} Segmente ({{size}}) ließen sich von der alten Festplatte nicht lesen und blieben dort."
+  },
+  "recording": {
+    "stopped": "Aufnahme gestoppt am {{time}}: {{reason}}.",
+    "hint": "Bis das behoben ist, wird nichts aufgenommen. Prüfen Sie, ob die Festplatte des Hives angeschlossen und eingebunden ist; die bisherigen Aufnahmen bleiben darauf.",
+    "restart": "Die Festplatte ist wieder da, aber der Hive hält noch die alte. Starten Sie den Hive neu (hive restart auf seinem Computer, als root oder Administrator), damit er wieder aufnimmt.",
+    "lastWord": "So hat es der Hive zuletzt an Camhive gemeldet; die App erreicht den Hive gerade nicht.",
+    "reason": {
+      "disk_not_mounted": "die Festplatte, auf die der Hive aufnimmt, ist nicht eingebunden",
+      "archive_missing": "der Ordner, in den der Hive aufnimmt, ist weg (die Festplatte wurde abgezogen oder ihre Einbindung ging verloren)",
+      "archive_changed": "der Ordner, in den der Hive aufnimmt, liegt auf einer anderen Festplatte als beim Start des Hives",
+      "archive_unwritable": "der Hive kann nicht in den Ordner schreiben, in den er aufnimmt",
+      "database": "seine Datenbank meldet Festplattenfehler",
+      "engine_stalled": "Kameras sind online, aber keine neue Aufnahme hat begonnen",
+      "unknown": "der Hive hat keinen Grund genannt"
+    }
+  },
+  "settings": {
+    "strip": "Dieser Hive auf einen Blick",
+    "index": "Auf dieser Seite",
+    "close": "Schließen",
+    "label": {
+      "version": "Version",
+      "path": "Weg",
+      "disk": "Festplatte",
+      "footage": "Aufnahmen",
+      "encryption": "Verschlüsselung",
+      "updates": "Updates"
+    },
+    "group": {
+      "connection": "Verbindung",
+      "recordings": "Aufnahmen und Festplatte",
+      "access": "Zugang",
+      "software": "Software",
+      "danger": "Gefahrenbereich"
+    },
+    "pathTitle": "Weg für Aufnahmen und Einstellungen",
+    "details": "Details",
+    "videoTitle": "Wie das Video läuft",
+    "diskHealth": "Zustand der Festplatte",
+    "diskChecked": "Geprüft {{date}}",
+    "version": "Laufende Version",
+    "hiveId": "Hive-ID",
+    "fact": {
+      "version": "{{version}}",
+      "unknownVersion": "unbekannt",
+      "notReported": "von diesem Hive nicht gemeldet (ab Version {{since}})",
+      "checking": "wird geprüft…",
+      "unknown": "gerade nicht bekannt",
+      "path": {
+        "direct": "direkt",
+        "relay": "über das Relay",
+        "none": "nicht erreichbar"
+      },
+      "disk": {
+        "ok": "in Ordnung",
+        "failing": "fällt bald aus",
+        "failed": "ausgefallen",
+        "unknown": "Zustand nicht lesbar"
+      },
+      "held_one": "{{size}} über {{count}} Tag",
+      "held_other": "{{size}} über {{count}} Tage",
+      "heldToday": "{{size}}, weniger als ein Tag",
+      "noFootage": "noch keine Aufnahmen",
+      "fullNow": "voll, die ältesten Aufnahmen werden gelöscht",
+      "fillsSoon": "innerhalb eines Tages voll",
+      "fillsIn_one": "voll in etwa {{count}} Tag",
+      "fillsIn_other": "voll in etwa {{count}} Tagen",
+      "keeps_one": "behält {{count}} Tag",
+      "keeps_other": "behält {{count}} Tage",
+      "encryption": {
+        "off": "aus",
+        "locked": "an, gesperrt",
+        "unlocked": "an, entsperrt",
+        "notSealing": "neue Aufnahmen werden nicht verschlüsselt"
+      },
+      "updates": {
+        "automatic": "automatisch",
+        "manual": "manuell",
+        "unsupported": "dieser Build aktualisiert sich nicht selbst",
+        "window": "Fenster {{from}}–{{to}}",
+        "available": "{{version}} verfügbar"
+      },
+      "localLogin": {
+        "on": "an für {{username}}",
+        "off": "aus"
+      },
+      "move": {
+        "ready": "auf diesem Hive möglich",
+        "unsupported": "auf diesem Hive nicht unterstützt",
+        "copying": "wird gerade verschoben, {{pct}} %",
+        "switching": "wechselt zur neuen Festplatte",
+        "done": "verschoben nach {{to}}",
+        "failed": "der letzte Umzug wurde abgebrochen"
+      },
+      "offline": "Hive offline",
+      "keepsOwn_one": "behält {{count}} Tag ({{camera}}: {{own}})",
+      "keepsOwn_other": "behält {{count}} Tage ({{camera}}: {{own}})",
+      "keepsShort_one": "behält etwa {{count}} von {{retention}} Tagen",
+      "keepsShort_other": "behält etwa {{count}} von {{retention}} Tagen",
+      "keepsUntilFull_one": "behält, bis die Festplatte voll ist, etwa {{count}} Tag",
+      "keepsUntilFull_other": "behält, bis die Festplatte voll ist, etwa {{count}} Tage",
+      "keepsUntilFullPlain": "behält, bis die Festplatte voll ist",
+      "recordingStopped": "Aufnahme gestoppt seit {{time}}: $t(recording.reason.{{reason}})"
+    },
+    "noAnswer": "Der Hive hat nicht geantwortet; was er meldet, ist gerade nicht bekannt."
   }
 }

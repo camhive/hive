@@ -130,32 +130,37 @@ func dropInFor(dir string) string {
 	return "[Service]\nEnvironment=\"CAMHIVE_DATA_DIR=" + dir + "\"\n"
 }
 
+// runSystemctl runs systemctl with fixed arguments.
+func runSystemctl(args ...string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "systemctl", args...).CombinedOutput() //nolint:gosec // fixed arguments
+	if err != nil {
+		return fmt.Errorf("systemctl %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // osService is camhive-hive under systemd.
 type osService struct {
 	systemctl func(args ...string) error
 	dropIn    string
 	answering func() error // the hive's loopback /healthz
 	wait      time.Duration
+	otherFS   func(dir string) bool // dir is on another file system than / (#172)
 }
 
 func newSystemService() *osService {
 	paths := hiveconfig.DefaultPaths()
 	return &osService{
-		systemctl: func(args ...string) error {
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-			defer cancel()
-			out, err := exec.CommandContext(ctx, "systemctl", args...).CombinedOutput() //nolint:gosec // fixed arguments
-			if err != nil {
-				return fmt.Errorf("systemctl %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
-			}
-			return nil
-		},
-		dropIn: systemdUnit + ".d/" + dropInName,
+		systemctl: runSystemctl,
+		dropIn:    systemdUnit + ".d/" + dropInName,
 		answering: func() error {
 			_, err := askHive(context.Background(), hiveAddr(paths, io.Discard))
 			return err
 		},
-		wait: time.Minute,
+		wait:    time.Minute,
+		otherFS: otherFS,
 	}
 }
 
@@ -182,9 +187,24 @@ func (s *osService) Switch(dir string) error {
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+	mounts := filepath.Join(filepath.Dir(s.dropIn), mountsDropIn)
+	mountsBefore, _ := os.ReadFile(mounts) //nolint:gosec // the hive's own drop-in
+	// #172: the disk lines follow the data directory; none for the old one
+	// stays. Back to the installed definition (dir ""), the hive writes
+	// them for its directory at its start.
+	want := ""
+	if dir != "" {
+		want = mountsConf("", dir, "", hasKey(dir), s.otherFS) // the archive moves into dir
+	}
+	if _, err := writeMounts(mounts, want); err != nil {
+		return err
+	}
 	err = s.apply([]byte(dropInFor(dir)), dir != "")
 	if err == nil {
 		return nil
+	}
+	if _, rerr := writeMounts(mounts, string(mountsBefore)); rerr != nil {
+		return fmt.Errorf("%w; putting the old disk lines back failed too: %w", err, rerr)
 	}
 	if rerr := s.apply(before, had); rerr != nil {
 		return fmt.Errorf("%w; putting the old service definition back failed too: %w", err, rerr)

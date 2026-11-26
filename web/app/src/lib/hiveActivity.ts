@@ -13,6 +13,7 @@ const RULES: [string, ActionGroup][] = [
   ["export.", "recordings"],
   ["camera.", "cameras"],
   ["motion.", "cameras"], // auto-calm (#157)
+  ["recording.", "recordings"], // the hive stopped and resumed recording (#172)
   ["update.", "updates"],
   ["local_login.", "access"],
   ["session.revoke", "access"],

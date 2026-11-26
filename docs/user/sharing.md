@@ -66,9 +66,11 @@ get one notice and one e-mail for it again when its last three days begin.
 
 On their home page your hive appears under *Shared with me*. They get live video
 and recordings for the granted cameras, and PTZ and Export if they are operators.
-They cannot add or change cameras or see your sharing, and the *Connection*
-tab shows them only how the app reaches the hive, without your sections
-(updates, local sign-in, encryption, deleting recordings, removing the hive).
+They cannot add or change cameras or see your sharing, and the *Settings*
+tab shows them only how the app reaches the hive, the hive's version and
+the storage of their cameras, without your rows (disk health, encryption,
+deleting recordings, moving to a new disk, local sign-in, updates, removing
+the hive).
 A grant of theirs that ends within three days, or ended less than three days
 ago, shows as a notice on their home page; to keep access they ask you to
 extend it.

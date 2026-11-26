@@ -48,7 +48,7 @@ On the home page the hive shows a grey dot.
 Live and Archive take different roads (see [Connection](connection.md)). If
 Live works and Archive says the hive did not answer:
 
-- Hive → *Connection*: is the certificate still *self-signed*? Browsers refuse it
+- Hive → *Settings* → *Connection* → *Details*: is the certificate still *self-signed*? Browsers refuse it
   on the relay road. Wait for the Let's Encrypt one; it is requested on every
   reconnect and every ten minutes.
 - Path "Unreachable" with local addresses listed: your router blocks the local
@@ -73,6 +73,42 @@ Live works and Archive says the hive did not answer:
 process is running, typically a foreground `hive run` next to the service.
 Stop one of them.
 
+## Recording stopped
+
+The hive checks once a minute that it records: that the folder it records
+into is there, on the same disk as when it started, and takes a small
+write; that its database answers without disk errors; and, while a camera
+is online, that a new recording started within `recording_stall_minutes`
+(default 10) plus one segment's length. A missing, moved or unmounted disk
+counts at once; a failed write, database errors and a stall only when the
+next check finds them too. When one of these fails, the owner
+gets a notification at once ("storage" group, never in a summary; a
+further stop within 15 minutes of the last one is told when they are
+over, unless the hive records again by then), the app
+shows a red banner **Recording stopped at <time>: <reason>** on the hive page
+and above a camera's recordings, and `hive status` prints
+`NOT RECORDING since …`. The hive tells the cloud directly, without its
+disk, and keeps telling it until the cloud confirms; when the app cannot
+reach the hive it shows what the hive last told the cloud. When recording
+works again, the owner gets "records again" on the same channels.
+
+| Reason | What happened | What to do |
+|---|---|---|
+| the disk is not mounted | the disk's mount point (from `/etc/fstab`) is an empty folder on the system disk: the disk was absent at boot | connect the disk, `sudo mount -a`, restart the hive |
+| the folder is gone | the disk was unplugged, or its mount was lost (a USB disk that dropped out) | connect the disk, mount it (`sudo mount -a` with the fstab line from [An external disk](install-hive.md#an-external-disk-mount-it-from-fstab-by-uuid)), restart the hive |
+| on another disk | the disk was mounted again as a new device, or the folder now is on the system disk | restart the hive (`sudo hive restart`) |
+| cannot write | the disk is full, read-only after errors, or the folder's permissions changed | see [The disk is failing](#the-disk-is-failing) and `hive status` |
+| database errors | `hive.db` answers with I/O or corruption errors | restart the hive; if it stays, the disk is failing |
+| no new recording | cameras are online but the video engine writes nothing | `hive diag`, then restart the hive |
+
+The recordings made before the stop stay on the disk; the hive never
+forgets them because the disk was away for a while. The other side of
+that: if you empty the archive folder by hand, or format the disk and
+mount it again without `hive move-data`, the app keeps listing the old
+recordings (they no longer play) until a camera writes the first new
+one; the hive's log says `archive reconcile … holds no segment` every
+minute until then.
+
 ## The disk is failing
 
 The hive checks the disk it records to when it starts and every 30 minutes.
@@ -92,7 +128,10 @@ What to do: save `hive.key`, `cloud.json`, `hive.yaml`, `archive-key/` and
 `hive.db` from the data directory (the banner lists them with their full
 paths), then replace the disk with `sudo hive move-data <new-dir>` as in
 [Replace the disk](install-hive.md#replace-the-disk). The notification ends
-after the disk has looked healthy for a day.
+after the disk has looked healthy for a day, or at the first check with a
+healthy SMART report and a working test write when only kernel errors
+raised it and no new ones came (a disk mounted again after it dropped out).
+A failed disk also stops recording: see [Recording stopped](#recording-stopped).
 
 Without `smartctl` and without access to the kernel log the state is
 *unknown*, and so it is on file systems whose disk the hive cannot trace

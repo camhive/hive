@@ -63,9 +63,64 @@ sudo CAMHIVE_DATA_DIR=/media/usb/camhive hive claim --api https://api.camhive.ap
 sudo hive start
 ```
 
-Tragen Sie die Festplatte in `/etc/fstab` ein, damit sie vor dem Dienst
-eingebunden wird; sonst startet der Hive mit einem leeren Verzeichnis und einer
-neuen Identität.
+#### Eine externe Festplatte: über fstab einbinden, per UUID
+
+Binden Sie die Festplatte **vor** `hive install` über `/etc/fstab` ein, per
+UUID und mit `nofail`, nie über das automatische Einbinden des Desktops (die
+Ordner unter `/media/<benutzer>/`, die beim Anstecken erscheinen): Das kommt
+erst, wenn sich jemand anmeldet, und eine USB-Festplatte, die kurz wegfällt
+und wiederkommt, bekommt einen anderen Gerätenamen und eine neue Einbindung,
+die der Hive nicht kennt. Nehmen Sie lieber ext4; NTFS geht, markiert aber
+nach einem verlorenen Schreibvorgang die ganze Festplatte als fehlerhaft und
+lässt sich dann erst nach einer Reparatur unter Windows wieder beschreibbar
+einbinden.
+
+```bash
+sudo blkid /dev/sda1
+```
+
+Notieren Sie die `UUID="…"`, legen Sie den Einhängepunkt an und tragen Sie eine
+Zeile in `/etc/fstab` ein (hier für ext4 unter `/mnt/cameras`):
+
+```bash
+sudo mkdir -p /mnt/cameras
+```
+
+```
+UUID=0a1b2c3d-…  /mnt/cameras  ext4  defaults,nofail,x-systemd.device-timeout=30s  0  2
+```
+
+```bash
+sudo mount -a
+```
+
+Installieren Sie dann mit `CAMHIVE_DATA_DIR=/mnt/cameras/camhive`. Liegt das
+Datenverzeichnis oder `archive_dir` aus `hive.yaml` auf einer anderen
+Festplatte als das System, bekommt der Dienst dafür `RequiresMountsFor=`, und
+sobald der Hive dort seine Identität hat auch `ConditionPathExists=…/hive.key`.
+Der Hive führt diese Zeilen in
+`/etc/systemd/system/camhive-hive.service.d/mounts.conf`: `hive install`
+schreibt die Datei, `hive move-data` schreibt sie für die neue Festplatte
+neu, und jeder Start des Dienstes bringt sie auf den Stand, wirksam ab dem
+nächsten Start. Ein Hive, der vor Version 0.1.11 installiert wurde, ist also
+nach seinem zweiten Start mit 0.1.11 geschützt; sofort geschützt ist er, wenn
+Sie nach dem Update `hive install` mit demselben `CAMHIVE_DATA_DIR` noch einmal
+ausführen. systemd startet den Hive dann nie, solange die Festplatte fehlt.
+Ein Hive, der sein Datenverzeichnis leer auf der Systemfestplatte findet,
+während der Dienst dort eine Festplatte erwartet, wird kein neuer, nicht
+angemeldeter Hive: Er wartet, `hive status` meldet
+`NOT RECORDING … disk_not_mounted`, und er startet von selbst innerhalb von
+30 Sekunden, sobald die Festplatte eingebunden ist. (Die Cloud hört solange
+nichts von ihm und meldet ihn offline; und weil `hive.yaml` auf dieser
+Festplatte liegt, antwortet er `hive status` bis dahin unter der
+Standardadresse 127.0.0.1:16016.) Nach einem Neustart ohne die
+Festplatte binden Sie sie ein und führen `sudo hive start` aus.
+
+Fällt die Festplatte weg, während der Hive läuft, merkt er das innerhalb
+einer Minute, meldet **Aufnahme gestoppt** (sofort eine Benachrichtigung, ein
+roter Hinweis in der App, `hive status`) und läuft weiter. Ist die Festplatte
+wieder da, starten Sie den Hive neu (`sudo hive restart`): Er hält noch die
+Dateien der alten Einbindung.
 
 Alles, was dem Hive gehört, liegt im Datenverzeichnis: `hive.yaml`
 (Konfiguration), `hive.key` (seine Identität, nie weitergeben), `hive.db`,
@@ -88,9 +143,11 @@ sie sind klein, und ohne sie lässt sich der Hive nicht wiederherstellen:
    verloren
 5. `hive.db`: Kameras, Index, Freigaben und das Aktivitätsprotokoll
 
-Schließen Sie dann die neue Festplatte an, binden Sie sie ein (tragen Sie sie in
-`/etc/fstab` ein; ext4 oder ein anderes Linux-Dateisystem, nicht FAT, exFAT
-oder NTFS) und führen Sie aus, mit einem einfachen Verzeichnisnamen
+Schließen Sie dann die neue Festplatte an, binden Sie sie ein (in
+`/etc/fstab` per UUID mit `nofail`, wie unter
+[Eine externe Festplatte](#eine-externe-festplatte-über-fstab-einbinden-per-uuid),
+nicht über das automatische Einbinden des Desktops; ext4 oder ein anderes
+Linux-Dateisystem, nicht FAT, exFAT oder NTFS) und führen Sie aus, mit einem einfachen Verzeichnisnamen
 (Buchstaben, Ziffern, `/ . - _`; keine Leerzeichen, keine Shell-Zeichen wie
 `; & | $ * ?`):
 
@@ -112,14 +169,16 @@ neue Exporte) werden mit „Der Hive zieht auf eine neue Festplatte um“
 abgelehnt, bis der Umzug beendet ist; `hive.db` wird am Ende mit den
 Ereignissen und Anmeldungen dieser Zeit erneut kopiert. Dann richtet er den
 Dienst auf das neue Verzeichnis aus (ein Drop-in,
-`/etc/systemd/system/camhive-hive.service.d/data-dir.conf`), startet den
+`/etc/systemd/system/camhive-hive.service.d/data-dir.conf`, mit
+`RequiresMountsFor=` und `ConditionPathExists=` für die neue Festplatte),
+startet den
 Hive dort und wartet, bis er antwortet; startet er nicht, kommt die alte
 Definition zurück und der Hive läuft wieder von der alten Festplatte. Er
 nennt, was nicht gepasst hat oder nicht lesbar war, und löscht oder ändert
 auf der alten Festplatte nichts. `archive/` oder `archive-key/` dürfen
 Verweise auf eine andere Festplatte sein: Kopiert wird, worauf sie zeigen. In
-der App zeigt **Einstellungen → Verbindung → Auf eine neue Festplatte
-umziehen** dieselben Schritte und den Fortschritt.
+der App zeigt **Einstellungen → Aufnahmen und Festplatte → Auf eine
+neue Festplatte umziehen** dieselben Schritte und den Fortschritt.
 
 Wird der Befehl unterbrochen (Strom, volle Festplatte), führen Sie ihn mit
 demselben Verzeichnis erneut aus: Er macht dort weiter, wo er aufgehört hat,
@@ -170,7 +229,7 @@ sudo hive restart
 ```
 
 Ein Hive lässt sich einmal anmelden. Um ihn in ein anderes Konto zu
-verschieben, entfernen Sie ihn in der App (Hive → *Verbindung* → *Diesen Hive
+verschieben, entfernen Sie ihn in der App (Hive → *Einstellungen* → *Diesen Hive
 entfernen* → **Hive entfernen**), löschen Sie `cloud.json` aus dem
 Datenverzeichnis und melden Sie ihn neu an. Die Aufnahmen bleiben auf der
 Festplatte.
@@ -219,7 +278,7 @@ diese Version nie wieder. Wie das abgesichert ist:
 [Hive updates](../../security/updates.md) in der Entwicklerdokumentation
 (englisch).
 
-**In der App:** Hive → *Verbindung* → *Updates* (nur Besitzer) zeigt die
+**In der App:** Hive → *Einstellungen* → *Updates* (nur Besitzer) zeigt die
 laufende Version, ein wartendes Update und das letzte Update oder die letzte Zurücknahme.
 Dort wählen Sie automatische oder manuelle Updates, das Update-Fenster und den
 Kanal, und **Jetzt aktualisieren** installiert ein wartendes Update sofort,

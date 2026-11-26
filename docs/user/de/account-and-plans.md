@@ -42,6 +42,11 @@ gemessen.
 | Analyse | Bewegung | + Objekterkennung (geplant) | + Gesichter/Kennzeichen, Suche (geplant) |
 | Früher Zugang zu Updates | | | ja |
 
+Eine Fernsitzung ist ein Gerät, das einen Hive über Camhive nutzt: Das Öffnen
+der Reiter *Kameras* oder *Einstellungen* eines Hives belegt eine davon, auch zu
+Hause, und der Offline-Zugang, den die App für einen Besitzer bereithält, eine
+weitere.
+
 *Tarif* zeigt Ihren aktuellen Tarif, Zusatzpakete und die Vergleichstabelle,
 so wie die Cloud sie liefert; die Zahlen dort gelten, falls diese Seite
 hinterherhinkt.
@@ -218,7 +223,7 @@ oder ein geteilter Link mit demselben Filter öffnet.
 
 ## Hive entfernen
 
-Hive → *Verbindung* → *Diesen Hive entfernen* → **Hive entfernen**. Der Hive
+Hive → *Einstellungen* → *Gefahrenbereich* → *Diesen Hive entfernen* → **Hive entfernen**. Der Hive
 wird in der Cloud widerrufen, ist von unterwegs nicht mehr erreichbar und gibt
 seinen Platz in Ihrem Tarif frei. Die Aufnahmen bleiben auf dem Gerät. Um den
 Computer wieder zu nutzen, löschen Sie `cloud.json` aus seinem

@@ -13,8 +13,6 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/kardianos/service"
-
 	"github.com/camhive/hive/internal/archive"
 	"github.com/camhive/hive/internal/archivekey"
 	"github.com/camhive/hive/internal/auth"
@@ -33,6 +31,7 @@ import (
 	"github.com/camhive/hive/internal/locate"
 	"github.com/camhive/hive/internal/motion"
 	"github.com/camhive/hive/internal/ptz"
+	"github.com/camhive/hive/internal/recording"
 	"github.com/camhive/hive/internal/retention"
 	"github.com/camhive/hive/internal/store"
 	"github.com/camhive/hive/internal/update/journal"
@@ -47,17 +46,20 @@ type runtimeParts struct {
 	index   *archive.Index   // nil when the video engine is unavailable
 	sweeper *retention.Sweeper
 	disk    *diskhealth.Monitor // nil when the video engine is unavailable; the archive disk's health (#155)
-	health  *health.Monitor
-	care    *health.Care    // camera care (#163); nil when the video engine is unavailable
-	locator *locate.Locator // nil when the video engine is unavailable
-	motion  *motion.Hub     // turns frame sizes and camera events into motion Events
-	cameras *motion.Watcher // nil when the video engine is unavailable; the cameras' own motion events
-	store   *store.Store
-	archive string
-	vault   *archivekey.Vault // the archive key (ADR-0019)
-	deps    hiveapp.Deps      // what the API serves; the automatic lock runs over it
-	exports *export.Manager   // nil when the video engine is unavailable
-	close   func()
+	// recording judges whether the hive records (#172); its alarm goes to
+	// the cloud on the agent's alarm lane, never through the store.
+	recording *recording.Watchdog
+	health    *health.Monitor
+	care      *health.Care    // camera care (#163); nil when the video engine is unavailable
+	locator   *locate.Locator // nil when the video engine is unavailable
+	motion    *motion.Hub     // turns frame sizes and camera events into motion Events
+	cameras   *motion.Watcher // nil when the video engine is unavailable; the cameras' own motion events
+	store     *store.Store
+	archive   string
+	vault     *archivekey.Vault // the archive key (ADR-0019)
+	deps      hiveapp.Deps      // what the API serves; the automatic lock runs over it
+	exports   *export.Manager   // nil when the video engine is unavailable
+	close     func()
 }
 
 // assemble opens the store, builds the verifier, the video engine, the
@@ -103,12 +105,15 @@ func assemble(ctx context.Context, cfg hiveconfig.Config, paths hiveconfig.Paths
 			return diag.Build(ctx, diag.Inputs{Paths: paths, Store: st, Version: version, Free: retention.FreeSpace})
 		}})
 	parts.agent.LoadLicense(ctx)
+	parts.recording = recording.New(recording.Options{ArchiveDir: cfg.ArchiveDir, MountPoint: archiveMountPoint(cfg.ArchiveDir),
+		Stall: stallFor(cfg), Store: st.Probe, Newest: archive.Newest,
+		Online: parts.camerasOnline, OnChange: recordingAlarm(parts.agent, st, log), Logger: log.With("component", "recording")})
 	deps := hiveapp.Deps{Store: st, Verifier: verifier, Version: version, Notify: func() {}, Logger: log.With("component", "api"), Location: time.Local, PTZ: ptz.New(),
 		Licensed: licensing.Effective, Discovery: hiveapp.ONVIFDiscoverer{},
 		Local:   auth.NewLocalSessions(hiveID, time.Now),    // the owner's emergency login (#57), LAN listener only
 		Updates: updateControl(paths, journal.DefaultDir()), // update settings and "Update now" (#82)
 		Vault:   keyWithEngine{Vault: vault, log: log}, Emit: parts.agent.Emit,
-		Autolock: autolock, Motion: parts.motion}
+		Autolock: autolock, Motion: parts.motion, Recording: parts.recording.State}
 	if eng != nil {
 		deps.Vault = keyWithEngine{Vault: vault, eng: eng, log: log}
 		// Segments only get shorter at run time (encryption, ADR-0019), which
@@ -120,7 +125,7 @@ func assemble(ctx context.Context, cfg hiveconfig.Config, paths hiveconfig.Paths
 		deps.Care = parts.care
 		parts.ingest = ingest.New(st.Cameras(), eng, ingest.Options{Logger: log.With("component", "ingest"), OnStart: parts.care.EngineStarted})
 		parts.index = archive.NewIndex(st, archive.WithLogger(log.With("component", "archive")), archive.WithOpener(vault.OpenSegment),
-			archive.WithFailed(func(err error) { parts.disk.RecordWrite(err) })) // parts.disk is made below, before Run
+			archive.WithFailed(parts.failedWrite)) // parts.disk is made below, before Run
 		parts.archive = cfg.ArchiveDir
 		deps.Playback = hiveapp.ArchiveFetch(archive.NewReader(cfg.ArchiveDir, vault.OpenSegment))
 		deps.Exports = export.NewManager(filepath.Join(paths.Data, "exports"), deps.Playback, st.Exports(), export.WithVault(vault),
@@ -148,7 +153,8 @@ func assemble(ctx context.Context, cfg hiveconfig.Config, paths hiveconfig.Paths
 			})
 		deps.Deletions = parts.sweeper
 		parts.disk = diskhealth.New(diskhealth.Options{ArchiveDir: cfg.ArchiveDir, EngineLog: filepath.Join(paths.Data, "engine", "mediamtx.log"),
-			Failing: diskEpisode(st, parts.agent, hiveagent.EventDiskFailing, log), Failed: diskEpisode(st, parts.agent, hiveagent.EventDiskFailed, log),
+			// disk.failed stays on the timeline; the cloud hears recording.stopped instead (#172).
+			Failing: diskEpisode(st, parts.agent, hiveagent.EventDiskFailing, true, log), Failed: diskEpisode(st, parts.agent, hiveagent.EventDiskFailed, false, log),
 			Logger: log.With("component", "diskhealth")})
 		// The overview and the owner's retention and floor (#150): hive.yaml and the running sweeper.
 		deps.Storage = &hiveapp.StorageControl{Paths: paths, ArchiveDir: cfg.ArchiveDir, Rules: parts.sweeper, ExportMaxBytes: int64(cfg.ExportMaxGB) << 30, Health: parts.disk.Report}
@@ -176,7 +182,8 @@ func assemble(ctx context.Context, cfg hiveconfig.Config, paths hiveconfig.Paths
 		parts.agent.SetHealth(parts.health)
 		parts.agent.SetEngine(eng)
 	}
-	deps.Move = &hiveapp.MoveInfo{Paths: paths, ArchiveDir: cfg.ArchiveDir, Supported: hasSystemd() && !service.Interactive(), Moving: datamove.Moving(paths.Data)}
+	deps.Move = &hiveapp.MoveInfo{Paths: paths, ArchiveDir: cfg.ArchiveDir, Moving: datamove.Moving(paths.Data),
+		Supported: asInstalledService(systemdUnit, paths.Data)} // also under hive-updater (#172 review 2)
 	parts.handler = hiveapp.NewAPI(deps)
 	parts.deps = deps
 	return parts, nil
@@ -196,13 +203,16 @@ func recordCalm(st *store.Store, log *slog.Logger, c motion.Calming) {
 }
 
 // diskEpisode is disk.failing or disk.failed (#155): an Event on the
-// hive's timeline, sent to the cloud (without the evidence's detail lines)
-// and written to the action log when it begins, as storage.low is.
-func diskEpisode(st *store.Store, agent *hiveagent.Agent, kind string, log *slog.Logger) *events.Condition {
+// hive's timeline, sent to the cloud when send says so (without the
+// evidence's detail lines) and written to the action log when it begins,
+// as storage.low is.
+func diskEpisode(st *store.Store, agent *hiveagent.Agent, kind string, send bool, log *slog.Logger) *events.Condition {
 	return events.NewCondition(st.Events(), "", kind, events.WithLogger(log), events.Observe(func(e store.Event) {
-		cloud := e
-		cloud.Data = diskhealth.ForCloud(e.Data) // the detail lines (paths, log text) stay on the hive
-		agent.EmitStart(cloud)
+		if send {
+			cloud := e
+			cloud.Data = diskhealth.ForCloud(e.Data) // the detail lines (paths, log text) stay on the hive
+			agent.EmitStart(cloud)
+		}
 		if !e.End.IsZero() {
 			return
 		}
@@ -210,6 +220,74 @@ func diskEpisode(st *store.Store, agent *hiveagent.Agent, kind string, log *slog
 			log.Error("action log", "err", err)
 		}
 	}))
+}
+
+// stallFor is how long no segment may start while a camera is online
+// before the hive counts as not recording (#172): recording_stall_minutes
+// plus a segment's length, since a segment starts only when the last ends.
+func stallFor(cfg hiveconfig.Config) time.Duration {
+	if cfg.RecordingStallMinutes == 0 {
+		return 0
+	}
+	return time.Duration(cfg.RecordingStallMinutes+cfg.SegmentMinutes) * time.Minute
+}
+
+// failedWrite is a failed write of the index or the sealer: evidence for
+// the disk's health (#155) and for the recording state (#172).
+func (p *runtimeParts) failedWrite(err error) {
+	if p.disk != nil {
+		p.disk.RecordWrite(err)
+	}
+	p.recording.Observe(err)
+}
+
+// camerasOnline counts the enabled cameras online now; 0 without a video
+// engine.
+func (p *runtimeParts) camerasOnline() int {
+	if p.health == nil {
+		return 0
+	}
+	n := 0
+	for _, c := range p.health.All() {
+		if c.Enabled && c.Online {
+			n++
+		}
+	}
+	return n
+}
+
+// recordingAlarm tells the cloud each change of the recording state
+// (#172): recording.stopped with its reason at the episode's start and
+// recording.resumed with the start of the episode it ends, both on the
+// agent's alarm lane until acknowledged. A start that finds the hive
+// recording sends recording.resumed once on the plain queue, so an
+// episode a restart cut off ends in the cloud; it is never resent. The
+// action log gets the changes, best effort and off the watchdog's path:
+// the store may be what broke. Only the watchdog's check calls it.
+func recordingAlarm(agent *hiveagent.Agent, st *store.Store, log *slog.Logger) func(recording.State) {
+	var stopped time.Time // the open episode's start; zero: none
+	return func(s recording.State) {
+		action, details := hiveagent.EventRecordingResumed, map[string]any{}
+		switch {
+		case s.Recording() && stopped.IsZero():
+			agent.Emit(action, details) // the start's judgement: nothing happened here
+			return
+		case s.Recording():
+			details["stopped_at"] = stopped
+			stopped = time.Time{}
+			agent.EmitAlarm(action, s.Since, details)
+		default:
+			stopped, action = s.Since, hiveagent.EventRecordingStopped
+			agent.EmitAlarm(action, s.Since, map[string]any{"reason": s.Reason})
+			details["reason"], details["detail"] = s.Reason, s.Detail
+		}
+		go func() {
+			raw, _ := json.Marshal(details)
+			if err := st.Actions().Append(context.Background(), store.Action{Actor: "hive", Action: action, Target: "archive", Details: raw}); err != nil {
+				log.Warn("action log", "action", action, "err", err)
+			}
+		}()
+	}
 }
 
 // closeOpenEvents ends the lasting Events a crash left open (ADR-0020): the

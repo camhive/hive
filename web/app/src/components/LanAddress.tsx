@@ -12,8 +12,10 @@ import { Field } from "@/components/Field";
  * that warning per browser and says that any other one means stop. It links to
  * the remembered address, says what the warning must say, takes a new
  * address after a DHCP change and probes again when the user comes back.
+ * `bare` drops the card and its section heading level, for a row in the
+ * settings page's Connection group.
  */
-export function LanAddressStep({ hive, probing, reprobe }: { hive: Hive; probing: boolean; reprobe: () => Promise<void> }) {
+export function LanAddressStep({ hive, probing, reprobe, bare }: { hive: Hive; probing: boolean; reprobe: () => Promise<void>; bare?: boolean }) {
   const { t } = useTranslation();
   const port = hive.lan?.port ?? 0;
   const [input, setInput] = useState(() => (transport.addresses(hive)[0] ?? "").replace(new RegExp(`:${port}$`), ""));
@@ -22,6 +24,7 @@ export function LanAddressStep({ hive, probing, reprobe }: { hive: Hive; probing
   const address = parseLanAddress(input, port);
   const name = hive.lan?.host ?? "";
   const host = (address ?? "").replace(/:\d+$/, ""); // how the browser names the address in its warning
+  const Heading = bare ? "h4" : "h2"; // bare sits under a settings row's h3
 
   useEffect(() => {
     const back = () => { if (document.visibilityState === "visible") void reprobe(); };
@@ -41,8 +44,8 @@ export function LanAddressStep({ hive, probing, reprobe }: { hive: Hive; probing
   }
 
   return (
-    <form className="card max-w-xl" onSubmit={(e) => void retry(e)} aria-labelledby="lan-address-title" data-testid="lan-address">
-      <h2 id="lan-address-title" className="text-lg font-semibold mb-1">{t("lanAddress.title")}</h2>
+    <form className={bare ? "" : "card max-w-xl"} onSubmit={(e) => void retry(e)} aria-labelledby="lan-address-title" data-testid="lan-address">
+      <Heading id="lan-address-title" className={bare ? "font-medium mb-1" : "text-lg font-semibold mb-1"}>{t("lanAddress.title")}</Heading>
       <p className="muted text-sm mb-3">{t("lanAddress.intro")}</p>
       <ol className="list-decimal pl-5 space-y-2 text-sm mb-4">
         <li>

@@ -238,3 +238,23 @@ func TestUpdateSettingsDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// #172: how long the engine may start no segment while a camera is online
+// before the hive counts as not recording; 0 turns the check off.
+func TestRecordingStallDefaultAndValidation(t *testing.T) {
+	paths := hiveconfig.DefaultPathsFor(runtime.GOOS, os.Getenv).WithDataDir(t.TempDir())
+	cfg, _, err := hiveconfig.Load(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.RecordingStallMinutes != 10 {
+		t.Fatalf("recording_stall_minutes = %d, want 10", cfg.RecordingStallMinutes)
+	}
+	for v, ok := range map[int]bool{-1: false, 0: true, 1440: true, 1441: false} {
+		c := cfg
+		c.RecordingStallMinutes = v
+		if err := c.Validate(); (err == nil) != ok {
+			t.Errorf("recording_stall_minutes %d: err = %v, want ok %v", v, err, ok)
+		}
+	}
+}
